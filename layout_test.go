@@ -12,7 +12,7 @@ func TestBCDMSFToLBA(t *testing.T) {
 		{"pregap start", [3]byte{0x00, 0x00, 0x00}, -150},
 		{"LBA 0", [3]byte{0x00, 0x02, 0x00}, 0},
 		{"one minute in", [3]byte{0x01, 0x00, 0x00}, 75*60 - 150},
-		{"frame 74 of LBA 0", [3]byte{0x00, 0x02, 0x74}, 74},
+		{"LBA 74", [3]byte{0x00, 0x02, 0x74}, 74},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
