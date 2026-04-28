@@ -30,7 +30,17 @@ type Manifest struct {
 	BinFirstLBA          int32   `json:"bin_first_lba"`
 	BinSectorCount       int32   `json:"bin_sector_count"`
 	ErrorSectors         []int32 `json:"error_sectors,omitempty"`
-	ErrorSectorCount     int     `json:"error_sector_count"`
+	// ErrorSectorCount is the number of sectors that required a delta
+	// override at pack time — i.e., where Pack's bin-driven prediction
+	// disagreed with the real .scram. This is NOT the same as Redumper's
+	// "errors count" (which counts only data-track ECC/EDC errors): it
+	// also includes lead-in noise from drive-buffered reads of scratched
+	// areas and any boundary-sector mismatches. For a SafeDisc 2.70 disc
+	// like Freelancer, expect this to be in the low thousands while
+	// Redumper reports ~588 — both numbers are correct, they just count
+	// different things. See e2e_redump_test.go's countDataTrackErrors
+	// helper for the Redumper-equivalent metric.
+	ErrorSectorCount int `json:"error_sector_count"`
 	DeltaSize            int64   `json:"delta_size"`
 	ScramblerTableSHA256 string  `json:"scrambler_table_sha256"`
 }
