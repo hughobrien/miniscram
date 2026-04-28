@@ -98,11 +98,14 @@ func runPack(args []string, stderr io.Writer) int {
 			return exitUsage
 		}
 	}
+	noVerifyImpliesKeep := *noVerify && !*keepSource
 	if *noVerify {
-		// --no-verify implies --keep-source
 		*keepSource = true
 	}
 	rep := NewReporter(stderr, beQuiet)
+	if noVerifyImpliesKeep {
+		rep.Info("--no-verify implies --keep-source; original .scram will be kept")
+	}
 	err = Pack(PackOptions{
 		BinPath: in.Bin, CuePath: in.Cue, ScramPath: in.Scram,
 		OutputPath: out, Verify: !*noVerify,
@@ -246,10 +249,13 @@ func packErrorToExit(err error) int {
 	switch {
 	case errors.As(err, &lme):
 		return exitLayout
+	case errors.Is(err, errBinSHA256Mismatch):
+		return exitWrongBin
+	case errors.Is(err, errVerifyMismatch),
+		errors.Is(err, errOutputSHA256Mismatch):
+		return exitVerifyFail
 	case strings.Contains(err.Error(), "xdelta3"):
 		return exitXDelta
-	case strings.Contains(err.Error(), "verify") || strings.Contains(err.Error(), "round-trip"):
-		return exitVerifyFail
 	default:
 		return exitIO
 	}
@@ -257,14 +263,12 @@ func packErrorToExit(err error) int {
 
 func unpackErrorToExit(err error) int {
 	switch {
-	case strings.Contains(err.Error(), "bin sha256 mismatch"):
+	case errors.Is(err, errBinSHA256Mismatch):
 		return exitWrongBin
+	case errors.Is(err, errOutputSHA256Mismatch):
+		return exitVerifyFail
 	case strings.Contains(err.Error(), "xdelta3"):
 		return exitXDelta
-	case strings.Contains(err.Error(), "manifest") || strings.Contains(err.Error(), "container"):
-		return exitIO
-	case strings.Contains(err.Error(), "sha256") || strings.Contains(err.Error(), "manifest expects"):
-		return exitVerifyFail
 	default:
 		return exitIO
 	}
