@@ -120,3 +120,39 @@ func ApplyDelta(out io.WriterAt, delta io.Reader) error {
 	}
 	return nil
 }
+
+// IterateDeltaRecords walks the override records in delta, calling fn
+// for each record's byte offset and length. fn is not given the
+// payload bytes (they're skipped over in delta). Returns the count
+// from the wire-format header and any framing or callback error.
+//
+// This is the read-only counterpart to EncodeDelta's writer; consumers
+// like inspect/verify use it to enumerate records without materializing
+// payloads.
+func IterateDeltaRecords(delta []byte, fn func(off uint64, length uint32) error) (uint32, error) {
+	if len(delta) < 4 {
+		return 0, fmt.Errorf("delta too short for override count (%d bytes)", len(delta))
+	}
+	count := binary.BigEndian.Uint32(delta[:4])
+	pos := 4
+	for i := uint32(0); i < count; i++ {
+		if pos+12 > len(delta) {
+			return i, fmt.Errorf("override %d header truncated at offset %d", i, pos)
+		}
+		off := binary.BigEndian.Uint64(delta[pos : pos+8])
+		length := binary.BigEndian.Uint32(delta[pos+8 : pos+12])
+		pos += 12
+		if length == 0 || length > SectorSize {
+			return i, fmt.Errorf("override %d has implausible length %d", i, length)
+		}
+		if pos+int(length) > len(delta) {
+			return i, fmt.Errorf("override %d payload truncated (need %d bytes at offset %d, have %d)",
+				i, length, pos, len(delta)-pos)
+		}
+		if err := fn(off, length); err != nil {
+			return i, err
+		}
+		pos += int(length)
+	}
+	return count, nil
+}

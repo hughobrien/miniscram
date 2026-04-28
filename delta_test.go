@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -154,5 +155,110 @@ func TestDeltaApplyRejectsTruncated(t *testing.T) {
 	defer f.Close()
 	if err := ApplyDelta(f, bytes.NewReader(bad)); err == nil {
 		t.Fatal("expected error for truncated delta")
+	}
+}
+
+func TestIterateDeltaRecordsEmpty(t *testing.T) {
+	count, err := IterateDeltaRecords([]byte{0, 0, 0, 0}, func(off uint64, length uint32) error {
+		t.Fatalf("callback invoked for empty delta")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("count = %d; want 0", count)
+	}
+}
+
+func TestIterateDeltaRecordsThreeRecords(t *testing.T) {
+	scram := bytes.Repeat([]byte{0xAB}, 10000)
+	hat := append([]byte{}, scram...)
+	scram[100] ^= 0xFF
+	scram[500] ^= 0xFF
+	scram[5000] ^= 0xFF
+	var enc bytes.Buffer
+	if _, err := EncodeDelta(&enc, bytes.NewReader(hat), bytes.NewReader(scram), int64(len(scram))); err != nil {
+		t.Fatal(err)
+	}
+	type rec struct {
+		off uint64
+		ln  uint32
+	}
+	var got []rec
+	count, err := IterateDeltaRecords(enc.Bytes(), func(off uint64, length uint32) error {
+		got = append(got, rec{off, length})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("count = %d; want 3", count)
+	}
+	want := []rec{{100, 1}, {500, 1}, {5000, 1}}
+	if len(got) != len(want) {
+		t.Fatalf("got %d records; want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("record %d = %+v; want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestIterateDeltaRecordsTruncatedHeader(t *testing.T) {
+	bad := []byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0}
+	if _, err := IterateDeltaRecords(bad, func(uint64, uint32) error { return nil }); err == nil {
+		t.Fatal("expected framing error for short record header")
+	}
+}
+
+func TestIterateDeltaRecordsTruncatedPayload(t *testing.T) {
+	bad := []byte{
+		0, 0, 0, 1,
+		0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 10,
+		1, 2, 3, 4, 5,
+	}
+	if _, err := IterateDeltaRecords(bad, func(uint64, uint32) error { return nil }); err == nil {
+		t.Fatal("expected framing error for truncated payload")
+	}
+}
+
+func TestIterateDeltaRecordsBadLength(t *testing.T) {
+	bad := []byte{
+		0, 0, 0, 1,
+		0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0,
+	}
+	if _, err := IterateDeltaRecords(bad, func(uint64, uint32) error { return nil }); err == nil {
+		t.Fatal("expected framing error for length=0")
+	}
+}
+
+func TestIterateDeltaRecordsLengthTooLarge(t *testing.T) {
+	// length = SectorSize+1 should be rejected (mirrors ApplyDelta's check)
+	bad := []byte{
+		0, 0, 0, 1,
+		0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0x09, 0x31, // length = 2353 = SectorSize + 1, big-endian
+	}
+	if _, err := IterateDeltaRecords(bad, func(uint64, uint32) error { return nil }); err == nil {
+		t.Fatal("expected framing error for length > SectorSize")
+	}
+}
+
+func TestIterateDeltaRecordsCallbackError(t *testing.T) {
+	scram := []byte{0xAB, 0xAB, 0xAB}
+	hat := []byte{0xAA, 0xAB, 0xAB}
+	var enc bytes.Buffer
+	if _, err := EncodeDelta(&enc, bytes.NewReader(hat), bytes.NewReader(scram), 3); err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("stop")
+	_, err := IterateDeltaRecords(enc.Bytes(), func(uint64, uint32) error { return want })
+	if !errors.Is(err, want) {
+		t.Fatalf("got err=%v; want %v", err, want)
 	}
 }
