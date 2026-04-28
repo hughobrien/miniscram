@@ -137,7 +137,7 @@ func runUnpack(args []string, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	output := fs.String("o", "", "output path")
 	outputLong := fs.String("output", "", "output path")
-	noVerify := fs.Bool("no-verify", false, "skip output sha256 verification")
+	noVerify := fs.Bool("no-verify", false, "skip output hash verification")
 	force := fs.Bool("f", false, "overwrite output")
 	forceLong := fs.Bool("force", false, "overwrite output")
 	quiet := fs.Bool("q", false, "quiet")
