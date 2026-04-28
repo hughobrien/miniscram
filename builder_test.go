@@ -152,3 +152,21 @@ func TestBuilderRefusesAtTooManyMismatches(t *testing.T) {
 		t.Fatalf("error %v is not *LayoutMismatchError", err)
 	}
 }
+
+func TestBuilderCleanRoundTripPositiveOffset(t *testing.T) {
+	bin, scram, params := synthDisc(t, 100, 48, 10)
+	var hat bytes.Buffer
+	errs, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("got %d error sectors, want 0", len(errs))
+	}
+	if int64(hat.Len()) != params.ScramSize {
+		t.Fatalf("ε̂ size %d != scramSize %d", hat.Len(), params.ScramSize)
+	}
+	if !bytes.Equal(hat.Bytes(), scram) {
+		t.Fatal("ε̂ != scram for clean disc with positive write offset")
+	}
+}
