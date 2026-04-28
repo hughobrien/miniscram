@@ -1,0 +1,52 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-28-miniscram-v0.2-implementation.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: EDC implementation (ECMA-130 §14.3)",
+      "status": "pending",
+      "description": "**Goal:** Pure-Go 32-bit CRC for Mode 1 sectors per ECMA-130 §14.3.\n\n**Files:** edc.go, edc_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run 'TestEDC' -v`\n\n```json:metadata\n{\"files\":[\"edc.go\",\"edc_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run TestEDC -v\",\"acceptanceCriteria\":[\"LBA-0 EDC matches pinned value\",\"edcTable sha256 matches constant\",\"init self-test panics on mismatch\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: ECC implementation (ECMA-130 §14.5/14.6 + Annex A)",
+      "status": "pending",
+      "description": "**Goal:** Pure-Go RSPC over GF(256). Computes 276 bytes of P+Q parity for Mode 1 sectors.\n\n**Files:** ecc.go, ecc_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run 'TestECC|TestGF' -v`\n\n```json:metadata\n{\"files\":[\"ecc.go\",\"ecc_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run 'TestECC|TestGF' -v\",\"acceptanceCriteria\":[\"GF table invariants\",\"GF table sha256\",\"LBA-0 ECC sha256\",\"LBA-0 full sector sha256\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: Smarter builder pregap/leadout + LBAToBCDMSF",
+      "status": "pending",
+      "blockedBy": [0, 1],
+      "description": "**Goal:** Builder emits proper Mode 1 zero pregap/leadout; lockstep extends across whole disc.\n\n**Files:** layout.go, layout_test.go, builder.go, builder_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run 'TestBuilder|TestLBAMSF|TestGenerateMode1' -v`\n\n```json:metadata\n{\"files\":[\"layout.go\",\"layout_test.go\",\"builder.go\",\"builder_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run 'TestBuilder|TestLBAMSF|TestGenerateMode1' -v\",\"acceptanceCriteria\":[\"LBAToBCDMSF round-trips\",\"generateMode1ZeroSector(0) sha matches\",\"clean round-trip still works\",\"extended lockstep covers full disc\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Structured delta format (delta.go)",
+      "status": "pending",
+      "description": "**Goal:** Byte-keyed override list with EncodeDelta and ApplyDelta.\n\n**Files:** delta.go, delta_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run TestDelta -v`\n\n```json:metadata\n{\"files\":[\"delta.go\",\"delta_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run TestDelta -v\",\"acceptanceCriteria\":[\"empty diff is 4 bytes\",\"single byte override\",\"coalescing\",\"non-adjacent separated\",\"apply round-trip\",\"truncated rejected\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: BuildEpsilonHatAndDelta + Pack/Unpack rewire + container v2",
+      "status": "pending",
+      "blockedBy": [2, 3],
+      "description": "**Goal:** Combine ε̂ build and delta encoding in one pass; switch unpack to ApplyDelta; bump container version to 0x02.\n\n**Files:** builder.go, builder_test.go, manifest.go, manifest_test.go, pack.go, pack_test.go, unpack.go, unpack_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run 'TestBuilder|TestPack|TestUnpack|TestContainer' -v`\n\n```json:metadata\n{\"files\":[\"builder.go\",\"builder_test.go\",\"manifest.go\",\"manifest_test.go\",\"pack.go\",\"pack_test.go\",\"unpack.go\",\"unpack_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run 'TestBuilder|TestPack|TestUnpack|TestContainer' -v\",\"acceptanceCriteria\":[\"combined function produces both\",\"v0.2 container\",\"unpack byte-equal\",\"v1 rejected\",\"clean miniscram <1 KiB\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 6: Drop xdelta3, os/exec, renumber exit codes",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** Remove xdelta3.go, ensureXDelta3 helper, os/exec import everywhere. Renumber exit codes; drop REQUIRES from --help.\n\n**Files:** main.go, main_test.go, help.go, e2e_redump_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test ./... && go build ./... && ./miniscram --help`\n\n```json:metadata\n{\"files\":[\"main.go\",\"main_test.go\",\"help.go\",\"e2e_redump_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test ./... && go build ./... && ./miniscram --help\",\"acceptanceCriteria\":[\"no os/exec in source\",\"no xdelta3 in source\",\"--help no REQUIRES\",\"tests pass\",\"exit codes contiguous\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 7: Update Deus Ex e2e test for v0.2 size",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** Tighten e2e test: delta < 1024 bytes, .miniscram < 2 KiB. Add EDC/ECC cross-validation.\n\n**Files:** e2e_redump_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -tags redump_data -run TestE2EDeusEx -timeout 10m -v`\n\n```json:metadata\n{\"files\":[\"e2e_redump_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -tags redump_data -run 'TestE2EDeusEx|TestEDCAndECCAgainstDeusEx' -timeout 10m -v\",\"acceptanceCriteria\":[\"delta < 1024\",\"container < 2 KiB\",\"byte-equal recovery\",\"EDC/ECC validate vs real sectors\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-28T03:00:00Z"
+}
