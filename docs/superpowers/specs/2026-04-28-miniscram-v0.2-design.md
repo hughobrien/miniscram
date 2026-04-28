@@ -193,6 +193,11 @@ func generateMode1ZeroSector(lba int32) [SectorSize]byte {
 }
 ```
 
+A sibling helper `generateLeadoutSector(lba)` produces a Mode 0 zero
+sector for the leadout region (same shape but with mode byte 0x00 and
+no EDC/ECC). Both are used by the builder's `buildSectorForLBA`
+switch.
+
 ### Updated `buildSectorForLBA`
 
 ```
@@ -203,7 +208,7 @@ case lba < p.BinFirstLBA:                           // pregap
 case lba in [BinFirstLBA, BinFirstLBA+BinSectorCount):
     binSec, scramble if data                            // (unchanged)
 case lba >= BinFirstLBA+BinSectorCount:             // leadout
-    return generateMode1ZeroSector(lba)                // NEW
+    return generateLeadoutSector(lba)                  // Mode 0
 ```
 
 ### Lockstep extends across the whole disc
@@ -219,9 +224,7 @@ bin-covered LBAs as in v0.1):
   pregap content (rare).
 - Bin: mismatches are error sectors (intentional EDC/ECC corruption
   used as copy protection).
-- Leadout: ε̂ = scrambled Mode 1 zero. Mismatches indicate the drive
-  read past-disc garbage instead of Mode 1 zero — fairly common; the
-  delta captures it faithfully.
+- Leadout: ε̂ = scrambled Mode 0 zero (sync + LBA-derived BCD MSF + 0x00 mode + 2336 zeros, scrambled). Mode 1 with computed EDC/ECC was the original assumption; empirical inspection of Deus Ex showed leadout follows the simpler Mode 0 convention. Mismatches indicate the drive read past-disc garbage instead of Mode 0 — fairly common; the delta captures it faithfully.
 
 The 5 % abort threshold still applies, computed as
 `len(overrides) / total_disc_sectors`.
