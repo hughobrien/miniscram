@@ -42,7 +42,7 @@
     {
       "id": 5,
       "subject": "Task 6: Drop xdelta3, os/exec, renumber exit codes",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         4
       ],
@@ -51,12 +51,12 @@
     {
       "id": 6,
       "subject": "Task 7: Update Deus Ex e2e test for v0.2 size",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         5
       ],
       "description": "**Goal:** Tighten e2e test: delta < 1024 bytes, .miniscram < 2 KiB. Add EDC/ECC cross-validation.\n\n**Files:** e2e_redump_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -tags redump_data -run TestE2EDeusEx -timeout 10m -v`\n\n```json:metadata\n{\"files\":[\"e2e_redump_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -tags redump_data -run 'TestE2EDeusEx|TestEDCAndECCAgainstDeusEx' -timeout 10m -v\",\"acceptanceCriteria\":[\"delta < 1024\",\"container < 2 KiB\",\"byte-equal recovery\",\"EDC/ECC validate vs real sectors\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-04-28T06:10:51Z"
+  "lastUpdated": "2026-04-28T06:15:07Z"
 }
