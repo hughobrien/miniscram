@@ -22,10 +22,10 @@ const (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string, stderr io.Writer) int {
+func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printTopHelp(stderr)
 		return exitUsage
@@ -35,6 +35,8 @@ func run(args []string, stderr io.Writer) int {
 		return runPack(args[1:], stderr)
 	case "unpack":
 		return runUnpack(args[1:], stderr)
+	case "inspect":
+		return runInspect(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
 		if len(args) >= 2 {
 			switch args[1] {
@@ -43,6 +45,9 @@ func run(args []string, stderr io.Writer) int {
 				return exitOK
 			case "unpack":
 				printUnpackHelp(stderr)
+				return exitOK
+			case "inspect":
+				printInspectHelp(stderr)
 				return exitOK
 			}
 		}
