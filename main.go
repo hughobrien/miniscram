@@ -288,10 +288,10 @@ func packErrorToExit(err error) int {
 	switch {
 	case errors.As(err, &lme):
 		return exitLayout
-	case errors.Is(err, errBinSHA256Mismatch):
+	case errors.Is(err, errBinHashMismatch):
 		return exitWrongBin
 	case errors.Is(err, errVerifyMismatch),
-		errors.Is(err, errOutputSHA256Mismatch):
+		errors.Is(err, errOutputHashMismatch):
 		return exitVerifyFail
 	default:
 		return exitIO
@@ -300,9 +300,9 @@ func packErrorToExit(err error) int {
 
 func unpackErrorToExit(err error) int {
 	switch {
-	case errors.Is(err, errBinSHA256Mismatch):
+	case errors.Is(err, errBinHashMismatch):
 		return exitWrongBin
-	case errors.Is(err, errOutputSHA256Mismatch):
+	case errors.Is(err, errOutputHashMismatch):
 		return exitVerifyFail
 	default:
 		return exitIO
@@ -311,9 +311,9 @@ func unpackErrorToExit(err error) int {
 
 func verifyErrorToExit(err error) int {
 	switch {
-	case errors.Is(err, errBinSHA256Mismatch):
+	case errors.Is(err, errBinHashMismatch):
 		return exitWrongBin
-	case errors.Is(err, errOutputSHA256Mismatch):
+	case errors.Is(err, errOutputHashMismatch):
 		return exitVerifyFail
 	default:
 		return exitIO

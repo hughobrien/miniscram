@@ -14,8 +14,8 @@ type VerifyOptions struct {
 
 // Verify performs a non-destructive integrity check: rebuild the
 // recovered .scram into a temp file, hash it, compare against
-// manifest.scram_sha256, then delete the temp file. Returns
-// errBinSHA256Mismatch on wrong bin (via Unpack), errOutputSHA256Mismatch
+// manifest scram hashes, then delete the temp file. Returns
+// errBinHashMismatch on wrong bin (via Unpack), errOutputHashMismatch
 // on hash mismatch, or any I/O error encountered along the way.
 func Verify(opts VerifyOptions, r Reporter) error {
 	if r == nil {
@@ -59,17 +59,18 @@ func Verify(opts VerifyOptions, r Reporter) error {
 		return err
 	}
 
-	st = r.Step("verifying scram sha256")
-	got, err := sha256File(tmpPath)
+	st = r.Step("verifying scram hashes")
+	got, err := hashFile(tmpPath)
 	if err != nil {
 		st.Fail(err)
 		return err
 	}
-	if got != m.ScramSHA256 {
-		err := fmt.Errorf("%w: computed %s, manifest %s", errOutputSHA256Mismatch, got, m.ScramSHA256)
+	wantHashes := FileHashes{MD5: m.ScramMD5, SHA1: m.ScramSHA1, SHA256: m.ScramSHA256}
+	if err := compareHashes(got, wantHashes); err != nil {
+		err := fmt.Errorf("%w: %v", errOutputHashMismatch, err)
 		st.Fail(err)
 		return err
 	}
-	st.Done("matches")
+	st.Done("all three match")
 	return nil
 }

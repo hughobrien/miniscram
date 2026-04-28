@@ -11,7 +11,7 @@ import (
 
 const (
 	containerMagic      = "MSCM"
-	containerVersion    = byte(0x02)
+	containerVersion    = byte(0x03)
 	errorSectorsListCap = 10000
 )
 
@@ -20,10 +20,14 @@ type Manifest struct {
 	FormatVersion        int     `json:"format_version"`
 	ToolVersion          string  `json:"tool_version"`
 	CreatedUTC           string  `json:"created_utc"`
-	ScramSize            int64   `json:"scram_size"`
-	ScramSHA256          string  `json:"scram_sha256"`
-	BinSize              int64   `json:"bin_size"`
-	BinSHA256            string  `json:"bin_sha256"`
+	ScramSize     int64  `json:"scram_size"`
+	ScramMD5      string `json:"scram_md5"`
+	ScramSHA1     string `json:"scram_sha1"`
+	ScramSHA256   string `json:"scram_sha256"`
+	BinSize       int64  `json:"bin_size"`
+	BinMD5        string `json:"bin_md5"`
+	BinSHA1       string `json:"bin_sha1"`
+	BinSHA256     string `json:"bin_sha256"`
 	WriteOffsetBytes     int     `json:"write_offset_bytes"`
 	LeadinLBA            int32   `json:"leadin_lba"`
 	Tracks               []Track `json:"tracks"`
@@ -117,7 +121,7 @@ func ReadContainer(path string) (*Manifest, []byte, error) {
 	}
 	if header[4] != containerVersion {
 		return nil, nil, fmt.Errorf("unsupported container version 0x%02x (this build expects 0x%02x); "+
-			"v0.1 .miniscram files cannot be read directly by v0.2 — re-pack with v0.2 from the original .bin",
+			"v0.2 .miniscram files cannot be read directly by this build — re-pack from the original .bin",
 			header[4], containerVersion)
 	}
 	mlen := binary.BigEndian.Uint32(header[5:9])

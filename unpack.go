@@ -12,8 +12,8 @@ import (
 
 // Sentinel errors. See pack.go for the rationale.
 var (
-	errBinSHA256Mismatch    = errors.New("bin sha256 mismatch")
-	errOutputSHA256Mismatch = errors.New("output sha256 mismatch")
+	errBinHashMismatch    = errors.New("bin hash mismatch")
+	errOutputHashMismatch = errors.New("output hash mismatch")
 )
 
 // UnpackOptions holds inputs for Unpack.
@@ -53,19 +53,20 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	}
 	st.Done("manifest %d bytes, delta %d bytes", deltaJSONSize(m), len(delta))
 
-	// 1. verify bin sha256
-	st = r.Step("verifying bin sha256")
-	binSHA, err := sha256File(opts.BinPath)
+	// 1. verify bin hashes
+	st = r.Step("verifying bin hashes")
+	binHashes, err := hashFile(opts.BinPath)
 	if err != nil {
 		st.Fail(err)
 		return err
 	}
-	if binSHA != m.BinSHA256 {
-		err := fmt.Errorf("%w: got %s, manifest expects %s", errBinSHA256Mismatch, binSHA, m.BinSHA256)
+	wantBin := FileHashes{MD5: m.BinMD5, SHA1: m.BinSHA1, SHA256: m.BinSHA256}
+	if err := compareHashes(binHashes, wantBin); err != nil {
+		err := fmt.Errorf("%w: %v", errBinHashMismatch, err)
 		st.Fail(err)
 		return err
 	}
-	st.Done("matches")
+	st.Done("all three match")
 
 	// 2. rebuild ε̂. ε̂ is the same size as the recovered .scram (often
 	// hundreds of MB), so put it next to the output rather than /tmp.
@@ -147,26 +148,27 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	outFile.Close()
 	st.Done("%d byte(s) of delta applied", len(delta))
 
-	// 4. verify output sha256
+	// 4. verify output hashes
 	if !opts.Verify {
 		if !opts.SuppressVerifyWarning {
 			r.Warn("verification skipped (--no-verify)")
 		}
 		return nil
 	}
-	st = r.Step("verifying output sha256")
-	outSHA, err := sha256File(opts.OutputPath)
+	st = r.Step("verifying output hashes")
+	outHashes, err := hashFile(opts.OutputPath)
 	if err != nil {
 		st.Fail(err)
 		return err
 	}
-	if outSHA != m.ScramSHA256 {
+	wantOut := FileHashes{MD5: m.ScramMD5, SHA1: m.ScramSHA1, SHA256: m.ScramSHA256}
+	if err := compareHashes(outHashes, wantOut); err != nil {
 		_ = os.Remove(opts.OutputPath)
-		err := fmt.Errorf("%w: output %s, manifest %s", errOutputSHA256Mismatch, outSHA, m.ScramSHA256)
+		err := fmt.Errorf("%w: %v", errOutputHashMismatch, err)
 		st.Fail(err)
 		return err
 	}
-	st.Done("matches")
+	st.Done("all three match")
 	return nil
 }
 

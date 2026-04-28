@@ -14,7 +14,7 @@ import (
 
 func sampleManifest() *Manifest {
 	return &Manifest{
-		FormatVersion:        2,
+		FormatVersion:        3,
 		ToolVersion:          "miniscram 0.2.0 (go1.22)",
 		CreatedUTC:           "2026-04-28T14:30:21Z",
 		ScramSize:            739729728,
@@ -53,13 +53,13 @@ func buildDelta(t *testing.T, offsets []uint64) []byte {
 func TestInspectFormatHumanCleanDelta(t *testing.T) {
 	m := sampleManifest()
 	delta := []byte{0, 0, 0, 0}
-	out, err := formatHumanInspect(m, "MSCM", 0x02, delta, false)
+	out, err := formatHumanInspect(m, "MSCM", 0x03, delta, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	wantLines := []string{
-		"container:  MSCM v2",
+		"container:  MSCM v3",
 		"  tool_version:           miniscram 0.2.0 (go1.22)",
 		"  bin_sha256:             " + strings.Repeat("a", 64),
 		"  scram_sha256:           " + strings.Repeat("c", 64),
@@ -84,7 +84,7 @@ func TestInspectFormatHumanCleanDelta(t *testing.T) {
 func TestInspectFormatHumanFullListsOverrides(t *testing.T) {
 	m := sampleManifest()
 	delta := buildDelta(t, []uint64{2352, 4704 + 100, 7056})
-	out, err := formatHumanInspect(m, "MSCM", 0x02, delta, true)
+	out, err := formatHumanInspect(m, "MSCM", 0x03, delta, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestInspectFormatHumanFullListsOverrides(t *testing.T) {
 func TestInspectFormatHumanFullEmptyHidesSection(t *testing.T) {
 	m := sampleManifest()
 	delta := []byte{0, 0, 0, 0}
-	out, err := formatHumanInspect(m, "MSCM", 0x02, delta, true)
+	out, err := formatHumanInspect(m, "MSCM", 0x03, delta, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestInspectFormatHumanFullEmptyHidesSection(t *testing.T) {
 func TestInspectFormatHumanReportsDeltaError(t *testing.T) {
 	m := sampleManifest()
 	delta := []byte{0, 0, 0, 1} // count=1, no record follows → framing error
-	out, err := formatHumanInspect(m, "MSCM", 0x02, delta, false)
+	out, err := formatHumanInspect(m, "MSCM", 0x03, delta, false)
 	if err == nil {
 		t.Fatal("expected framing error from formatHumanInspect")
 	}
@@ -210,7 +210,7 @@ func TestInspectFormatHumanTrackPadding(t *testing.T) {
 		{Number: 1, Mode: "MODE1/2352", FirstLBA: 0},
 		{Number: 2, Mode: "AUDIO", FirstLBA: 12345},
 	}
-	out, err := formatHumanInspect(m, "MSCM", 0x02, []byte{0, 0, 0, 0}, false)
+	out, err := formatHumanInspect(m, "MSCM", 0x03, []byte{0, 0, 0, 0}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestCLIInspectHumanOutput(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"container:  MSCM v2",
+		"container:  MSCM v3",
 		"manifest:",
 		"tool_version:",
 		"bin_sha256:",
@@ -298,10 +298,10 @@ func TestCLIInspectFullFlag(t *testing.T) {
 	}
 }
 
-func TestCLIInspectRejectsV1(t *testing.T) {
+func TestCLIInspectRejectsV2(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "v1.miniscram")
-	body := []byte("MSCM\x01\x00\x00\x00\x00")
+	path := filepath.Join(dir, "v2.miniscram")
+	body := []byte("MSCM\x02\x00\x00\x00\x00")
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -310,8 +310,8 @@ func TestCLIInspectRejectsV1(t *testing.T) {
 	if code != exitIO {
 		t.Fatalf("exit %d; want %d (exitIO); stderr=%s", code, exitIO, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "unsupported container version") {
-		t.Errorf("missing v1 migration error in stderr:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "v0.2 .miniscram files cannot be read") {
+		t.Errorf("missing v0.2 migration error in stderr:\n%s", stderr.String())
 	}
 }
 
