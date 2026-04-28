@@ -132,10 +132,9 @@ func TestEDCKnownDeterministicSector(t *testing.T) {
 	for i := 16; i < 2064; i++ {
 		buf[i] = byte(i & 0xFF)
 	}
-	// Pinned value computed once from the same Python port.
-	// (Confirm by running the same Python script offline if needed.)
+	// Pinned value computed from the spec in Python.
 	got := ComputeEDC(buf)
-	want := [4]byte{0xa9, 0x77, 0x80, 0xa1}
+	want := [4]byte{0xee, 0x9c, 0x2a, 0x0e}
 	if got != want {
 		t.Fatalf("ComputeEDC = %x; want %x", got, want)
 	}
