@@ -35,6 +35,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runPack(args[1:], stderr)
 	case "unpack":
 		return runUnpack(args[1:], stderr)
+	case "verify":
+		return runVerify(args[1:], stderr)
 	case "inspect":
 		return runInspect(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
@@ -45,6 +47,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return exitOK
 			case "unpack":
 				printUnpackHelp(stderr)
+				return exitOK
+			case "verify":
+				printVerifyHelp(stderr)
 				return exitOK
 			case "inspect":
 				printInspectHelp(stderr)
@@ -175,6 +180,36 @@ func runUnpack(args []string, stderr io.Writer) int {
 	return exitOK
 }
 
+func runVerify(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	quiet := fs.Bool("q", false, "quiet")
+	quietLong := fs.Bool("quiet", false, "quiet")
+	help := fs.Bool("help", false, "show help for verify")
+	helpShort := fs.Bool("h", false, "show help for verify")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if *help || *helpShort {
+		printVerifyHelp(stderr)
+		return exitOK
+	}
+	beQuiet := *quiet || *quietLong
+
+	in, err := resolveUnpackInputs(fs.Args())
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitUsage
+	}
+	rep := NewReporter(stderr, beQuiet)
+	if err := Verify(VerifyOptions{
+		BinPath: in.Bin, ContainerPath: in.Container,
+	}, rep); err != nil {
+		return verifyErrorToExit(err)
+	}
+	return exitOK
+}
+
 func resolvePackInputs(positional []string) (PackInputs, error) {
 	switch len(positional) {
 	case 0:
@@ -264,6 +299,17 @@ func packErrorToExit(err error) int {
 }
 
 func unpackErrorToExit(err error) int {
+	switch {
+	case errors.Is(err, errBinSHA256Mismatch):
+		return exitWrongBin
+	case errors.Is(err, errOutputSHA256Mismatch):
+		return exitVerifyFail
+	default:
+		return exitIO
+	}
+}
+
+func verifyErrorToExit(err error) int {
 	switch {
 	case errors.Is(err, errBinSHA256Mismatch):
 		return exitWrongBin
