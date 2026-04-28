@@ -16,10 +16,9 @@ const (
 	exitOK         = 0
 	exitUsage      = 1
 	exitLayout     = 2
-	exitXDelta     = 3
-	exitVerifyFail = 4
-	exitIO         = 5
-	exitWrongBin   = 6
+	exitVerifyFail = 3
+	exitIO         = 4
+	exitWrongBin   = 5
 )
 
 func main() {
@@ -254,8 +253,6 @@ func packErrorToExit(err error) int {
 	case errors.Is(err, errVerifyMismatch),
 		errors.Is(err, errOutputSHA256Mismatch):
 		return exitVerifyFail
-	case strings.Contains(err.Error(), "xdelta3"):
-		return exitXDelta
 	default:
 		return exitIO
 	}
@@ -267,8 +264,6 @@ func unpackErrorToExit(err error) int {
 		return exitWrongBin
 	case errors.Is(err, errOutputSHA256Mismatch):
 		return exitVerifyFail
-	case strings.Contains(err.Error(), "xdelta3"):
-		return exitXDelta
 	default:
 		return exitIO
 	}
