@@ -203,15 +203,20 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// detectWriteOffset finds the first scrambled-sync field anywhere in
-// the scram file, descrambles its BCD MSF header to recover the LBA
-// that sector represents, and computes the implied write offset.
+// detectWriteOffset scans the scram file for sync-field candidates,
+// descrambles each candidate's MSF header, and returns the implied
+// write offset of the first candidate whose header is valid BCD and
+// whose implied write offset is sample-aligned and within ±2 sectors.
 //
-// This works for both real Redumper input (where the first sync lands
-// at LBA -150 because Mode 1 zero pregap sectors keep their sync field
-// after scrambling) and the synthetic test fixture (where the first
-// sync lands at LBA 0 because synthDisc emits raw scrambleTable bytes
-// for pregap, which has zero in the sync slots).
+// Real-world Redumper output of copy-protected discs (e.g. SafeDisc)
+// can contain bytes in the leadin region that happen to match the
+// 12-byte sync pattern but are not aligned to a sector boundary or
+// have deliberately corrupted MSF headers. The original implementation
+// took the first sync unconditionally, which produced a nonsense write
+// offset for these discs. Iterating until a header decodes cleanly
+// skips past those false positives without affecting the synthetic
+// test fixtures (whose first sync is always at the start of a real
+// sector with valid BCD).
 func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 	f, err := os.Open(scramPath)
 	if err != nil {
@@ -223,15 +228,50 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 		return 0, err
 	}
 	const (
-		chunkSize = 128 * 1024
-		maxScan   = 200 * 1024 * 1024
+		chunkSize        = 128 * 1024
+		maxScan          = 200 * 1024 * 1024
+		writeOffsetLimit = 2 * SectorSize
 	)
 	limit := info.Size()
 	if limit > maxScan {
 		limit = maxScan
 	}
 
-	syncOffset := int64(-1)
+	isBCD := func(b byte) bool { return (b>>4) <= 9 && (b&0x0F) <= 9 }
+
+	// tryCandidate validates a sync candidate and returns the implied
+	// write offset on success. Returns ok=false if the candidate is a
+	// false positive (header not BCD, LBA implausible, offset not
+	// sample-aligned, or offset out of range).
+	tryCandidate := func(syncOffset int64) (int, bool) {
+		var header [3]byte
+		if syncOffset+int64(SyncLen)+3 > info.Size() {
+			return 0, false
+		}
+		if _, err := f.ReadAt(header[:], syncOffset+SyncLen); err != nil {
+			return 0, false
+		}
+		for i := 0; i < 3; i++ {
+			header[i] ^= scrambleTable[SyncLen+i]
+		}
+		if !isBCD(header[0]) || !isBCD(header[1]) || !isBCD(header[2]) {
+			return 0, false
+		}
+		decodedLBA := BCDMSFToLBA(header)
+		if decodedLBA < leadinLBA || decodedLBA > 500_000 {
+			return 0, false
+		}
+		expectedAt := int64(decodedLBA-leadinLBA) * SectorSize
+		writeOffset := int(syncOffset - expectedAt)
+		if writeOffset%4 != 0 {
+			return 0, false
+		}
+		if writeOffset > writeOffsetLimit || writeOffset < -writeOffsetLimit {
+			return 0, false
+		}
+		return writeOffset, true
+	}
+
 	chunk := make([]byte, chunkSize)
 	carry := make([]byte, 0, SyncLen-1)
 	pos := int64(0)
@@ -250,15 +290,27 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 		// Stitch the carry from the previous chunk to catch syncs
 		// straddling a chunk boundary.
 		var search []byte
+		var carryLen int64
 		if len(carry) > 0 {
 			search = append(carry, chunk[:n]...)
+			carryLen = int64(len(carry))
 		} else {
 			search = chunk[:n]
 		}
-		idx := bytes.Index(search, Sync[:])
-		if idx >= 0 {
-			syncOffset = pos - int64(len(carry)) + int64(idx)
-			break
+		// Walk every sync occurrence in this buffer; first plausible
+		// candidate wins.
+		searchPos := 0
+		for {
+			idx := bytes.Index(search[searchPos:], Sync[:])
+			if idx < 0 {
+				break
+			}
+			idx += searchPos
+			syncOffset := pos - carryLen + int64(idx)
+			if wo, ok := tryCandidate(syncOffset); ok {
+				return wo, nil
+			}
+			searchPos = idx + 1
 		}
 		// Save the tail in case Sync straddles the boundary.
 		tailStart := n - (SyncLen - 1)
@@ -268,33 +320,7 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 		carry = append(carry[:0], chunk[tailStart:n]...)
 		pos += int64(n)
 	}
-	if syncOffset < 0 {
-		return 0, fmt.Errorf("no scrambled sync field found in first %d bytes of scram", limit)
-	}
-	// Descramble bytes 12..14 of the candidate sector to read the BCD MSF.
-	var header [3]byte
-	if _, err := f.ReadAt(header[:], syncOffset+12); err != nil {
-		return 0, fmt.Errorf("reading header at sync %d: %w", syncOffset, err)
-	}
-	for i := 0; i < 3; i++ {
-		header[i] ^= scrambleTable[12+i]
-	}
-	decodedLBA := BCDMSFToLBA(header)
-	if decodedLBA < leadinLBA || decodedLBA > 500_000 {
-		return 0, fmt.Errorf("first sync's MSF header decodes to implausible LBA %d", decodedLBA)
-	}
-	expectedAt := int64(decodedLBA-leadinLBA) * SectorSize
-	writeOffset := int(syncOffset - expectedAt)
-	if writeOffset%4 != 0 {
-		return 0, fmt.Errorf("auto-detected write offset %d is not sample-aligned", writeOffset)
-	}
-	// Real-world write offsets are typically within ±1 sector. ±2
-	// sectors leaves headroom for unusual but valid discs.
-	const writeOffsetLimit = 2 * SectorSize
-	if writeOffset > writeOffsetLimit || writeOffset < -writeOffsetLimit {
-		return 0, fmt.Errorf("auto-detected write offset %d is implausibly large (>%d bytes)", writeOffset, writeOffsetLimit)
-	}
-	return writeOffset, nil
+	return 0, fmt.Errorf("no plausible scrambled sync field found in first %d bytes of scram", limit)
 }
 
 // checkConstantOffset samples sync positions near the start, middle,
