@@ -3,10 +3,21 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"testing"
 )
+
+func TestGenerateMode1ZeroSectorLBAZero(t *testing.T) {
+	const wantSHA = "b2c91211b98919e43eb75d5d1eba18821c607badf31e60af4d166883a96cd68f"
+	sec := generateMode1ZeroSector(0)
+	sum := sha256.Sum256(sec[:])
+	if got := hex.EncodeToString(sum[:]); got != wantSHA {
+		t.Fatalf("generateMode1ZeroSector(0) sha256 = %s; want %s", got, wantSHA)
+	}
+}
 
 // synthDisc returns (bin, scram, params) for a small fake disc:
 //   - 100 Mode 1 data sectors with valid sync + BCD MSF header,
@@ -48,14 +59,13 @@ func synthDisc(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSecto
 		var sec [SectorSize]byte
 		switch {
 		case i < int32(pregap):
-			// scrambled zero == scrambleTable
-			copy(sec[:], scrambleTable[:])
+			sec = generateMode1ZeroSector(int32(i) + LBAPregapStart)
 		case i < int32(pregap+mainSectors):
 			binIdx := int(i) - pregap
 			copy(sec[:], bin[binIdx*SectorSize:(binIdx+1)*SectorSize])
 			Scramble(&sec)
 		default:
-			copy(sec[:], scrambleTable[:])
+			sec = generateMode1ZeroSector(int32(i) + LBAPregapStart)
 		}
 		dst := int64(i)*int64(SectorSize) + int64(writeOffsetBytes)
 		// when offset is negative, the first sector's leading bytes are clipped.
