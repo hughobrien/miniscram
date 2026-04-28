@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,3 +104,114 @@ func mustHashFile(t *testing.T, path string) string {
 
 // ensure the test file in this package can reach bytes
 var _ = bytes.Equal
+
+func TestHashFile_EmptyFile(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(tmp, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := hashFile(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		emptyMD5    = "d41d8cd98f00b204e9800998ecf8427e"
+		emptySHA1   = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+		emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	)
+	if got.MD5 != emptyMD5 {
+		t.Errorf("MD5 = %s; want %s", got.MD5, emptyMD5)
+	}
+	if got.SHA1 != emptySHA1 {
+		t.Errorf("SHA1 = %s; want %s", got.SHA1, emptySHA1)
+	}
+	if got.SHA256 != emptySHA256 {
+		t.Errorf("SHA256 = %s; want %s", got.SHA256, emptySHA256)
+	}
+}
+
+func TestHashFile_NonemptyFile(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "abc")
+	if err := os.WriteFile(tmp, []byte("abc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := hashFile(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reference values from FIPS-180 / RFC 1321 test vectors for "abc".
+	if got.MD5 != "900150983cd24fb0d6963f7d28e17f72" {
+		t.Errorf("MD5 = %s", got.MD5)
+	}
+	if got.SHA1 != "a9993e364706816aba3e25717850c26c9cd0d89d" {
+		t.Errorf("SHA1 = %s", got.SHA1)
+	}
+	if got.SHA256 != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
+		t.Errorf("SHA256 = %s", got.SHA256)
+	}
+}
+
+func TestHashFile_OpenError(t *testing.T) {
+	_, err := hashFile("/nonexistent/path/here")
+	if err == nil {
+		t.Fatal("expected error opening nonexistent file")
+	}
+}
+
+func TestCompareHashes_AllMatch(t *testing.T) {
+	h := FileHashes{MD5: "aaa", SHA1: "bbb", SHA256: "ccc"}
+	if err := compareHashes(h, h); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestCompareHashes_MD5Mismatch(t *testing.T) {
+	got := FileHashes{MD5: "aaa", SHA1: "bbb", SHA256: "ccc"}
+	want := FileHashes{MD5: "xxx", SHA1: "bbb", SHA256: "ccc"}
+	err := compareHashes(got, want)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if !strings.Contains(err.Error(), "md5") {
+		t.Errorf("error message missing 'md5': %v", err)
+	}
+}
+
+func TestCompareHashes_SHA1Mismatch(t *testing.T) {
+	got := FileHashes{MD5: "aaa", SHA1: "bbb", SHA256: "ccc"}
+	want := FileHashes{MD5: "aaa", SHA1: "yyy", SHA256: "ccc"}
+	err := compareHashes(got, want)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if !strings.Contains(err.Error(), "sha1") {
+		t.Errorf("error message missing 'sha1': %v", err)
+	}
+}
+
+func TestCompareHashes_SHA256Mismatch(t *testing.T) {
+	got := FileHashes{MD5: "aaa", SHA1: "bbb", SHA256: "ccc"}
+	want := FileHashes{MD5: "aaa", SHA1: "bbb", SHA256: "zzz"}
+	err := compareHashes(got, want)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if !strings.Contains(err.Error(), "sha256") {
+		t.Errorf("error message missing 'sha256': %v", err)
+	}
+}
+
+func TestCompareHashes_AllMismatch(t *testing.T) {
+	got := FileHashes{MD5: "aaa", SHA1: "bbb", SHA256: "ccc"}
+	want := FileHashes{MD5: "xxx", SHA1: "yyy", SHA256: "zzz"}
+	err := compareHashes(got, want)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"md5", "sha1", "sha256"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q: %v", want, err)
+		}
+	}
+}

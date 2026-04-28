@@ -3,6 +3,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -201,6 +204,55 @@ func sha256File(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// FileHashes holds the three hashes miniscram records per file.
+type FileHashes struct {
+	MD5    string
+	SHA1   string
+	SHA256 string
+}
+
+// hashFile streams path through MD5, SHA-1, and SHA-256 in a single
+// I/O pass and returns all three as lowercase hex.
+func hashFile(path string) (FileHashes, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return FileHashes{}, err
+	}
+	defer f.Close()
+	m, s1, s256 := md5.New(), sha1.New(), sha256.New()
+	w := io.MultiWriter(m, s1, s256)
+	if _, err := io.Copy(w, f); err != nil {
+		return FileHashes{}, err
+	}
+	return FileHashes{
+		MD5:    hex.EncodeToString(m.Sum(nil)),
+		SHA1:   hex.EncodeToString(s1.Sum(nil)),
+		SHA256: hex.EncodeToString(s256.Sum(nil)),
+	}, nil
+}
+
+// compareHashes returns nil iff all three hashes match. Otherwise it
+// returns a plain (un-sentinel-wrapped) error whose message describes
+// each hash's status. Callers wrap with their own sentinel via
+// fmt.Errorf("%w: %v", sentinel, err) to attach the appropriate exit
+// code semantics.
+func compareHashes(got, want FileHashes) error {
+	var diffs []string
+	if got.MD5 != want.MD5 {
+		diffs = append(diffs, fmt.Sprintf("md5 got %s, manifest expects %s", got.MD5, want.MD5))
+	}
+	if got.SHA1 != want.SHA1 {
+		diffs = append(diffs, fmt.Sprintf("sha1 got %s, manifest expects %s", got.SHA1, want.SHA1))
+	}
+	if got.SHA256 != want.SHA256 {
+		diffs = append(diffs, fmt.Sprintf("sha256 got %s, manifest expects %s", got.SHA256, want.SHA256))
+	}
+	if len(diffs) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(diffs, "; "))
 }
 
 // detectWriteOffset scans the scram file for sync-field candidates,
