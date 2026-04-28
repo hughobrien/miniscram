@@ -1478,6 +1478,15 @@ type BuildParams struct {
 	Tracks           []Track
 }
 
+// scramFileOffset returns the byte offset within the .scram file for a
+// given LBA, using the supplied leadinLBA as the base (rather than the
+// hardcoded LBALeadinStart in ScramOffset). Lets unit tests use a
+// truncated layout while real Redumper input still produces identical
+// offsets to ScramOffset.
+func scramFileOffset(lba, leadinLBA int32, writeOffsetBytes int) int64 {
+	return int64(lba-leadinLBA)*int64(SectorSize) + int64(writeOffsetBytes)
+}
+
 // LayoutMismatchError indicates the lockstep pre-check found enough
 // mismatches to prove that the caller's parameters don't actually
 // describe the .scram on disk.
@@ -1596,7 +1605,11 @@ func BuildEpsilonHat(out io.Writer, p BuildParams, bin io.Reader, scram io.Reade
 		written += int64(len(secBytes))
 
 		// Lockstep pre-check (only for full bin-covered sectors).
-		secOffset := ScramOffset(lba, p.WriteOffsetBytes)
+		// Use p.LeadinLBA as the scram-file base via a private helper —
+		// the public ScramOffset hardcodes LBALeadinStart, which is
+		// correct for real input but wrong for the truncated synthetic
+		// fixture (where p.LeadinLBA = -150).
+		secOffset := scramFileOffset(lba, p.LeadinLBA, p.WriteOffsetBytes)
 		if scram != nil &&
 			lba >= p.BinFirstLBA && lba < p.BinFirstLBA+p.BinSectorCount &&
 			secOffset >= 0 && secOffset+SectorSize <= p.ScramSize {

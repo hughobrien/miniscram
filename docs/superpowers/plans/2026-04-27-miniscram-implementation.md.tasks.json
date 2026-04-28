@@ -10,25 +10,25 @@
     {
       "id": 1,
       "subject": "Task 2: Cue parser",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Lightweight cue scanner extracting TRACK n MODE/AUDIO and INDEX 01 m:s:f.\n\n**Files:**\n- Create: cue.go\n- Create: cue_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run TestCue -v`\n\n```json:metadata\n{\"files\":[\"cue.go\",\"cue_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run TestCue -v\",\"acceptanceCriteria\":[\"single track parses\",\"multi-track + audio parses\",\"MODE2 accepted\",\"unknown mode rejected\",\"comments and blanks ignored\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 3: Manifest type + container framing",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Manifest JSON struct + on-disk container format (magic + version + length + manifest + delta).\n\n**Files:**\n- Create: manifest.go\n- Create: manifest_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run 'TestContainer|TestErrorSectorsCapped' -v`\n\n```json:metadata\n{\"files\":[\"manifest.go\",\"manifest_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run 'TestContainer|TestErrorSectorsCapped' -v\",\"acceptanceCriteria\":[\"round-trip identity\",\"bad magic rejected\",\"unknown version rejected\",\"error_sectors capped at 10k\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 4: xdelta3 subprocess wrapper",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Wrap xdelta3 binary for encode and decode with stderr capture.\n\n**Files:**\n- Create: xdelta3.go\n- Create: xdelta3_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run TestXDelta3 -v`\n\n```json:metadata\n{\"files\":[\"xdelta3.go\",\"xdelta3_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run TestXDelta3 -v\",\"acceptanceCriteria\":[\"round-trip\",\"missing binary error\",\"skip when xdelta3 absent\"]}\n```"
     },
     {
       "id": 4,
       "subject": "Task 5: Status reporter",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Reporter interface with TTY-aware text output and quiet mode.\n\n**Files:**\n- Create: reporter.go\n- Create: reporter_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run TestReporter -v`\n\n```json:metadata\n{\"files\":[\"reporter.go\",\"reporter_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run TestReporter -v\",\"acceptanceCriteria\":[\"Step.Done writes label+result\",\"Step.Fail writes error\",\"quiet writes nothing\",\"Info/Warn formatting\"]}\n```"
     },
     {
@@ -88,5 +88,5 @@
       "description": "**Goal:** Full pipeline against the 1.7 GB Deus Ex Redumper dump.\n\n**Files:**\n- Create: e2e_redump_test.go (build tag: redump_data)\n\n**Verify:** `cd /home/hugh/miniscram && go test -tags redump_data -run TestE2EDeusEx -timeout 10m -v`\n\n```json:metadata\n{\"files\":[\"e2e_redump_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -tags redump_data -run TestE2EDeusEx -timeout 10m -v\",\"acceptanceCriteria\":[\"pack succeeds\",\"zero error sectors\",\"delta < 1% of scram\",\"byte-equal recovery\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-04-28T01:51:51Z"
+  "lastUpdated": "2026-04-28T01:59:30Z"
 }
