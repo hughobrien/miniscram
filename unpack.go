@@ -18,11 +18,12 @@ var (
 
 // UnpackOptions holds inputs for Unpack.
 type UnpackOptions struct {
-	BinPath       string
-	ContainerPath string
-	OutputPath    string
-	Verify        bool
-	Force         bool
+	BinPath               string
+	ContainerPath         string
+	OutputPath            string
+	Verify                bool
+	Force                 bool
+	SuppressVerifyWarning bool // skip the "verification skipped" Warn; for callers that perform their own verification (e.g. Verify)
 }
 
 // Unpack reproduces the original .scram from <bin> + <container>.
@@ -148,7 +149,9 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 
 	// 4. verify output sha256
 	if !opts.Verify {
-		r.Warn("verification skipped (--no-verify)")
+		if !opts.SuppressVerifyWarning {
+			r.Warn("verification skipped (--no-verify)")
+		}
 		return nil
 	}
 	st = r.Step("verifying output sha256")

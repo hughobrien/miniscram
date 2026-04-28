@@ -25,10 +25,13 @@ func Verify(opts VerifyOptions, r Reporter) error {
 	// Read the manifest up front so we have scram_sha256 for the final
 	// compare. ReadContainer is called again inside Unpack but the
 	// manifest is small (KiB) and re-parsing is negligible.
+	st := r.Step("reading manifest")
 	m, _, err := ReadContainer(opts.ContainerPath)
 	if err != nil {
+		st.Fail(err)
 		return err
 	}
+	st.Done("ok")
 
 	// Allocate a tempfile next to the container. The rebuild produces
 	// a scram-sized file (often hundreds of MB); the container's
@@ -46,16 +49,17 @@ func Verify(opts VerifyOptions, r Reporter) error {
 	// own final hash; Force=true allows writing into the tempfile we
 	// just created.
 	if err := Unpack(UnpackOptions{
-		BinPath:       opts.BinPath,
-		ContainerPath: opts.ContainerPath,
-		OutputPath:    tmpPath,
-		Verify:        false,
-		Force:         true,
+		BinPath:               opts.BinPath,
+		ContainerPath:         opts.ContainerPath,
+		OutputPath:            tmpPath,
+		Verify:                false,
+		Force:                 true,
+		SuppressVerifyWarning: true,
 	}, r); err != nil {
 		return err
 	}
 
-	st := r.Step("verifying scram sha256")
+	st = r.Step("verifying scram sha256")
 	got, err := sha256File(tmpPath)
 	if err != nil {
 		st.Fail(err)
