@@ -18,6 +18,10 @@ func printUnpackHelp(w io.Writer) {
 	fmt.Fprint(w, unpackHelpText)
 }
 
+func printVerifyHelp(w io.Writer) {
+	fmt.Fprint(w, verifyHelpText)
+}
+
 func printInspectHelp(w io.Writer) {
 	fmt.Fprint(w, inspectHelpText)
 }
@@ -32,6 +36,7 @@ USAGE:
 COMMANDS:
     pack       pack a .scram into a compact .miniscram container
     unpack     reproduce a .scram from .bin + .miniscram
+    verify     non-destructive integrity check of a .miniscram
     inspect    pretty-print a .miniscram container (read-only)
     help       show this help, or 'miniscram help <command>'
 
@@ -88,6 +93,31 @@ OPTIONS:
     --no-verify            skip output sha256 verification.
     -q, --quiet            suppress progress output.
     -h, --help             show this help.
+`
+
+const verifyHelpText = `USAGE:
+    miniscram verify [<bin> <in.miniscram>] [options]
+
+ARGUMENTS (optional — discovered from cwd if omitted):
+    <bin>             path to the unscrambled CD image (Redumper *.bin)
+    <in.miniscram>    .miniscram container produced by 'miniscram pack'
+
+OPTIONS:
+    -q, --quiet       suppress progress output.
+    -h, --help        show this help.
+
+DESCRIPTION:
+    Rebuilds the original .scram in a temporary file, hashes it,
+    compares against the container's recorded scram_sha256, and
+    deletes the temporary file. Used to confirm a .miniscram still
+    decodes correctly without producing a multi-hundred-MB output.
+
+EXIT CODES:
+    0    success
+    1    usage / input error
+    3    verification failed (computed sha256 != manifest.scram_sha256)
+    4    I/O error
+    5    wrong .bin (sha256 mismatch with manifest.bin_sha256)
 `
 
 const inspectHelpText = `USAGE:
