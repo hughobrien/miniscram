@@ -53,8 +53,12 @@ func TestContainerRejectsLegacyV1(t *testing.T) {
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ReadContainer(path); err == nil {
+	_, _, err := ReadContainer(path)
+	if err == nil {
 		t.Fatal("expected error rejecting v1 container")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("re-pack")) {
+		t.Fatalf("v1 rejection error should contain \"re-pack\"; got: %v", err)
 	}
 }
 

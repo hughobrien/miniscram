@@ -231,3 +231,20 @@ func TestBuilderCleanRoundTripPositiveOffset(t *testing.T) {
 		t.Fatal("ε̂ != scram for clean disc with positive write offset")
 	}
 }
+
+func TestBuildEpsilonHatAndDeltaRefusesAtTooManyMismatches(t *testing.T) {
+	bin, scram, params := synthDisc(t, 100, 0, 10)
+	// flip every main sector (100% mismatch in bin range; ~38% across full disc)
+	for i := 0; i < 100; i++ {
+		scram[(150+i)*SectorSize+50] ^= 0xFF
+	}
+	var hat, delta bytes.Buffer
+	_, _, err := BuildEpsilonHatAndDelta(&hat, &delta, params, bytes.NewReader(bin), bytes.NewReader(scram))
+	if err == nil {
+		t.Fatal("expected layout-mismatch error")
+	}
+	var lme *LayoutMismatchError
+	if !errors.As(err, &lme) {
+		t.Fatalf("error %v is not *LayoutMismatchError", err)
+	}
+}

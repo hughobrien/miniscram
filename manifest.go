@@ -106,7 +106,8 @@ func ReadContainer(path string) (*Manifest, []byte, error) {
 		return nil, nil, fmt.Errorf("not a miniscram container (bad magic %q)", header[:4])
 	}
 	if header[4] != containerVersion {
-		return nil, nil, fmt.Errorf("unsupported container version 0x%02x (this build expects 0x%02x)",
+		return nil, nil, fmt.Errorf("unsupported container version 0x%02x (this build expects 0x%02x); "+
+			"v0.1 .miniscram files cannot be read directly by v0.2 — re-pack with v0.2 from the original .bin",
 			header[4], containerVersion)
 	}
 	mlen := binary.BigEndian.Uint32(header[5:9])

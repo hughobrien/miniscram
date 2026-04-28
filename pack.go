@@ -16,7 +16,7 @@ import (
 
 // toolVersion is reported in the manifest. Bump in lockstep with
 // container or behaviour changes.
-const toolVersion = "miniscram 0.1.0"
+const toolVersion = "miniscram 0.2.0"
 
 // Sentinel errors so the CLI can map error classes to exit codes
 // without resorting to substring matching on the message.

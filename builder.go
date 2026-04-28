@@ -306,6 +306,7 @@ func BuildEpsilonHatAndDelta(
 	binBuf := make([]byte, SectorSize)
 	scramBuf := make([]byte, SectorSize)
 	var errLBAs []int32
+	var mismatchedSectors int
 	var scramCur int64
 
 	advanceScramTo := func(target int64) error {
@@ -375,8 +376,11 @@ func BuildEpsilonHatAndDelta(
 				run = run[:0]
 			}
 		}
-		if sectorMismatch && len(errLBAs) < errorSectorsListCap {
-			errLBAs = append(errLBAs, lba)
+		if sectorMismatch {
+			mismatchedSectors++
+			if len(errLBAs) < errorSectorsListCap {
+				errLBAs = append(errLBAs, lba)
+			}
 		}
 		if written >= p.ScramSize {
 			break
@@ -389,7 +393,7 @@ func BuildEpsilonHatAndDelta(
 	// Mismatch ratio check (5% of total disc sectors).
 	if endLBA > p.LeadinLBA {
 		totalDisc := int32(endLBA - p.LeadinLBA)
-		ratio := float64(len(errLBAs)) / float64(totalDisc)
+		ratio := float64(mismatchedSectors) / float64(totalDisc)
 		if ratio > layoutMismatchAbortRatio {
 			head := errLBAs
 			if len(head) > 10 {
