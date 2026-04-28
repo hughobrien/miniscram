@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -36,8 +37,11 @@ func (e *LayoutMismatchError) Error() string {
 
 const layoutMismatchAbortRatio = 0.05
 
-// trackModeAt returns the mode of the track containing the given LBA.
-// Returns "" when no track covers it (e.g., leadin/leadout).
+// trackModeAt returns the mode of the track whose first LBA is <= lba.
+// Returns "" for LBAs that precede the first track (leadin/pregap).
+// Callers should only consult this for LBAs known to fall inside the
+// .bin coverage range — leadin/pregap/leadout sectors are emitted as
+// zeros or scrambled-zeros directly, never via trackModeAt.
 func trackModeAt(tracks []Track, lba int32) string {
 	mode := ""
 	for _, tr := range tracks {
@@ -158,8 +162,10 @@ func BuildEpsilonHat(out io.Writer, p BuildParams, bin io.Reader, scram io.Reade
 			if _, err := io.ReadFull(scram, scramBuf); err != nil {
 				return nil, fmt.Errorf("reading scram LBA %d: %w", lba, err)
 			}
+			// ReadFull advanced the underlying reader by SectorSize but
+			// does not touch scramCursor; resync.
 			scramCursor = secOffset + SectorSize
-			if !bytesEqual(sec[:], scramBuf) {
+			if !bytes.Equal(sec[:], scramBuf) {
 				errSectors = append(errSectors, lba)
 			}
 		}
@@ -183,16 +189,4 @@ func BuildEpsilonHat(out io.Writer, p BuildParams, bin io.Reader, scram io.Reade
 		}
 	}
 	return errSectors, nil
-}
-
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
