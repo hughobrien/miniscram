@@ -301,30 +301,6 @@ renamed `errBinSHA256Mismatch` → `errBinHashMismatch` and
 
 ---
 
-### C2. `miniscram fsck <miniscram>` subcommand
-
-**Goal:** Validate container framing without unpacking. Catches
-corruption in: magic bytes, version byte, manifest length, manifest
-JSON parsing, override-record framing.
-
-**Acceptance:**
-- [ ] `miniscram fsck <path>` reports OK or lists specific framing
-      errors with byte offsets.
-- [ ] No file outputs; no temp files.
-- [ ] Doesn't validate the *content* of overrides (that's `verify`'s
-      job; this is purely structural).
-
-**Files:** new `fsck.go`, `fsck_test.go`; `main.go`; `help.go`.
-
-**Effort:** ~100 LOC. Half a day.
-
-**Depends on:** nothing.
-
-**Open questions:** Whether to fold this into `inspect --check` rather
-than a separate subcommand. Probably yes — keeps the CLI smaller.
-
----
-
 ### C3. Cross-platform CI
 
 **Goal:** v0.2 spec calls out Linux-only as a known untested gap.
@@ -370,6 +346,14 @@ them without a clear motivating use case:
   revisiting only if DVD support lands.
 - **Pluggable scrambling tables.** Some niche disc formats use
   non-ECMA-130 scrambling. Out of scope; that's a different tool.
+- **`fsck` / `inspect --check` structural validator.** Was C2.
+  Largely redundant with `verify`: ReadContainer already catches
+  bad magic / bad version byte / implausible manifest length /
+  malformed manifest JSON, and ApplyDelta validates override
+  framing during the rebuild. The narrow value (no-bin needed,
+  no scratch disk, byte-offset diagnostics) doesn't justify a
+  new subcommand. If the disk-cheap-check becomes a real need,
+  add `verify --structural-only` rather than a separate command.
 
 ---
 
