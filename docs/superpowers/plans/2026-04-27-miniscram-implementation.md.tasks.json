@@ -4,7 +4,7 @@
     {
       "id": 0,
       "subject": "Task 1: Project skeleton + scrambler core + layout helpers",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Scaffold the Go module and implement the ECMA-130 scramble table and the LBA/MSF/byte-offset arithmetic.\n\n**Files:**\n- Create: go.mod\n- Create: scrambler.go\n- Create: scrambler_test.go\n- Create: layout.go\n- Create: layout_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test ./... -run 'Scramble|Layout|MSF|LBA' -v`\n\n```json:metadata\n{\"files\":[\"go.mod\",\"scrambler.go\",\"scrambler_test.go\",\"layout.go\",\"layout_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test ./... -run 'Scramble|Layout|MSF|LBA' -v\",\"acceptanceCriteria\":[\"go test passes\",\"Scramble self-inverse\",\"table sha256 matches constant\",\"sync bytes zero\",\"BCDMSF/LBA round-trip\",\"ScramOffset arithmetic\"]}\n```"
     },
     {
@@ -35,37 +35,58 @@
       "id": 5,
       "subject": "Task 6: Epsilon-hat builder + lockstep pre-check",
       "status": "pending",
-      "blockedBy": [0],
+      "blockedBy": [
+        0
+      ],
       "description": "**Goal:** BuildEpsilonHat produces same-size reconstructed scrambled image and identifies error sectors.\n\n**Files:**\n- Create: builder.go\n- Create: builder_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run TestBuilder -v`\n\n```json:metadata\n{\"files\":[\"builder.go\",\"builder_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run TestBuilder -v\",\"acceptanceCriteria\":[\"clean disc bytes equal\",\"one error sector detected\",\"layout mismatch >5% aborts\",\"epsilon-hat size matches scram size\"]}\n```"
     },
     {
       "id": 6,
       "subject": "Task 7: Pack pipeline",
       "status": "pending",
-      "blockedBy": [0, 1, 2, 3, 4, 5],
-      "description": "**Goal:** End-to-end pack: parse cue, auto-detect write offset, hash, build ε̂, run xdelta3, write container, inline-verify.\n\n**Files:**\n- Create: pack.go\n- Create: pack_test.go\n\n**Verify (after Task 8):** `cd /home/hugh/miniscram && go test -run 'TestPack|TestUnpack' -v`\n\n```json:metadata\n{\"files\":[\"pack.go\",\"pack_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run TestPack -v\",\"acceptanceCriteria\":[\"valid container produced\",\"write offset detected\",\"scram sha256 recorded\",\"zero error sectors on clean disc\"]}\n```"
+      "blockedBy": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "description": "**Goal:** End-to-end pack: parse cue, auto-detect write offset, hash, build \u03b5\u0302, run xdelta3, write container, inline-verify.\n\n**Files:**\n- Create: pack.go\n- Create: pack_test.go\n\n**Verify (after Task 8):** `cd /home/hugh/miniscram && go test -run 'TestPack|TestUnpack' -v`\n\n```json:metadata\n{\"files\":[\"pack.go\",\"pack_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run TestPack -v\",\"acceptanceCriteria\":[\"valid container produced\",\"write offset detected\",\"scram sha256 recorded\",\"zero error sectors on clean disc\"]}\n```"
     },
     {
       "id": 7,
       "subject": "Task 8: Unpack pipeline",
       "status": "pending",
-      "blockedBy": [0, 2, 3, 4, 5, 6],
-      "description": "**Goal:** End-to-end unpack: read container, verify bin sha256, rebuild ε̂, run xdelta3 -d, verify output sha256.\n\n**Files:**\n- Create: unpack.go\n- Create: unpack_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run 'TestPack|TestUnpack' -v`\n\n```json:metadata\n{\"files\":[\"unpack.go\",\"unpack_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run 'TestPack|TestUnpack' -v\",\"acceptanceCriteria\":[\"round-trip byte-equal\",\"wrong bin rejected\",\"no overwrite without force\",\"output sha256 matches manifest\"]}\n```"
+      "blockedBy": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "description": "**Goal:** End-to-end unpack: read container, verify bin sha256, rebuild \u03b5\u0302, run xdelta3 -d, verify output sha256.\n\n**Files:**\n- Create: unpack.go\n- Create: unpack_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run 'TestPack|TestUnpack' -v`\n\n```json:metadata\n{\"files\":[\"unpack.go\",\"unpack_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run 'TestPack|TestUnpack' -v\",\"acceptanceCriteria\":[\"round-trip byte-equal\",\"wrong bin rejected\",\"no overwrite without force\",\"output sha256 matches manifest\"]}\n```"
     },
     {
       "id": 8,
       "subject": "Task 9: CLI / file discovery / source removal / main",
       "status": "pending",
-      "blockedBy": [6, 7],
+      "blockedBy": [
+        6,
+        7
+      ],
       "description": "**Goal:** Wire pipelines into a real CLI: --help, file discovery, default outputs, force, source removal, exit codes.\n\n**Files:**\n- Create: discover.go\n- Create: discover_test.go\n- Create: main.go\n- Create: help.go\n- Create: main_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test ./... -v && go build ./... && ./miniscram --help`\n\n```json:metadata\n{\"files\":[\"discover.go\",\"discover_test.go\",\"main.go\",\"help.go\",\"main_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test ./... -v && go build ./... && ./miniscram --help\",\"acceptanceCriteria\":[\"pack --help works\",\"discovery cwd+stem\",\"default output paths\",\"verified pack removes source\",\"keep-source honored\",\"cross-fs refused without flag\",\"exit codes correct\"]}\n```"
     },
     {
       "id": 9,
       "subject": "Task 10: Real-world Deus Ex end-to-end test (build-tagged)",
       "status": "pending",
-      "blockedBy": [8],
+      "blockedBy": [
+        8
+      ],
       "description": "**Goal:** Full pipeline against the 1.7 GB Deus Ex Redumper dump.\n\n**Files:**\n- Create: e2e_redump_test.go (build tag: redump_data)\n\n**Verify:** `cd /home/hugh/miniscram && go test -tags redump_data -run TestE2EDeusEx -timeout 10m -v`\n\n```json:metadata\n{\"files\":[\"e2e_redump_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -tags redump_data -run TestE2EDeusEx -timeout 10m -v\",\"acceptanceCriteria\":[\"pack succeeds\",\"zero error sectors\",\"delta < 1% of scram\",\"byte-equal recovery\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-04-27T17:30:00Z"
+  "lastUpdated": "2026-04-28T01:51:51Z"
 }
