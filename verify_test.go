@@ -206,6 +206,31 @@ func TestCLIVerifyHelp(t *testing.T) {
 	}
 }
 
+func TestVerifyDetectsTruncatedContainer(t *testing.T) {
+	_, containerPath, _, _ := packForVerify(t)
+
+	// Truncate the container to 8 bytes — too short to be a valid container.
+	if err := os.WriteFile(containerPath, []byte("TRUNCATE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	rep := NewReporter(&buf, false)
+	err := Verify(VerifyOptions{
+		BinPath:       filepath.Join(filepath.Dir(containerPath), "test.bin"),
+		ContainerPath: containerPath,
+	}, rep)
+	if err == nil {
+		t.Fatal("expected error on truncated container, got nil")
+	}
+	if err.Error() == "" {
+		t.Error("expected non-empty error message")
+	}
+	if !strings.Contains(buf.String(), "FAIL") {
+		t.Errorf("expected reporter to surface failure; got: %q", buf.String())
+	}
+}
+
 func TestCLIVerifyUsageErrors(t *testing.T) {
 	// 3 positionals
 	var stderr bytes.Buffer
