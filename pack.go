@@ -18,6 +18,12 @@ import (
 // container or behaviour changes.
 const toolVersion = "miniscram 0.1.0"
 
+// Sentinel errors so the CLI can map error classes to exit codes
+// without resorting to substring matching on the message.
+var (
+	errVerifyMismatch = errors.New("round-trip verification failed")
+)
+
 // PackOptions captures everything Pack needs. Defaults match the spec
 // (Verify on, LeadinLBA = LBALeadinStart). Fields without a comment
 // match the obvious thing.
@@ -128,23 +134,34 @@ func Pack(opts PackOptions, r Reporter) error {
 	// alive simultaneously can blow up small temp filesystems.
 	st.Done("%d sector(s) differ", len(errSectors))
 
+	// Track ε̂ removal explicitly so we can free it before the verify
+	// pass rebuilds a fresh one (ε̂ is the same size as .scram, often
+	// hundreds of MB; keeping two alive simultaneously can blow up
+	// small temp filesystems). The deferred remove is a safety net in
+	// case we return early before the explicit free.
+	hatRemoved := false
+	defer func() {
+		if !hatRemoved {
+			_ = os.Remove(hatPath)
+		}
+	}()
+
 	// 7. run xdelta3 -e
 	st = r.Step("running xdelta3 -e")
 	deltaPath := hatPath + ".delta"
 	if err := XDelta3Encode(hatPath, opts.ScramPath, deltaPath, scramSize); err != nil {
-		_ = os.Remove(hatPath)
 		st.Fail(err)
 		return err
 	}
 	defer os.Remove(deltaPath)
-	// Free the ε̂ now that the delta is on disk. The verify pass (if
-	// enabled) will rebuild it from scratch.
-	if err := os.Remove(hatPath); err != nil && !os.IsNotExist(err) {
-		r.Warn("could not remove temporary ε̂ %s: %v", hatPath, err)
-	}
 	deltaInfo, err := os.Stat(deltaPath)
 	if err != nil {
 		return err
+	}
+	if err := os.Remove(hatPath); err == nil {
+		hatRemoved = true
+	} else if !os.IsNotExist(err) {
+		r.Warn("could not remove temporary ε̂ %s: %v", hatPath, err)
 	}
 	st.Done("%d bytes", deltaInfo.Size())
 
@@ -229,24 +246,55 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Search up to 200 MB or the whole file, whichever is smaller. The
-	// first sync in real Redumper input lands ~106 MB in (45000-sector
-	// zero-filled leadin). For the synthetic fixture it lands within
-	// the first MB.
-	const maxSearch = 200 * 1024 * 1024
-	searchLen := info.Size()
-	if searchLen > maxSearch {
-		searchLen = maxSearch
+	const (
+		chunkSize = 128 * 1024
+		maxScan   = 200 * 1024 * 1024
+	)
+	limit := info.Size()
+	if limit > maxScan {
+		limit = maxScan
 	}
-	buf := make([]byte, searchLen)
-	if _, err := io.ReadFull(f, buf); err != nil && err != io.ErrUnexpectedEOF {
-		return 0, err
+
+	syncOffset := int64(-1)
+	chunk := make([]byte, chunkSize)
+	carry := make([]byte, 0, SyncLen-1)
+	pos := int64(0)
+	for pos < limit {
+		readLen := int64(chunkSize)
+		if pos+readLen > limit {
+			readLen = limit - pos
+		}
+		n, err := f.ReadAt(chunk[:readLen], pos)
+		if err != nil && err != io.EOF {
+			return 0, err
+		}
+		if n == 0 {
+			break
+		}
+		// Stitch the carry from the previous chunk to catch syncs
+		// straddling a chunk boundary.
+		var search []byte
+		if len(carry) > 0 {
+			search = append(carry, chunk[:n]...)
+		} else {
+			search = chunk[:n]
+		}
+		idx := bytes.Index(search, Sync[:])
+		if idx >= 0 {
+			syncOffset = pos - int64(len(carry)) + int64(idx)
+			break
+		}
+		// Save the tail in case Sync straddles the boundary.
+		tailStart := n - (SyncLen - 1)
+		if tailStart < 0 {
+			tailStart = 0
+		}
+		carry = append(carry[:0], chunk[tailStart:n]...)
+		pos += int64(n)
 	}
-	syncIdx := bytes.Index(buf, Sync[:])
-	if syncIdx < 0 {
-		return 0, errors.New("no scrambled sync field found in first 200 MB of scram")
+	if syncOffset < 0 {
+		return 0, fmt.Errorf("no scrambled sync field found in first %d bytes of scram", limit)
 	}
-	syncOffset := int64(syncIdx)
 	// Descramble bytes 12..14 of the candidate sector to read the BCD MSF.
 	var header [3]byte
 	if _, err := f.ReadAt(header[:], syncOffset+12); err != nil {
@@ -264,8 +312,11 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 	if writeOffset%4 != 0 {
 		return 0, fmt.Errorf("auto-detected write offset %d is not sample-aligned", writeOffset)
 	}
-	if writeOffset > 10*SectorSize || writeOffset < -10*SectorSize {
-		return 0, fmt.Errorf("auto-detected write offset %d is implausibly large", writeOffset)
+	// Real-world write offsets are typically within ±1 sector. ±2
+	// sectors leaves headroom for unusual but valid discs.
+	const writeOffsetLimit = 2 * SectorSize
+	if writeOffset > writeOffsetLimit || writeOffset < -writeOffsetLimit {
+		return 0, fmt.Errorf("auto-detected write offset %d is implausibly large (>%d bytes)", writeOffset, writeOffsetLimit)
 	}
 	return writeOffset, nil
 }
@@ -398,7 +449,7 @@ func verifyRoundTrip(containerPath, binPath string, want *Manifest) error {
 		return err
 	}
 	if got != want.ScramSHA256 {
-		return fmt.Errorf("verify: round-trip sha256 %s != recorded %s", got, want.ScramSHA256)
+		return fmt.Errorf("%w: round-trip sha256 %s != recorded %s", errVerifyMismatch, got, want.ScramSHA256)
 	}
 	return nil
 }

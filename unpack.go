@@ -2,11 +2,16 @@
 package main
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+)
+
+// Sentinel errors. See pack.go for the rationale.
+var (
+	errBinSHA256Mismatch    = errors.New("bin sha256 mismatch")
+	errOutputSHA256Mismatch = errors.New("output sha256 mismatch")
 )
 
 // UnpackOptions holds inputs for Unpack.
@@ -53,7 +58,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		return err
 	}
 	if binSHA != m.BinSHA256 {
-		err := fmt.Errorf("bin sha256 mismatch: got %s, manifest expects %s", binSHA, m.BinSHA256)
+		err := fmt.Errorf("%w: got %s, manifest expects %s", errBinSHA256Mismatch, binSHA, m.BinSHA256)
 		st.Fail(err)
 		return err
 	}
@@ -134,7 +139,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	}
 	if outSHA != m.ScramSHA256 {
 		_ = os.Remove(opts.OutputPath)
-		err := fmt.Errorf("output sha256 %s != manifest %s", outSHA, m.ScramSHA256)
+		err := fmt.Errorf("%w: output %s, manifest %s", errOutputSHA256Mismatch, outSHA, m.ScramSHA256)
 		st.Fail(err)
 		return err
 	}
@@ -151,7 +156,3 @@ func deltaJSONSize(m *Manifest) int {
 	}
 	return len(body)
 }
-
-// ensure-the-import: bytes is sometimes pulled by future edits.
-var _ = bytes.Equal
-var _ io.Writer = io.Discard
