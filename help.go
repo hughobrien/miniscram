@@ -90,7 +90,7 @@ OPTIONS:
                            default: <miniscram-stem>.scram next to
                            <in.miniscram>.
     -f, --force            overwrite existing output.
-    --no-verify            skip output sha256 verification.
+    --no-verify            skip output hash verification (md5/sha1/sha256).
     -q, --quiet            suppress progress output.
     -h, --help             show this help.
 `
@@ -107,17 +107,18 @@ OPTIONS:
     -h, --help        show this help.
 
 DESCRIPTION:
-    Rebuilds the original .scram in a temporary file, hashes it,
-    compares against the container's recorded scram_sha256, and
-    deletes the temporary file. Used to confirm a .miniscram still
-    decodes correctly without producing a multi-hundred-MB output.
+    Rebuilds the original .scram in a temporary file, hashes it
+    (md5 + sha1 + sha256), compares against the container's recorded
+    hashes, and deletes the temporary file. Used to confirm a
+    .miniscram still decodes correctly without producing a
+    multi-hundred-MB output.
 
 EXIT CODES:
     0    success
     1    usage / input error
-    3    verification failed (computed sha256 != manifest.scram_sha256)
+    3    verification failed (one or more of md5/sha1/sha256 mismatched)
     4    I/O error
-    5    wrong .bin (sha256 mismatch with manifest.bin_sha256)
+    5    wrong .bin (one or more recorded hashes mismatched)
 `
 
 const inspectHelpText = `USAGE:
