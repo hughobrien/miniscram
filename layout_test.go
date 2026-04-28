@@ -24,6 +24,16 @@ func TestBCDMSFToLBA(t *testing.T) {
 	}
 }
 
+func TestLBAMSFRoundTrip(t *testing.T) {
+	cases := []int32{-150, -1, 0, 1, 100, 17850, 449849}
+	for _, l := range cases {
+		got := BCDMSFToLBA(LBAToBCDMSF(l))
+		if got != l {
+			t.Errorf("BCDMSFToLBA(LBAToBCDMSF(%d)) = %d", l, got)
+		}
+	}
+}
+
 func TestScramOffset(t *testing.T) {
 	cases := []struct {
 		lba    int32

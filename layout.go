@@ -34,6 +34,23 @@ func BCDMSFToLBA(bcdMSF [3]byte) int32 {
 	return int32(MSFFramesPerSecond*(60*m+s) + f - 150)
 }
 
+// LBAToBCDMSF is the inverse of BCDMSFToLBA. Given an LBA, returns
+// the 3-byte BCD MSF triple stored in the header field of the
+// corresponding Mode 1 sector. LBA -150 yields {0x00, 0x00, 0x00}.
+//
+// Caller must ensure lba is in [-150, 99*60*75 - 150) — the absolute-
+// time addressing range per ECMA-130 §14.2. Out-of-range inputs
+// silently produce nonsense BCD bytes (no panic).
+func LBAToBCDMSF(lba int32) [3]byte {
+	v := lba + 150
+	m := v / (60 * MSFFramesPerSecond)
+	v -= m * 60 * MSFFramesPerSecond
+	s := v / MSFFramesPerSecond
+	f := v - s*MSFFramesPerSecond
+	enc := func(n int32) byte { return byte(n/10*16 + n%10) }
+	return [3]byte{enc(m), enc(s), enc(f)}
+}
+
 // ScramOffset returns the byte offset within a Redumper .scram file
 // for a given LBA, given the disc's write offset in bytes
 // (samples × 4). May be negative for LBAs that fall before the file

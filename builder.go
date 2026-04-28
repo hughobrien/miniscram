@@ -37,6 +37,29 @@ func (e *LayoutMismatchError) Error() string {
 
 const layoutMismatchAbortRatio = 0.05
 
+// generateMode1ZeroSector returns the scrambled bytes of a Mode 1
+// sector with all-zero user data and a BCD MSF header for the given
+// LBA. This is the standard pregap and leadout content for CD-ROMs
+// mastered with Mode 1 zero sectors in those regions.
+func generateMode1ZeroSector(lba int32) [SectorSize]byte {
+	var sec [SectorSize]byte
+	copy(sec[:SyncLen], Sync[:])
+	msf := LBAToBCDMSF(lba)
+	sec[12] = msf[0]
+	sec[13] = msf[1]
+	sec[14] = msf[2]
+	sec[15] = 0x01
+	edc := ComputeEDC(sec[:2064])
+	sec[2064] = edc[0]
+	sec[2065] = edc[1]
+	sec[2066] = edc[2]
+	sec[2067] = edc[3]
+	// bytes 2068..2075 already zero (intermediate)
+	ComputeECC(&sec)
+	Scramble(&sec)
+	return sec
+}
+
 // trackModeAt returns the mode of the track whose first LBA is <= lba.
 // Returns "" for LBAs that precede the first track (leadin/pregap).
 // Callers should only consult this for LBAs known to fall inside the
@@ -116,10 +139,9 @@ func BuildEpsilonHat(out io.Writer, p BuildParams, bin io.Reader, scram io.Reade
 		var sec [SectorSize]byte
 		switch {
 		case lba < LBAPregapStart:
-			// leadin: zeros
+			// leadin: zeros (Redumper convention; drives don't read here)
 		case lba < p.BinFirstLBA:
-			// pregap: scrambled zero == scramble table
-			copy(sec[:], scrambleTable[:])
+			sec = generateMode1ZeroSector(lba)
 		case lba < p.BinFirstLBA+p.BinSectorCount:
 			if _, err := io.ReadFull(bin, binBuf); err != nil {
 				return nil, fmt.Errorf("reading bin LBA %d: %w", lba, err)
@@ -129,8 +151,7 @@ func BuildEpsilonHat(out io.Writer, p BuildParams, bin io.Reader, scram io.Reade
 				Scramble(&sec)
 			}
 		default:
-			// leadout: scrambled zero
-			copy(sec[:], scrambleTable[:])
+			sec = generateMode1ZeroSector(lba)
 		}
 
 		// Apply skipFirst on the very first sector if needed.
@@ -154,7 +175,6 @@ func BuildEpsilonHat(out io.Writer, p BuildParams, bin io.Reader, scram io.Reade
 		// layouts (LeadinLBA = -150) work as well as real ones (-45150).
 		secOffset := scramFileOffset(lba, p.LeadinLBA, p.WriteOffsetBytes)
 		if scram != nil &&
-			lba >= p.BinFirstLBA && lba < p.BinFirstLBA+p.BinSectorCount &&
 			secOffset >= 0 && secOffset+SectorSize <= p.ScramSize {
 			if err := advanceScram(secOffset); err != nil {
 				return nil, err
@@ -174,15 +194,16 @@ func BuildEpsilonHat(out io.Writer, p BuildParams, bin io.Reader, scram io.Reade
 		}
 	}
 
-	if p.BinSectorCount > 0 {
-		ratio := float64(len(errSectors)) / float64(p.BinSectorCount)
+	if endLBA > p.LeadinLBA {
+		totalDisc := int32(endLBA - p.LeadinLBA)
+		ratio := float64(len(errSectors)) / float64(totalDisc)
 		if ratio > layoutMismatchAbortRatio {
 			head := errSectors
 			if len(head) > 10 {
 				head = head[:10]
 			}
 			return errSectors, &LayoutMismatchError{
-				BinSectors:    p.BinSectorCount,
+				BinSectors:    totalDisc,
 				ErrorSectors:  head,
 				MismatchRatio: ratio,
 			}
