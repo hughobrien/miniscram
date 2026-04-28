@@ -268,3 +268,30 @@ table-driven loop + the new Freelancer assertions.
 - **SafeDisc-specific spot-checks.** Out per design discussion —
   byte-equality is sufficient.
 - **Per-platform CI.** TASKS.md C3.
+
+## Variance from initial spec (post-implementation)
+
+The initial spec described asserting `m.ErrorSectorCount == 588` directly
+for Freelancer. First-run revealed a metric definition mismatch:
+miniscram's `ErrorSectorCount` counts every sector requiring a delta
+override (data-track errors + lead-in noise + boundary sectors ≈ 2812
+for Freelancer), while redump.org's "errors count" counts only data-
+track ECC/EDC errors (588). Both numbers are correct; they count
+different things.
+
+**Resolution (commit `735da03`):** Test asserts the data-track ECC/EDC
+count via a new test-side `countDataTrackErrors` helper that walks the
+bin and recomputes EDC per sector. That number (588 for Freelancer) is
+a SafeDisc-class signature, stable across dumps. The manifest's
+`ErrorSectorCount` retains a soft sentinel check (`> 0` for protected,
+`== 0` for clean). Freelancer delta/container bounds loosened from 5
+MiB to 15 MiB based on the observed ~7 MB.
+
+**Also folded into this cycle (not in the initial spec):** A real bug
+in `pack.go`'s `detectWriteOffset` was surfaced by the first Freelancer
+pack attempt and fixed in commit `57e05b3`. Lead-in regions on real
+protected discs contain non-zero data that produces coincidental
+sync-pattern matches with non-BCD MSF headers; the original detector
+took the first match and aborted with "implausible LBA". The fix
+iterates candidates and accepts the first one with valid BCD plus a
+sample-aligned, plausibly-bounded write offset.
