@@ -16,6 +16,11 @@ for Redumper's output format.
   byte-for-byte.
 - Verify round-trip integrity by default in both directions; refuse to emit
   unverified output.
+- Report progress clearly on stderr so a watching archivist can see what
+  the tool is doing to their data at every step.
+- Reclaim disk by default: once verification proves the `.scram` can be
+  reconstructed exactly, remove it (opt out via `--keep-source` or
+  `--no-verify`).
 - Stay small. One Go module, flat layout, no embedded VCDIFF — shell out
   to `xdelta3`.
 
@@ -85,16 +90,149 @@ it twice returns the original bytes.
 
 ## CLI
 
-```
-miniscram pack   <bin> <cue> <scram>  -o <out.miniscram>   [--no-verify]
-miniscram unpack <bin>                -o <out.scram>   <in.miniscram>   [--no-verify]
-```
-
-`pack` produces a self-contained `.miniscram` file. `unpack` reproduces
-the original `.scram` from `.bin` + `.miniscram` without needing the
-original `.cue` (parsed track layout is embedded in the manifest).
-
 External runtime dependency: `xdelta3` on `PATH`.
+
+### `miniscram --help`
+
+```
+miniscram — compactly preserve scrambled CD-ROM dumps alongside .bin images.
+
+USAGE:
+    miniscram <command> [arguments] [options]
+    miniscram <command> --help
+    miniscram --version
+
+COMMANDS:
+    pack       pack a .scram into a compact .miniscram container
+    unpack     reproduce a .scram from .bin + .miniscram
+    help       show this help, or 'miniscram help <command>'
+
+ABOUT:
+    miniscram stores the bytes of a .scram (Redumper's scrambled
+    intermediate CD-ROM dump) as a small binary delta against the
+    unscrambled .bin final dump. With this tool and the .bin, you
+    can reproduce the original .scram byte-for-byte. Implements the
+    method from Hauenstein, "Compact Preservation of Scrambled CD-ROM
+    Data" (IJCSIT, August 2022), specialised for Redumper output.
+
+REQUIRES:
+    xdelta3 binary on PATH (e.g. apt install xdelta3)
+
+EXIT CODES:
+    0    success
+    1    usage / input error (missing files, bad arguments)
+    2    layout mismatch — >5% of bin sectors differ from .scram
+         (typically: wrong .scram for this .bin, or unsupported disc)
+    3    xdelta3 failed (encode or decode)
+    4    verification failed (output deleted; source preserved)
+    5    I/O error
+    6    wrong .bin for this .miniscram (sha256 mismatch)
+```
+
+### `miniscram pack --help`
+
+```
+USAGE:
+    miniscram pack <bin> <cue> <scram> -o <out.miniscram> [options]
+
+ARGUMENTS:
+    <bin>      path to the unscrambled CD image (Redumper *.bin)
+    <cue>      path to the cue sheet (Redumper *.cue)
+    <scram>    path to the scrambled intermediate dump (Redumper *.scram)
+
+REQUIRED:
+    -o, --output <path>    where to write the .miniscram container
+
+OPTIONS:
+    --keep-source          do not remove <scram> after a successful
+                           verified pack. By default the source .scram
+                           is removed once verification proves it can
+                           be reconstructed exactly from <bin> + <out>.
+    --no-verify            skip the inline round-trip verification.
+                           implies --keep-source — we will never
+                           auto-delete a source whose recovery has not
+                           been proven.
+    --allow-cross-fs       permit auto-deletion of <scram> when <out>
+                           is on a different filesystem. Default refuses
+                           cross-filesystem deletes: a power-cut between
+                           writing one disk and deleting another can
+                           lose both copies.
+    -q, --quiet            suppress progress output; errors still go
+                           to stderr.
+    -h, --help             show this help.
+
+PIPELINE:
+    1. parse <cue> for track layout (MODE1/2352, MODE2/2352, AUDIO).
+    2. auto-detect the disc's write offset from the first scrambled
+       sync field in <scram>; verify the offset by descrambling the
+       sync's BCD MSF header.
+    3. sample syncs at start, middle, and end of the data region;
+       confirm constant offset (variable-offset discs are not
+       supported and will abort cleanly here).
+    4. build a reconstructed scrambled image (ε̂) from <bin>,
+       comparing against <scram> sector-by-sector to find error
+       sectors. Aborts if >5% of sectors mismatch.
+    5. run 'xdelta3 -e -9 -B <scramSize>' to produce a binary delta
+       from ε̂ to <scram>.
+    6. write the .miniscram container (header + manifest + delta).
+    7. verify by unpacking the freshly-written container and
+       comparing sha256(reconstructed) against sha256(original).
+    8. (default) remove <scram>. suppressed by --keep-source or
+       --no-verify, or if <out> is on a different filesystem and
+       --allow-cross-fs was not passed.
+
+EXAMPLES:
+    # standard archival pack — verifies, then removes <scram>
+    miniscram pack DeusEx.bin DeusEx.cue DeusEx.scram \
+        -o DeusEx.miniscram
+
+    # keep both files (e.g., before deciding to commit a batch)
+    miniscram pack DeusEx.bin DeusEx.cue DeusEx.scram \
+        -o DeusEx.miniscram --keep-source
+
+    # write the container to a different volume and still auto-delete
+    miniscram pack DeusEx.bin DeusEx.cue DeusEx.scram \
+        -o /mnt/archive/DeusEx.miniscram --allow-cross-fs
+```
+
+### `miniscram unpack --help`
+
+```
+USAGE:
+    miniscram unpack <bin> <in.miniscram> -o <out.scram> [options]
+
+ARGUMENTS:
+    <bin>             path to the unscrambled CD image (Redumper *.bin)
+                       — must be the same .bin used when packing
+    <in.miniscram>    path to the .miniscram container produced by
+                       'miniscram pack'
+
+REQUIRED:
+    -o, --output <path>    where to write the reconstructed .scram
+
+OPTIONS:
+    --no-verify       skip sha256 verification of the reconstructed
+                      .scram against the value recorded at pack time.
+                      not recommended; the verification is what proves
+                      you recovered the bytes correctly.
+    -q, --quiet       suppress progress output; errors still go to
+                      stderr.
+    -h, --help        show this help.
+
+PIPELINE:
+    1. read the .miniscram header, manifest, and delta.
+    2. hash <bin> and verify it matches manifest.bin_sha256; abort
+       with exit code 6 if it does not — this would otherwise produce
+       garbage output.
+    3. rebuild ε̂ from <bin> using the layout parameters embedded in
+       the manifest (no .cue required at unpack time).
+    4. run 'xdelta3 -d' to apply the delta and produce <out.scram>.
+    5. verify sha256(<out.scram>) == manifest.scram_sha256. on
+       mismatch, delete <out.scram> and exit non-zero.
+
+EXAMPLES:
+    miniscram unpack DeusEx.bin DeusEx.miniscram -o DeusEx.scram
+```
 
 ## Module layout
 
@@ -112,6 +250,7 @@ miniscram/
   unpack.go       # unpack pipeline
   manifest.go     # JSON manifest + container framing
   xdelta3.go      # subprocess wrapper
+  reporter.go     # human-readable progress reporter (stderr)
   *_test.go
 ```
 
@@ -144,7 +283,14 @@ Inputs: `bin`, `cue`, `scram`. Output: `out.miniscram`.
     into a second temp file; sha256 the result; assert it equals
     `manifest.scram_sha256`. On mismatch, delete the output and exit
     non-zero.
-11. Remove temp files; rename the verified output to its final path.
+11. `fsync` the `.miniscram` file. Rename to its final path. Remove temp
+    files.
+12. **Remove source** (default; suppressed by `--keep-source` or
+    `--no-verify`). Confirm the output is on the same filesystem as the
+    source `.scram` (same `st_dev`); if not, log a warning and skip
+    deletion unless `--allow-cross-fs` was passed. Then `os.Remove(scram)`
+    and log the freed bytes. Failure to delete is non-fatal — the
+    `.miniscram` is already valid.
 
 ## Unpack pipeline
 
@@ -159,6 +305,91 @@ Inputs: `bin`, `in.miniscram`. Output: `out.scram`.
 5. **Verify.** sha256 the output and compare against
    `manifest.scram_sha256`. On mismatch, delete the output and exit
    non-zero.
+
+## Status reporting
+
+Audience is digital preservationists who care intensely about what the
+tool is doing to their data. Default output is human-readable progress
+on stderr (so stdout stays clean for `miniscram unpack ... -o -` style
+piping later if we want it). `--quiet` suppresses everything but errors.
+
+### Reporter interface
+
+```go
+type Reporter interface {
+    Step(label string) StepHandle           // begins a step, returns handle
+    Info(format string, args ...any)        // one-off line
+    Warn(format string, args ...any)
+}
+
+type StepHandle interface {
+    Progress(current, total uint64)         // throttled to ≤1 update / 200ms
+    Done(format string, args ...any)        // closes step with a result line
+    Fail(err error)                         // closes step with ✗ and error
+}
+```
+
+Implementations:
+
+- `TermReporter` for interactive stderr (timestamps, dot-leader fill,
+  ANSI progress bar via `\r`, ✓/✗ glyphs).
+- `PlainReporter` for non-TTY stderr (no progress bars, no ANSI; one
+  line per `Done`/`Fail`/`Info`).
+- `QuietReporter` for `--quiet` (drops everything; `Fail` still bubbles
+  the error up the call stack as usual).
+
+Selection: TTY-detect on stderr, else `PlainReporter`.
+
+### What gets reported
+
+Every operation is wrapped in a `Step`. Concrete steps (in pack order):
+
+| step                                     | progress?           |
+| ---------------------------------------- | ------------------- |
+| parse cue                                | no                  |
+| stat scram                               | no                  |
+| auto-detect write offset                 | no                  |
+| constant-offset sync check               | no                  |
+| hash bin (sha256)                        | yes (bytes hashed)  |
+| hash scram (sha256)                      | yes (bytes hashed)  |
+| build ε̂ + lockstep pre-check            | yes (sectors built) |
+| run xdelta3 -e                           | yes (bytes consumed) |
+| write container                          | no                  |
+| verify (rebuild ε̂ + xdelta3 -d + sha256) | yes (sectors built) |
+| remove source                            | no                  |
+
+Final summary line on success, examples:
+
+```
+✓ pack complete in 47.3s — Δ 14.6 KiB (0.0016% of original .scram)
+                            removed DeusEx_v1002f.scram (856 MiB)
+```
+
+```
+✓ unpack complete in 38.1s — wrote DeusEx_v1002f.scram (856 MiB)
+                              sha256 verified ✓
+```
+
+### Example `pack` output (interactive)
+
+```
+[17:31:04] parsing cue.................................... 1 track Mode 1 ✓
+[17:31:04] stat scram..................................... 856 MiB
+[17:31:04] auto-detecting write offset.................... -48 bytes (BCD MSF 00:00:00 ✓)
+[17:31:04] sampling syncs for constant offset............. 3/3 match ✓
+[17:31:04] hashing bin                            ███████░ 754 MiB sha256:0c1b78bf
+[17:31:06] hashing scram                          ███████░ 856 MiB sha256:abcd1234
+[17:31:08] building ε̂ + lockstep pre-check        ███████░ 381,602 sectors, 0 mismatches ✓
+[17:31:42] running xdelta3 -e -9                          done Δ=14.2 KiB
+[17:32:14] writing container                              14.6 KiB → DeusEx_v1002f.miniscram
+[17:32:14] verifying round-trip                           sha256 matches ✓
+[17:32:18] removing source DeusEx_v1002f.scram (856 MiB)  freed
+✓ pack complete in 1m14s — Δ 14.6 KiB (0.0016% of original .scram)
+```
+
+The intent: at any moment a watching archivist can see exactly what the
+tool is doing to their dump. The "removing source" line is loud and
+obvious; failures at any step fail-fast with a `✗` and a non-zero exit.
 
 ## ε̂ construction
 
