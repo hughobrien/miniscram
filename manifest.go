@@ -17,23 +17,23 @@ const (
 
 // Manifest is the JSON metadata embedded in every .miniscram container.
 type Manifest struct {
-	FormatVersion        int     `json:"format_version"`
-	ToolVersion          string  `json:"tool_version"`
-	CreatedUTC           string  `json:"created_utc"`
-	ScramSize     int64  `json:"scram_size"`
-	ScramMD5      string `json:"scram_md5"`
-	ScramSHA1     string `json:"scram_sha1"`
-	ScramSHA256   string `json:"scram_sha256"`
-	BinSize       int64  `json:"bin_size"`
-	BinMD5        string `json:"bin_md5"`
-	BinSHA1       string `json:"bin_sha1"`
-	BinSHA256     string `json:"bin_sha256"`
-	WriteOffsetBytes     int     `json:"write_offset_bytes"`
-	LeadinLBA            int32   `json:"leadin_lba"`
-	Tracks               []Track `json:"tracks"`
-	BinFirstLBA          int32   `json:"bin_first_lba"`
-	BinSectorCount       int32   `json:"bin_sector_count"`
-	ErrorSectors         []int32 `json:"error_sectors,omitempty"`
+	FormatVersion    int     `json:"format_version"`
+	ToolVersion      string  `json:"tool_version"`
+	CreatedUTC       string  `json:"created_utc"`
+	ScramSize        int64   `json:"scram_size"`
+	ScramMD5         string  `json:"scram_md5"`
+	ScramSHA1        string  `json:"scram_sha1"`
+	ScramSHA256      string  `json:"scram_sha256"`
+	BinSize          int64   `json:"bin_size"`
+	BinMD5           string  `json:"bin_md5"`
+	BinSHA1          string  `json:"bin_sha1"`
+	BinSHA256        string  `json:"bin_sha256"`
+	WriteOffsetBytes int     `json:"write_offset_bytes"`
+	LeadinLBA        int32   `json:"leadin_lba"`
+	Tracks           []Track `json:"tracks"`
+	BinFirstLBA      int32   `json:"bin_first_lba"`
+	BinSectorCount   int32   `json:"bin_sector_count"`
+	ErrorSectors     []int32 `json:"error_sectors,omitempty"`
 	// ErrorSectorCount is the number of sectors that required a delta
 	// override at pack time — i.e., where Pack's bin-driven prediction
 	// disagreed with the real .scram. This is NOT the same as Redumper's
@@ -44,9 +44,9 @@ type Manifest struct {
 	// Redumper reports ~588 — both numbers are correct, they just count
 	// different things. See e2e_redump_test.go's countDataTrackErrors
 	// helper for the Redumper-equivalent metric.
-	ErrorSectorCount int `json:"error_sector_count"`
-	DeltaSize            int64   `json:"delta_size"`
-	ScramblerTableSHA256 string  `json:"scrambler_table_sha256"`
+	ErrorSectorCount     int    `json:"error_sector_count"`
+	DeltaSize            int64  `json:"delta_size"`
+	ScramblerTableSHA256 string `json:"scrambler_table_sha256"`
 }
 
 // Marshal returns the JSON encoding of m, dropping ErrorSectors when
