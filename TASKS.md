@@ -126,45 +126,6 @@ instead"). Probably no — too magical.
 
 ---
 
-### A4. Batch mode — `miniscram pack --recursive <dir>`
-
-**Goal:** Walk a directory tree of one-disc-per-subdir dumps and pack
-each one with a summary at the end. Real archivists have hundreds of
-discs.
-
-**Behavior:**
-- For each subdirectory under `<dir>`: if it contains exactly one
-  `.bin`, one `.cue`, one `.scram`, run pack on them. If 0 or
-  multiple, skip and log.
-- Per-disc options inherited from the top-level invocation
-  (`--keep-source`, `--no-verify`, etc.).
-- Summary at the end: success count, skip count, fail count, total
-  bytes saved.
-- `--continue` to skip already-packed discs (where `<stem>.miniscram`
-  exists and validates).
-
-**Acceptance:**
-- [ ] `miniscram pack --recursive <dir>` works on a tree of clean
-      synthetic dumps.
-- [ ] Per-disc failures don't abort the batch; they're logged and
-      counted.
-- [ ] Summary report at the end matches the per-disc results.
-- [ ] `--continue` is a no-op on already-packed discs that verify.
-
-**Files:** `pack.go` (extend `runPack` to handle the recursive case),
-or new `batch.go` if the change is large; `pack_test.go`.
-
-**Effort:** ~250 LOC. One day.
-
-**Depends on:** nothing critical. A1 (`inspect`) would be nice for
-the `--continue` validation step but not required.
-
-**Open questions:** Should batch mode also support a CSV or JSON
-report file? Probably yes for archivists feeding miniscram into
-spreadsheets.
-
----
-
 ## Theme B — Preservation completeness (highest archival value)
 
 ### B1. Real copy-protected disc test (the *Rune* case)
@@ -305,7 +266,7 @@ accepts `MODE2/2352`.
 
 ## Theme C — Robustness & interop
 
-### C1. Hash algorithm parity with Redumper
+### C1. Hash algorithm parity with Redumper *(shipped 2026-04-28)*
 
 **Goal:** Redump submission templates record md5, sha1, and sha256.
 miniscram currently records only sha256. Adding md5 and sha1 to the
@@ -313,27 +274,26 @@ manifest makes interop with redump.org workflows direct (no separate
 hashing step needed).
 
 **Acceptance:**
-- [ ] Manifest gains `bin_md5`, `bin_sha1` (alongside existing
+- [x] Manifest gains `bin_md5`, `bin_sha1` (alongside existing
       `bin_sha256`).
-- [ ] Same for `scram_md5`, `scram_sha1`, `scram_sha256`.
-- [ ] All three are computed in a single pass per file (use a
-      `hash.Hash` slice and write to all of them simultaneously).
-- [ ] `inspect` shows all three.
-- [ ] At unpack, all three are verified (md5 + sha1 + sha256).
+- [x] Same for `scram_md5`, `scram_sha1`, `scram_sha256`.
+- [x] All three are computed in a single pass per file (single
+      `io.MultiWriter` over MD5/SHA-1/SHA-256 hashes).
+- [x] `inspect` shows all three.
+- [x] At unpack, all three are verified (md5 + sha1 + sha256), with
+      strict any-of-three policy: any single mismatch fails the
+      operation (exit 5 for bin, exit 3 for output).
 
-**Files:** `pack.go` (`sha256File` → `hashFile` returning all three);
-`manifest.go` (new fields); `unpack.go` (verify all three);
-`inspect.go` if A1 has landed.
+**Decision (open question resolved):** Strict any-of-three. We don't
+expect collisions; any divergence between recorded and recomputed
+hashes is treated as real signal, not a hash-impl false alarm.
 
-**Effort:** ~80 LOC. Half a day.
-
-**Depends on:** ideally lands as part of a `format_version` bump
-(see B2's container changes, or do it standalone with `format_version`
-→ 3).
-
-**Open questions:** Whether to keep sha256 as authoritative for the
-"verify failed" exit code, or any-of-three failure. Probably keep
-sha256 authoritative; the others are advisory cross-checks.
+**Outcome:** Container format bumped v0.2 → v0.3 (`format_version` 3,
+container version byte `0x03`). v0.2 containers are rejected with the
+same "re-pack from .bin" migration message v0.1 used. Sentinels
+renamed `errBinSHA256Mismatch` → `errBinHashMismatch` and
+`errOutputSHA256Mismatch` → `errOutputHashMismatch`. New helpers
+`hashFile` and `compareHashes` in `pack.go`; `sha256File` deleted.
 
 ---
 
