@@ -8,11 +8,21 @@ import (
 	"strconv"
 )
 
+// xdelta3SourceWindowCap caps the -B flag passed to xdelta3 -e. xdelta3
+// allocates a buffer this large in memory; CD images can be ~900 MB
+// which is too much. 256 MB is comfortable for the typical case where
+// our ε̂ is sector-aligned with .scram (matches are always nearby).
+const xdelta3SourceWindowCap = 256 * 1024 * 1024
+
 // XDelta3Encode runs `xdelta3 -e -9 -B <window> -f -s <source> <target> <delta>`.
-// The -f flag forces overwrite of an existing delta path. The window
-// is the source window size in bytes; pass at least the source size
-// so xdelta3 can find matches across the whole input.
+// The -f flag forces overwrite of an existing delta path. sourceWindow
+// is the requested source window size in bytes; the actual value passed
+// to xdelta3 is min(sourceWindow, xdelta3SourceWindowCap) to avoid
+// out-of-memory kills on multi-hundred-MB sources.
 func XDelta3Encode(source, target, delta string, sourceWindow int64) error {
+	if sourceWindow > xdelta3SourceWindowCap {
+		sourceWindow = xdelta3SourceWindowCap
+	}
 	args := []string{
 		"-e", "-9", "-f",
 		"-B", strconv.FormatInt(sourceWindow, 10),

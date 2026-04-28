@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 )
@@ -121,17 +122,26 @@ func Pack(opts PackOptions, r Reporter) error {
 		st.Fail(err)
 		return err
 	}
-	defer os.Remove(hatPath)
+	// hatPath is removed below right after xdelta3 -e finishes. We do
+	// NOT defer it: ε̂ is the same size as the .scram (often hundreds of
+	// MB) and the verify step will rebuild a fresh one — keeping both
+	// alive simultaneously can blow up small temp filesystems.
 	st.Done("%d sector(s) differ", len(errSectors))
 
 	// 7. run xdelta3 -e
 	st = r.Step("running xdelta3 -e")
 	deltaPath := hatPath + ".delta"
 	if err := XDelta3Encode(hatPath, opts.ScramPath, deltaPath, scramSize); err != nil {
+		_ = os.Remove(hatPath)
 		st.Fail(err)
 		return err
 	}
 	defer os.Remove(deltaPath)
+	// Free the ε̂ now that the delta is on disk. The verify pass (if
+	// enabled) will rebuild it from scratch.
+	if err := os.Remove(hatPath); err != nil && !os.IsNotExist(err) {
+		r.Warn("could not remove temporary ε̂ %s: %v", hatPath, err)
+	}
 	deltaInfo, err := os.Stat(deltaPath)
 	if err != nil {
 		return err
@@ -323,7 +333,11 @@ func checkConstantOffset(scramPath string, scramSize int64) error {
 }
 
 func buildHatTempFile(opts PackOptions, tracks []Track, scramSize int64, writeOffsetBytes int, binSectors int32) (string, []int32, error) {
-	hatFile, err := os.CreateTemp("", "miniscram-hat-*")
+	// Temp files live next to the output container so they share a
+	// filesystem with the data they're being diffed against. xdelta3 and
+	// our verify pass both stream multi-hundred-MB files; /tmp is often
+	// a small tmpfs.
+	hatFile, err := os.CreateTemp(filepath.Dir(opts.OutputPath), "miniscram-hat-*")
 	if err != nil {
 		return "", nil, err
 	}
@@ -361,7 +375,9 @@ func buildHatTempFile(opts PackOptions, tracks []Track, scramSize int64, writeOf
 }
 
 func verifyRoundTrip(containerPath, binPath string, want *Manifest) error {
-	tmpOut, err := os.CreateTemp("", "miniscram-verify-*")
+	// Recovered .scram is the same size as the original — keep it next
+	// to the container output so we don't fill /tmp.
+	tmpOut, err := os.CreateTemp(filepath.Dir(containerPath), "miniscram-verify-*")
 	if err != nil {
 		return err
 	}

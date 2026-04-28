@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // UnpackOptions holds inputs for Unpack.
@@ -58,9 +59,10 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	}
 	st.Done("matches")
 
-	// 2. rebuild ε̂
+	// 2. rebuild ε̂. ε̂ is the same size as the recovered .scram (often
+	// hundreds of MB), so put it next to the output rather than /tmp.
 	st = r.Step("building ε̂")
-	hatFile, err := os.CreateTemp("", "miniscram-unpack-hat-*")
+	hatFile, err := os.CreateTemp(filepath.Dir(opts.OutputPath), "miniscram-unpack-hat-*")
 	if err != nil {
 		st.Fail(err)
 		return err
