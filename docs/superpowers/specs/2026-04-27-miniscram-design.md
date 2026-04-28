@@ -92,6 +92,63 @@ it twice returns the original bytes.
 
 External runtime dependency: `xdelta3` on `PATH`.
 
+### File discovery
+
+Archivists typically work inside a per-disc directory where every
+sidecar file shares a common stem (`DeusEx_v1002f.bin`,
+`DeusEx_v1002f.cue`, `DeusEx_v1002f.scram`, …). Both `pack` and
+`unpack` accept three input shapes accordingly:
+
+1. **No positional arguments** — discover all inputs from the current
+   directory.
+2. **One positional argument** — interpreted as either a directory or
+   a stem (with an optional path prefix). If the argument is an
+   existing directory, discover inputs from there. Otherwise it is a
+   stem (any known extension is stripped: `.bin`, `.cue`, `.scram`,
+   `.miniscram`). The expected files are `<stem>.bin`, `<stem>.cue`,
+   `<stem>.scram` for `pack`, or `<stem>.bin` and `<stem>.miniscram`
+   for `unpack`.
+3. **Full set of explicit paths** — three for `pack`
+   (`<bin> <cue> <scram>`), two for `unpack` (`<bin> <in.miniscram>`).
+
+Directory-discovery rules (cases 1 and 2 with a directory):
+
+- Exactly one of each required extension → use those.
+- Zero matches for any required extension → error: "no `.bin` file in
+  `<dir>`; pass it explicitly".
+- More than one match for any extension → error: "found 2 `.bin`
+  files in `<dir>`: a.bin, b.bin; please specify explicitly". The tool
+  does **not** try to pair files by stem when the directory contains
+  multiple sets — the user disambiguates by passing the stem
+  explicitly (case 2).
+
+Stem-discovery rules (case 2 with a stem):
+
+- Each `<stem>.<ext>` must exist. Missing files → error naming the
+  exact path that was expected.
+
+Default output paths (used when `-o` is omitted):
+
+- `pack`: `<bin-stem>.miniscram` next to `<bin>`.
+- `unpack`: `<miniscram-stem>.scram` next to `<in.miniscram>`.
+
+If the resolved output path already exists, `pack` and `unpack` refuse
+to overwrite it; pass `-f` / `--force` to overwrite. (Applies to
+explicit `-o` paths too.)
+
+Discovered paths are echoed in the status output so there is never
+ambiguity about which files the tool is operating on.
+
+Examples:
+
+```
+cd ~/dumps/DeusEx_v1002f && miniscram pack          # case 1: cwd
+miniscram pack ~/dumps/DeusEx_v1002f                # case 2: directory
+miniscram pack ~/dumps/DeusEx_v1002f/DeusEx_v1002f  # case 2: stem with path
+miniscram pack DeusEx_v1002f                        # case 2: stem in cwd
+miniscram pack DeusEx.bin DeusEx.cue DeusEx.scram   # case 3: explicit
+```
+
 ### `miniscram --help`
 
 ```
@@ -133,17 +190,24 @@ EXIT CODES:
 
 ```
 USAGE:
-    miniscram pack <bin> <cue> <scram> -o <out.miniscram> [options]
+    miniscram pack [<bin> <cue> <scram>] [-o <out.miniscram>] [options]
 
-ARGUMENTS:
+ARGUMENTS (optional — discovered from the current directory if omitted):
     <bin>      path to the unscrambled CD image (Redumper *.bin)
     <cue>      path to the cue sheet (Redumper *.cue)
     <scram>    path to the scrambled intermediate dump (Redumper *.scram)
 
-REQUIRED:
-    -o, --output <path>    where to write the .miniscram container
+    With no arguments, looks in the current directory for exactly one
+    *.bin, one *.cue, and one *.scram. If any extension matches more
+    than one file, you must pass paths explicitly.
 
 OPTIONS:
+    -o, --output <path>    where to write the .miniscram container.
+                           default: <bin-basename>.miniscram next to
+                           <bin>.
+    -f, --force            overwrite the output file if it already
+                           exists. without this flag the tool refuses
+                           to overwrite.
     --keep-source          do not remove <scram> after a successful
                            verified pack. By default the source .scram
                            is removed once verification proves it can
@@ -162,6 +226,8 @@ OPTIONS:
     -h, --help             show this help.
 
 PIPELINE:
+    0. discover <bin>, <cue>, <scram> from the current directory if
+       not given on the command line.
     1. parse <cue> for track layout (MODE1/2352, MODE2/2352, AUDIO).
     2. auto-detect the disc's write offset from the first scrambled
        sync field in <scram>; verify the offset by descrambling the
@@ -182,35 +248,41 @@ PIPELINE:
        --allow-cross-fs was not passed.
 
 EXAMPLES:
-    # standard archival pack — verifies, then removes <scram>
-    miniscram pack DeusEx.bin DeusEx.cue DeusEx.scram \
-        -o DeusEx.miniscram
+    # cd into a Redumper dump folder and let the tool figure it out
+    cd ~/dumps/DeusEx
+    miniscram pack
+
+    # explicit paths with explicit output
+    miniscram pack DeusEx.bin DeusEx.cue DeusEx.scram -o DeusEx.miniscram
 
     # keep both files (e.g., before deciding to commit a batch)
-    miniscram pack DeusEx.bin DeusEx.cue DeusEx.scram \
-        -o DeusEx.miniscram --keep-source
+    miniscram pack --keep-source
 
     # write the container to a different volume and still auto-delete
-    miniscram pack DeusEx.bin DeusEx.cue DeusEx.scram \
-        -o /mnt/archive/DeusEx.miniscram --allow-cross-fs
+    miniscram pack -o /mnt/archive/DeusEx.miniscram --allow-cross-fs
 ```
 
 ### `miniscram unpack --help`
 
 ```
 USAGE:
-    miniscram unpack <bin> <in.miniscram> -o <out.scram> [options]
+    miniscram unpack [<bin> <in.miniscram>] [-o <out.scram>] [options]
 
-ARGUMENTS:
+ARGUMENTS (optional — discovered from the current directory if omitted):
     <bin>             path to the unscrambled CD image (Redumper *.bin)
                        — must be the same .bin used when packing
     <in.miniscram>    path to the .miniscram container produced by
                        'miniscram pack'
 
-REQUIRED:
-    -o, --output <path>    where to write the reconstructed .scram
+    With no arguments, looks in the current directory for exactly one
+    *.bin and one *.miniscram.
 
 OPTIONS:
+    -o, --output <path>    where to write the reconstructed .scram.
+                           default: <miniscram-basename>.scram next to
+                           <in.miniscram>.
+    -f, --force            overwrite the output file if it already
+                           exists.
     --no-verify       skip sha256 verification of the reconstructed
                       .scram against the value recorded at pack time.
                       not recommended; the verification is what proves
@@ -220,6 +292,8 @@ OPTIONS:
     -h, --help        show this help.
 
 PIPELINE:
+    0. discover <bin> and <in.miniscram> from the current directory if
+       not given on the command line.
     1. read the .miniscram header, manifest, and delta.
     2. hash <bin> and verify it matches manifest.bin_sha256; abort
        with exit code 6 if it does not — this would otherwise produce
@@ -231,6 +305,11 @@ PIPELINE:
        mismatch, delete <out.scram> and exit non-zero.
 
 EXAMPLES:
+    # discover from current directory, default output path
+    cd ~/dumps/DeusEx
+    miniscram unpack
+
+    # explicit paths
     miniscram unpack DeusEx.bin DeusEx.miniscram -o DeusEx.scram
 ```
 
