@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,7 +39,7 @@ func TestCLIPackDiscovers(t *testing.T) {
 	// the CLI test cannot use the synthetic dataset; we test the
 	// real discovery+ flag handling here, and rely on Pack-level tests
 	// for synthetic verification.
-	code := run([]string{"pack", "--help"}, &stderr)
+	code := run([]string{"pack", "--help"}, io.Discard, &stderr)
 	if code != exitOK {
 		t.Fatalf("pack --help exit %d, stderr=%s", code, stderr.String())
 	}
@@ -49,7 +50,7 @@ func TestCLIPackDiscovers(t *testing.T) {
 
 func TestCLIUnknownCommand(t *testing.T) {
 	var stderr bytes.Buffer
-	code := run([]string{"foo"}, &stderr)
+	code := run([]string{"foo"}, io.Discard, &stderr)
 	if code != exitUsage {
 		t.Fatalf("got exit %d, want %d", code, exitUsage)
 	}
@@ -60,7 +61,7 @@ func TestCLIUnknownCommand(t *testing.T) {
 
 func TestCLIVersion(t *testing.T) {
 	var stderr bytes.Buffer
-	code := run([]string{"--version"}, &stderr)
+	code := run([]string{"--version"}, io.Discard, &stderr)
 	if code != exitOK {
 		t.Fatalf("got %d", code)
 	}

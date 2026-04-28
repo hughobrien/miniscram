@@ -3,7 +3,9 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
@@ -14,11 +16,11 @@ import (
 // payload as returned by ReadContainer. If full is true and there is
 // at least one override record, an `overrides:` block is appended.
 //
-// On a framing error walking the delta, the error is appended on its
-// own line under the delta: section; partial output before the failure
-// is preserved. (This matches inspect's "narrow scope" — surface the
-// error, don't try to fsck.)
-func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, full bool) string {
+// On a framing error walking the delta, partial output before the
+// failure is returned as the string and the iterator error is
+// returned as the error. The caller is responsible for routing the
+// error to stderr and producing the I/O exit code (per spec §Errors).
+func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, full bool) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "container:  %s v%d\n", magic, version)
 	b.WriteString("manifest:\n")
@@ -58,10 +60,6 @@ func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, f
 	})
 	b.WriteString("delta:\n")
 	fmt.Fprintf(&b, "  override_records:       %d\n", count)
-	if iterErr != nil {
-		fmt.Fprintf(&b, "  delta_error:            %s\n", iterErr)
-	}
-
 	if full && len(records) > 0 {
 		// Sort by offset for deterministic output (records are emitted in
 		// position order by EncodeDelta, but sorting makes the contract
@@ -73,7 +71,7 @@ func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, f
 			fmt.Fprintf(&b, "  byte_offset=%-12d length=%-5d lba=%d\n", r.off, r.length, lba)
 		}
 	}
-	return b.String()
+	return b.String(), iterErr
 }
 
 // formatJSONInspect emits the manifest JSON verbatim plus a top-level
@@ -158,4 +156,50 @@ func stableInspectFieldOrder(body []byte) []string {
 		}
 	}
 	return keys
+}
+
+// runInspect is the CLI entry point for `miniscram inspect`. Reads the
+// container, formats per --json/--full flags, writes to stdout. Errors
+// go to stderr and produce exit code 4 (I/O); usage errors produce 1.
+func runInspect(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	full := fs.Bool("full", false, "list every override record (no cap)")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	help := fs.Bool("help", false, "show help for inspect")
+	helpShort := fs.Bool("h", false, "show help for inspect")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if *help || *helpShort {
+		printInspectHelp(stderr)
+		return exitOK
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintf(stderr, "expected exactly one container path; got %d\n", fs.NArg())
+		printInspectHelp(stderr)
+		return exitUsage
+	}
+	path := fs.Arg(0)
+	m, delta, err := ReadContainer(path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitIO
+	}
+	if *asJSON {
+		body, err := formatJSONInspect(m, delta)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitIO
+		}
+		fmt.Fprintln(stdout, string(body))
+		return exitOK
+	}
+	human, ferr := formatHumanInspect(m, containerMagic, containerVersion, delta, *full)
+	fmt.Fprint(stdout, human)
+	if ferr != nil {
+		fmt.Fprintln(stderr, ferr)
+		return exitIO
+	}
+	return exitOK
 }

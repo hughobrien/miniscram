@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,7 +53,10 @@ func buildDelta(t *testing.T, offsets []uint64) []byte {
 func TestInspectFormatHumanCleanDelta(t *testing.T) {
 	m := sampleManifest()
 	delta := []byte{0, 0, 0, 0}
-	out := formatHumanInspect(m, "MSCM", 0x02, delta, false)
+	out, err := formatHumanInspect(m, "MSCM", 0x02, delta, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	wantLines := []string{
 		"container:  MSCM v2",
@@ -78,7 +84,10 @@ func TestInspectFormatHumanCleanDelta(t *testing.T) {
 func TestInspectFormatHumanFullListsOverrides(t *testing.T) {
 	m := sampleManifest()
 	delta := buildDelta(t, []uint64{2352, 4704 + 100, 7056})
-	out := formatHumanInspect(m, "MSCM", 0x02, delta, true)
+	out, err := formatHumanInspect(m, "MSCM", 0x02, delta, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(out, "overrides:\n") {
 		t.Errorf("expected overrides: section with --full and 3 records:\n%s", out)
 	}
@@ -100,7 +109,10 @@ func TestInspectFormatHumanFullListsOverrides(t *testing.T) {
 func TestInspectFormatHumanFullEmptyHidesSection(t *testing.T) {
 	m := sampleManifest()
 	delta := []byte{0, 0, 0, 0}
-	out := formatHumanInspect(m, "MSCM", 0x02, delta, true)
+	out, err := formatHumanInspect(m, "MSCM", 0x02, delta, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(out, "overrides:") {
 		t.Errorf("expected no overrides: section when --full and 0 records:\n%s", out)
 	}
@@ -108,10 +120,17 @@ func TestInspectFormatHumanFullEmptyHidesSection(t *testing.T) {
 
 func TestInspectFormatHumanReportsDeltaError(t *testing.T) {
 	m := sampleManifest()
-	delta := []byte{0, 0, 0, 1}
-	out := formatHumanInspect(m, "MSCM", 0x02, delta, false)
-	if !strings.Contains(out, "delta_error:") {
-		t.Errorf("expected delta_error: line for truncated delta:\n%s", out)
+	delta := []byte{0, 0, 0, 1} // count=1, no record follows → framing error
+	out, err := formatHumanInspect(m, "MSCM", 0x02, delta, false)
+	if err == nil {
+		t.Fatal("expected framing error from formatHumanInspect")
+	}
+	if strings.Contains(out, "delta_error:") {
+		t.Errorf("delta_error: marker should not appear in output (it routes via returned error):\n%s", out)
+	}
+	// Partial output through the delta: section header should still be present.
+	if !strings.Contains(out, "delta:\n") {
+		t.Errorf("expected partial output through delta: section:\n%s", out)
 	}
 }
 
@@ -191,11 +210,207 @@ func TestInspectFormatHumanTrackPadding(t *testing.T) {
 		{Number: 1, Mode: "MODE1/2352", FirstLBA: 0},
 		{Number: 2, Mode: "AUDIO", FirstLBA: 12345},
 	}
-	out := formatHumanInspect(m, "MSCM", 0x02, []byte{0, 0, 0, 0}, false)
+	out, err := formatHumanInspect(m, "MSCM", 0x02, []byte{0, 0, 0, 0}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(out, "track 1: MODE1/2352  first_lba=0") {
 		t.Errorf("expected non-padded track 1 line:\n%s", out)
 	}
 	if !strings.Contains(out, "track 2: AUDIO       first_lba=12345") {
 		t.Errorf("expected padded AUDIO line:\n%s", out)
+	}
+}
+
+// packSyntheticContainer builds a real .miniscram on disk via Pack, so
+// CLI tests can hit the actual ReadContainer code path.
+func packSyntheticContainer(t *testing.T) string {
+	t.Helper()
+	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
+	out := filepath.Join(dir, "x.miniscram")
+	rep := NewReporter(io.Discard, true)
+	if err := Pack(PackOptions{
+		BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+		OutputPath: out, LeadinLBA: LBAPregapStart, Verify: true,
+	}, rep); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestCLIInspectHumanOutput(t *testing.T) {
+	path := packSyntheticContainer(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"inspect", path}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"container:  MSCM v2",
+		"manifest:",
+		"tool_version:",
+		"bin_sha256:",
+		"scram_sha256:",
+		"tracks:",
+		"track 1: MODE1/2352",
+		"delta:",
+		"override_records:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestCLIInspectJSONOutput(t *testing.T) {
+	path := packSyntheticContainer(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"inspect", "--json", path}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr=%s", code, stderr.String())
+	}
+	var top map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &top); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, stdout.String())
+	}
+	if _, ok := top["delta_records"]; !ok {
+		t.Errorf("delta_records missing in JSON output: %v", top)
+	}
+	if _, ok := top["bin_sha256"]; !ok {
+		t.Errorf("bin_sha256 missing in JSON output: %v", top)
+	}
+}
+
+func TestCLIInspectFullFlag(t *testing.T) {
+	path := packSyntheticContainer(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"inspect", "--full", path}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "override_records:       0") {
+		t.Errorf("expected override_records: 0 line:\n%s", out)
+	}
+	if strings.Contains(out, "overrides:\n") {
+		t.Errorf("unexpected overrides: section with 0 records:\n%s", out)
+	}
+}
+
+func TestCLIInspectRejectsV1(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v1.miniscram")
+	body := []byte("MSCM\x01\x00\x00\x00\x00")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"inspect", path}, &stdout, &stderr)
+	if code != exitIO {
+		t.Fatalf("exit %d; want %d (exitIO); stderr=%s", code, exitIO, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unsupported container version") {
+		t.Errorf("missing v1 migration error in stderr:\n%s", stderr.String())
+	}
+}
+
+func TestCLIInspectRejectsBadMagic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "junk.miniscram")
+	if err := os.WriteFile(path, []byte("XXXX\x02\x00\x00\x00\x00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"inspect", path}, &stdout, &stderr)
+	if code != exitIO {
+		t.Fatalf("exit %d; want %d", code, exitIO)
+	}
+	if !strings.Contains(stderr.String(), "not a miniscram container") {
+		t.Errorf("missing bad-magic error in stderr:\n%s", stderr.String())
+	}
+}
+
+func TestCLIInspectUsageErrors(t *testing.T) {
+	t.Run("zero positionals", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"inspect"}, &stdout, &stderr)
+		if code != exitUsage {
+			t.Fatalf("exit %d; want %d", code, exitUsage)
+		}
+		if !strings.Contains(stderr.String(), "expected exactly one container path") {
+			t.Errorf("missing usage error message in stderr:\n%s", stderr.String())
+		}
+	})
+	t.Run("two positionals", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"inspect", "a", "b"}, &stdout, &stderr)
+		if code != exitUsage {
+			t.Fatalf("exit %d; want %d", code, exitUsage)
+		}
+		if !strings.Contains(stderr.String(), "expected exactly one container path") {
+			t.Errorf("missing usage error message in stderr:\n%s", stderr.String())
+		}
+	})
+}
+
+func TestCLIInspectHelp(t *testing.T) {
+	t.Run("inspect --help", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"inspect", "--help"}, &stdout, &stderr)
+		if code != exitOK {
+			t.Fatalf("exit %d; stderr=%s", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "miniscram inspect") {
+			t.Errorf("inspect --help did not print help:\n%s", stderr.String())
+		}
+	})
+	t.Run("help inspect", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"help", "inspect"}, &stdout, &stderr)
+		if code != exitOK {
+			t.Fatalf("exit %d; stderr=%s", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "miniscram inspect") {
+			t.Errorf("help inspect did not print help:\n%s", stderr.String())
+		}
+	})
+	t.Run("top-level help lists inspect", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"help"}, &stdout, &stderr)
+		if code != exitOK {
+			t.Fatalf("exit %d", code)
+		}
+		if !strings.Contains(stderr.String(), "inspect") {
+			t.Errorf("top-level help missing inspect command:\n%s", stderr.String())
+		}
+	})
+}
+
+func TestCLIInspectFullWithOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "with-overrides.miniscram")
+	m := sampleManifest()
+	m.BinFirstLBA = 0
+	delta := buildDelta(t, []uint64{2352, 4704, 7056})
+	if err := WriteContainer(path, m, bytes.NewReader(delta)); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"inspect", "--full", path}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "overrides:\n") {
+		t.Errorf("expected overrides: section with --full and 3 records:\n%s", out)
+	}
+	if !strings.Contains(out, "override_records:       3") {
+		t.Errorf("expected override_records: 3:\n%s", out)
+	}
+	for _, want := range []string{"byte_offset=2352", "byte_offset=4704", "byte_offset=7056", "lba=1", "lba=2", "lba=3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in --full output:\n%s", want, out)
+		}
 	}
 }

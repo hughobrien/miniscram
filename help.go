@@ -18,6 +18,10 @@ func printUnpackHelp(w io.Writer) {
 	fmt.Fprint(w, unpackHelpText)
 }
 
+func printInspectHelp(w io.Writer) {
+	fmt.Fprint(w, inspectHelpText)
+}
+
 const topHelpText = `miniscram — compactly preserve scrambled CD-ROM dumps alongside .bin images.
 
 USAGE:
@@ -28,6 +32,7 @@ USAGE:
 COMMANDS:
     pack       pack a .scram into a compact .miniscram container
     unpack     reproduce a .scram from .bin + .miniscram
+    inspect    pretty-print a .miniscram container (read-only)
     help       show this help, or 'miniscram help <command>'
 
 ABOUT:
@@ -83,4 +88,25 @@ OPTIONS:
     --no-verify            skip output sha256 verification.
     -q, --quiet            suppress progress output.
     -h, --help             show this help.
+`
+
+const inspectHelpText = `USAGE:
+    miniscram inspect [--full] [--json] <container>
+
+ARGUMENTS:
+    <container>    path to a .miniscram file
+
+OPTIONS:
+    --full         append a per-record listing of every override
+                   (no cap). without it, only the override count
+                   is printed.
+    --json         emit machine-readable JSON: the manifest verbatim
+                   plus a delta_records array. always includes all
+                   records.
+    -h, --help     show this help.
+
+EXIT CODES:
+    0    success
+    1    usage error (wrong number of positionals, bad flags)
+    4    I/O or container parse error
 `
