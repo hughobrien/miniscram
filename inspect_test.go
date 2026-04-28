@@ -18,8 +18,12 @@ func sampleManifest() *Manifest {
 		ToolVersion:          "miniscram 0.2.0 (go1.22)",
 		CreatedUTC:           "2026-04-28T14:30:21Z",
 		ScramSize:            739729728,
+		ScramMD5:             strings.Repeat("1", 32),
+		ScramSHA1:            strings.Repeat("2", 40),
 		ScramSHA256:          strings.Repeat("c", 64),
 		BinSize:              739729728,
+		BinMD5:               strings.Repeat("3", 32),
+		BinSHA1:              strings.Repeat("4", 40),
 		BinSHA256:            strings.Repeat("a", 64),
 		WriteOffsetBytes:     -52,
 		LeadinLBA:            -150,
@@ -411,6 +415,49 @@ func TestCLIInspectFullWithOverrides(t *testing.T) {
 	for _, want := range []string{"byte_offset=2352", "byte_offset=4704", "byte_offset=7056", "lba=1", "lba=2", "lba=3"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in --full output:\n%s", want, out)
+		}
+	}
+}
+
+func TestInspectShowsAllSixHashes(t *testing.T) {
+	path := packSyntheticContainer(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"inspect", path}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"bin_md5:",
+		"bin_sha1:",
+		"bin_sha256:",
+		"scram_md5:",
+		"scram_sha1:",
+		"scram_sha256:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in inspect output", want)
+		}
+	}
+}
+
+func TestInspectJSONIncludesAllSixHashes(t *testing.T) {
+	path := packSyntheticContainer(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"inspect", "--json", path}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr=%s", code, stderr.String())
+	}
+	var top map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &top); err != nil {
+		t.Fatalf("JSON parse: %v", err)
+	}
+	for _, key := range []string{
+		"bin_md5", "bin_sha1", "bin_sha256",
+		"scram_md5", "scram_sha1", "scram_sha256",
+	} {
+		if v, ok := top[key]; !ok || v == "" {
+			t.Errorf("JSON output missing or empty key %q (got %v)", key, v)
 		}
 	}
 }
