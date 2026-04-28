@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -90,7 +91,7 @@ func Pack(opts PackOptions, r Reporter) error {
 
 	// 4. constant-offset check
 	st = r.Step("checking constant offset")
-	if err := checkConstantOffset(opts.ScramPath, scramSize, opts.LeadinLBA, writeOffsetBytes); err != nil {
+	if err := checkConstantOffset(opts.ScramPath, scramSize); err != nil {
 		st.Fail(err)
 		return err
 	}
@@ -199,49 +200,56 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// detectWriteOffset finds the first scrambled-sync field in the scram
-// file beyond the leadin region and returns the implied write offset
-// in bytes. It also descrambles the candidate sync's MSF header and
-// rejects the result if the LBA is not LBAPregapStart (-150).
+// detectWriteOffset finds the first scrambled-sync field anywhere in
+// the scram file, descrambles its BCD MSF header to recover the LBA
+// that sector represents, and computes the implied write offset.
+//
+// This works for both real Redumper input (where the first sync lands
+// at LBA -150 because Mode 1 zero pregap sectors keep their sync field
+// after scrambling) and the synthetic test fixture (where the first
+// sync lands at LBA 0 because synthDisc emits raw scrambleTable bytes
+// for pregap, which has zero in the sync slots).
 func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 	f, err := os.Open(scramPath)
 	if err != nil {
 		return 0, err
 	}
 	defer f.Close()
-	// search a window around the expected pregap location
-	expectedAt := int64(LBAPregapStart-leadinLBA) * SectorSize
-	const windowBytes = 64 * 1024
-	startAt := expectedAt - windowBytes
-	if startAt < 0 {
-		startAt = 0
-	}
-	if _, err := f.Seek(startAt, io.SeekStart); err != nil {
+	info, err := f.Stat()
+	if err != nil {
 		return 0, err
 	}
-	buf := make([]byte, 4*windowBytes)
-	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	// Search up to 200 MB or the whole file, whichever is smaller. The
+	// first sync in real Redumper input lands ~106 MB in (45000-sector
+	// zero-filled leadin). For the synthetic fixture it lands within
+	// the first MB.
+	const maxSearch = 200 * 1024 * 1024
+	searchLen := info.Size()
+	if searchLen > maxSearch {
+		searchLen = maxSearch
+	}
+	buf := make([]byte, searchLen)
+	if _, err := io.ReadFull(f, buf); err != nil && err != io.ErrUnexpectedEOF {
 		return 0, err
 	}
-	syncIdx := -1
-	for i := 0; i+SyncLen <= n; i++ {
-		ok := true
-		for j := 0; j < SyncLen; j++ {
-			if buf[i+j] != Sync[j] {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			syncIdx = i
-			break
-		}
-	}
+	syncIdx := bytes.Index(buf, Sync[:])
 	if syncIdx < 0 {
-		return 0, errors.New("no scrambled sync field found in expected window")
+		return 0, errors.New("no scrambled sync field found in first 200 MB of scram")
 	}
-	syncOffset := startAt + int64(syncIdx)
+	syncOffset := int64(syncIdx)
+	// Descramble bytes 12..14 of the candidate sector to read the BCD MSF.
+	var header [3]byte
+	if _, err := f.ReadAt(header[:], syncOffset+12); err != nil {
+		return 0, fmt.Errorf("reading header at sync %d: %w", syncOffset, err)
+	}
+	for i := 0; i < 3; i++ {
+		header[i] ^= scrambleTable[12+i]
+	}
+	decodedLBA := BCDMSFToLBA(header)
+	if decodedLBA < leadinLBA || decodedLBA > 500_000 {
+		return 0, fmt.Errorf("first sync's MSF header decodes to implausible LBA %d", decodedLBA)
+	}
+	expectedAt := int64(decodedLBA-leadinLBA) * SectorSize
 	writeOffset := int(syncOffset - expectedAt)
 	if writeOffset%4 != 0 {
 		return 0, fmt.Errorf("auto-detected write offset %d is not sample-aligned", writeOffset)
@@ -249,64 +257,66 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 	if writeOffset > 10*SectorSize || writeOffset < -10*SectorSize {
 		return 0, fmt.Errorf("auto-detected write offset %d is implausibly large", writeOffset)
 	}
-	// descramble the candidate sync's BCD MSF header (bytes 12..14 of the sector).
-	header := [4]byte{}
-	if _, err := f.ReadAt(header[:], syncOffset+12); err != nil {
-		return 0, err
-	}
-	for i := 0; i < 4; i++ {
-		header[i] ^= scrambleTable[12+i]
-	}
-	if BCDMSFToLBA([3]byte{header[0], header[1], header[2]}) != LBAPregapStart {
-		return 0, fmt.Errorf("first sync's BCD MSF header decodes to LBA != %d", LBAPregapStart)
-	}
 	return writeOffset, nil
 }
 
-// checkConstantOffset samples sync positions at the start, middle, and
-// near-end of the data region and confirms they all share the same
-// (offset mod SectorSize) value relative to leadinLBA.
-func checkConstantOffset(scramPath string, scramSize int64, leadinLBA int32, writeOffsetBytes int) error {
+// checkConstantOffset samples sync positions near the start, middle,
+// and end of the scram file and confirms they all share the same
+// (offset % SectorSize) value. A drift here would indicate a
+// variable-offset disc, which miniscram doesn't support.
+func checkConstantOffset(scramPath string, scramSize int64) error {
 	f, err := os.Open(scramPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	leadinBytes := int64(LBAPregapStart-leadinLBA) * SectorSize
-	dataBytes := scramSize - leadinBytes
-	if dataBytes < 4*SectorSize {
-		return nil // too little data to sample
-	}
-	expectedMod := ((leadinBytes+int64(writeOffsetBytes))%int64(SectorSize) + int64(SectorSize)) % int64(SectorSize)
-	checkAt := func(off int64) error {
-		buf := make([]byte, 2*SectorSize)
-		if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
-			return err
-		}
-		for i := 0; i+SyncLen <= len(buf); i++ {
-			ok := true
-			for j := 0; j < SyncLen; j++ {
-				if buf[i+j] != Sync[j] {
-					ok = false
-					break
-				}
+	// findSyncFrom searches forward from startAt (up to the end of the
+	// file) for the first sync field. It reads in 128 KB chunks to
+	// avoid loading the whole file.
+	findSyncFrom := func(startAt int64) (int64, error) {
+		const chunkSize = 128 * 1024
+		pos := startAt
+		for pos < scramSize {
+			readLen := int64(chunkSize)
+			if pos+readLen > scramSize {
+				readLen = scramSize - pos
 			}
-			if ok {
-				absolute := off + int64(i)
-				mod := ((absolute-leadinBytes)%int64(SectorSize) + int64(SectorSize)) % int64(SectorSize)
-				if mod != expectedMod {
-					return fmt.Errorf("variable write offset detected at byte %d (mod %d vs expected %d)",
-						absolute, mod, expectedMod)
-				}
-				return nil
+			buf := make([]byte, readLen)
+			if _, err := f.ReadAt(buf, pos); err != nil && err != io.EOF {
+				return 0, err
+			}
+			idx := bytes.Index(buf, Sync[:])
+			if idx >= 0 {
+				return pos + int64(idx), nil
+			}
+			// advance by chunkSize - SyncLen+1 to not straddle a boundary
+			pos += readLen - int64(SyncLen) + 1
+			if readLen < int64(SyncLen) {
+				break
 			}
 		}
-		return fmt.Errorf("no sync field near byte %d", off)
+		return 0, fmt.Errorf("no sync field found from offset %d", startAt)
 	}
-	mids := []int64{leadinBytes, leadinBytes + dataBytes/2, leadinBytes + dataBytes - 4*SectorSize}
-	for _, m := range mids {
-		if err := checkAt(m); err != nil {
+	if scramSize < 8*SectorSize {
+		return nil // file too small to bother
+	}
+	// Collect at most 3 sync positions spread across the file. We start
+	// the search at 0, scramSize/2, and scramSize*3/4 so that we always
+	// find syncs even when a large pregap occupies the first half of
+	// the file.
+	starts := []int64{0, scramSize / 2, scramSize * 3 / 4}
+	var mods []int64
+	for _, s := range starts {
+		off, err := findSyncFrom(s)
+		if err != nil {
 			return err
+		}
+		mods = append(mods, off%int64(SectorSize))
+	}
+	for i := 1; i < len(mods); i++ {
+		if mods[i] != mods[0] {
+			return fmt.Errorf("variable write offset detected (sync mod %d at sample %d differs from %d at sample 0)",
+				mods[i], i, mods[0])
 		}
 	}
 	return nil
