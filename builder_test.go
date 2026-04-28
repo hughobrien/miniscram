@@ -19,6 +19,32 @@ func TestGenerateMode1ZeroSectorLBAZero(t *testing.T) {
 	}
 }
 
+func TestGenerateLeadoutSectorLBA0(t *testing.T) {
+	sec := generateLeadoutSector(0)
+	// Descramble (Scramble is self-inverse) and check fields.
+	Scramble(&sec)
+	// Sync field unchanged.
+	for i := 0; i < SyncLen; i++ {
+		if sec[i] != Sync[i] {
+			t.Fatalf("sync byte %d = 0x%02x; want 0x%02x", i, sec[i], Sync[i])
+		}
+	}
+	// BCD MSF for LBA 0 is 00:02:00.
+	if sec[12] != 0x00 || sec[13] != 0x02 || sec[14] != 0x00 {
+		t.Fatalf("BCD MSF = %02x %02x %02x; want 00 02 00", sec[12], sec[13], sec[14])
+	}
+	// Mode byte must be 0x00.
+	if sec[15] != 0x00 {
+		t.Fatalf("mode byte = 0x%02x; want 0x00", sec[15])
+	}
+	// Bytes 16..2351 must be zero.
+	for i := 16; i < SectorSize; i++ {
+		if sec[i] != 0 {
+			t.Fatalf("byte %d = 0x%02x; want 0x00", i, sec[i])
+		}
+	}
+}
+
 // synthDisc returns (bin, scram, params) for a small fake disc:
 //   - 100 Mode 1 data sectors with valid sync + BCD MSF header,
 //     starting at LBA 0 (bin).
@@ -65,7 +91,7 @@ func synthDisc(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSecto
 			copy(sec[:], bin[binIdx*SectorSize:(binIdx+1)*SectorSize])
 			Scramble(&sec)
 		default:
-			sec = generateMode1ZeroSector(int32(i) + LBAPregapStart)
+			sec = generateLeadoutSector(int32(i) + LBAPregapStart)
 		}
 		dst := int64(i)*int64(SectorSize) + int64(writeOffsetBytes)
 		// when offset is negative, the first sector's leading bytes are clipped.

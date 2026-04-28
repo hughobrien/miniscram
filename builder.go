@@ -61,6 +61,27 @@ func generateMode1ZeroSector(lba int32) [SectorSize]byte {
 	return sec
 }
 
+// generateLeadoutSector returns the scrambled bytes of a Mode 0 zero
+// sector for the given LBA: sync + BCD MSF header + mode 0x00 + 2336
+// zeros, all scrambled. This matches the convention used by Redumper-
+// dumped Deus Ex (and likely most commercial CD-ROMs) for the leadout
+// region — the disc's "this is the end" filler.
+//
+// Use for LBAs at or after the bin's last sector. For pregap (LBAs in
+// [-150, BinFirstLBA)) use generateMode1ZeroSector instead.
+func generateLeadoutSector(lba int32) [SectorSize]byte {
+	var sec [SectorSize]byte
+	copy(sec[:SyncLen], Sync[:])
+	msf := LBAToBCDMSF(lba)
+	sec[12] = msf[0]
+	sec[13] = msf[1]
+	sec[14] = msf[2]
+	sec[15] = 0x00 // Mode 0 (per ECMA-130 §14.2)
+	// Bytes 16..2351 stay zero. No EDC, no ECC.
+	Scramble(&sec)
+	return sec
+}
+
 // trackModeAt returns the mode of the track whose first LBA is <= lba.
 // Returns "" for LBAs that precede the first track (leadin/pregap).
 // Callers should only consult this for LBAs known to fall inside the
@@ -152,7 +173,7 @@ func BuildEpsilonHat(out io.Writer, p BuildParams, bin io.Reader, scram io.Reade
 				Scramble(&sec)
 			}
 		default:
-			sec = generateMode1ZeroSector(lba)
+			sec = generateLeadoutSector(lba)
 		}
 
 		// Apply skipFirst on the very first sector if needed.
@@ -314,7 +335,7 @@ func BuildEpsilonHatAndDelta(
 				Scramble(&sec)
 			}
 		default:
-			sec = generateMode1ZeroSector(lba)
+			sec = generateLeadoutSector(lba)
 		}
 
 		secBytes := sec[:]
