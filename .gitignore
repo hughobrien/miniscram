@@ -1,0 +1,21 @@
+# Reference papers (kept locally, not version-controlled)
+*.pdf
+
+# Test data / dumps (multi-GB, kept locally)
+/deus-ex/
+
+# Go build artefacts
+/miniscram
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Go workspace state
+go.work.sum
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
