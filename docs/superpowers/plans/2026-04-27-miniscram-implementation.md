@@ -382,8 +382,8 @@ func TestCueDeusExSingleTrack(t *testing.T) {
 }
 
 func TestCueMixedDataAudio(t *testing.T) {
-	// Track 1: data starting at LBA 0 (MSF 00:02:00).
-	// Track 2: audio starting at MSF 04:00:00 = LBA 75*4*60 - 150 = 17850.
+	// Track 1: data starting at LBA 0 (cue MSF 00:00:00).
+	// Track 2: audio starting at cue MSF 04:00:00 = LBA 4*60*75 = 18000.
 	src := `FILE "Mixed.bin" BINARY
   TRACK 01 MODE1/2352
     INDEX 01 00:00:00
@@ -401,7 +401,7 @@ func TestCueMixedDataAudio(t *testing.T) {
 	if got[0].Mode != "MODE1/2352" || got[0].FirstLBA != 0 {
 		t.Fatalf("track 1 = %+v", got[0])
 	}
-	if got[1].Mode != "AUDIO" || got[1].FirstLBA != 17850 {
+	if got[1].Mode != "AUDIO" || got[1].FirstLBA != 18000 {
 		t.Fatalf("track 2 = %+v", got[1])
 	}
 }
@@ -579,7 +579,11 @@ func ParseCue(r io.Reader) ([]Track, error) {
 }
 
 // parseMSF turns "mm:ss:ff" (decimal, not BCD) into an LBA.
-// Example: "00:02:00" → 0; "04:00:00" → 17850.
+// Cuesheet INDEX values use file-relative MSF where 00:00:00 of TRACK
+// 01's INDEX 01 represents the first sector of the file (LBA 0). This
+// is distinct from the disc-physical MSF stored in sector headers
+// (which has the 2-second pregap baked in — see BCDMSFToLBA).
+// Example: "00:00:00" → 0; "04:00:00" → 18000.
 func parseMSF(s string) (int32, error) {
 	parts := strings.Split(s, ":")
 	if len(parts) != 3 {
@@ -597,7 +601,7 @@ func parseMSF(s string) (int32, error) {
 	if err != nil {
 		return 0, err
 	}
-	return int32(m*60*MSFFramesPerSecond+sec*MSFFramesPerSecond+f) - 150, nil
+	return int32(m*60*MSFFramesPerSecond + sec*MSFFramesPerSecond + f), nil
 }
 ```
 
