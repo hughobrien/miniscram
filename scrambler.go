@@ -52,3 +52,9 @@ func CheckScrambleTable() error {
 	}
 	return nil
 }
+
+func init() {
+	if err := CheckScrambleTable(); err != nil {
+		panic(err)
+	}
+}

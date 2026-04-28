@@ -20,14 +20,22 @@ func TestScrambleTableSyncBytesZero(t *testing.T) {
 	}
 }
 
-func TestScrambleTableFirstBytes(t *testing.T) {
+func TestScrambleTableSpotChecks(t *testing.T) {
 	// First post-sync byte is shift & 0xFF after one byte of LFSR
 	// output. With seed 0x0001 the very first value taken is 0x01.
-	if scrambleTable[12] != 0x01 {
-		t.Fatalf("scrambleTable[12] = 0x%02x; want 0x01", scrambleTable[12])
+	cases := []struct {
+		idx  int
+		want byte
+	}{
+		{12, 0x01},
+		{13, 0x80},
+		{1000, 0x7C}, // mid-table spot-check
+		{2351, 0x99}, // last byte
 	}
-	if scrambleTable[13] != 0x80 {
-		t.Fatalf("scrambleTable[13] = 0x%02x; want 0x80", scrambleTable[13])
+	for _, c := range cases {
+		if scrambleTable[c.idx] != c.want {
+			t.Errorf("scrambleTable[%d] = 0x%02x; want 0x%02x", c.idx, scrambleTable[c.idx], c.want)
+		}
 	}
 }
 
