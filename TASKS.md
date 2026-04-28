@@ -88,44 +88,6 @@ the "verification skipped" warning during verify's internal unpack.
 
 ---
 
-### A3. Layout-failure diagnostics
-
-**Goal:** When `BuildEpsilonHatAndDelta` returns a `LayoutMismatchError`,
-the user sees "10000+ sectors differ; first mismatched LBAs:
-[0, 1, 2, 3, …]". Not very helpful for debugging. Better: heuristic
-analysis of the override pattern that suggests probable causes.
-
-**Heuristics to implement:**
-- All mismatched LBAs in arithmetic progression with stride N → likely
-  off-by-N sector misalignment in the cue.
-- Mismatches concentrated in a contiguous run at the start or end →
-  likely wrong `BinFirstLBA` or `BinSectorCount`.
-- Mismatches span every Nth sector → variable-offset disc (which we
-  reject earlier, but `checkConstantOffset`'s 3-sample check might
-  miss subtler patterns).
-- Mismatches uniformly distributed → likely wrong write offset.
-
-**Acceptance:**
-- [ ] `LayoutMismatchError.Error()` includes a "Likely cause:" line
-      derived from the override pattern.
-- [ ] At least three distinct heuristic categories are detected and
-      tested with synthetic fixtures.
-- [ ] Heuristics never produce a false-positive "this is the cause"
-      claim — they say "likely" or "possibly" when uncertain.
-
-**Files:** `builder.go` (modify `LayoutMismatchError` and its `Error`
-method); `builder_test.go` (new heuristic tests).
-
-**Effort:** ~200 LOC + tests. One day.
-
-**Depends on:** nothing.
-
-**Open questions:** Whether the heuristic should attempt a *retry*
-with a corrected guess (e.g. "trying with write_offset = -52
-instead"). Probably no — too magical.
-
----
-
 ## Theme B — Preservation completeness (highest archival value)
 
 ### B1. Real copy-protected disc test (the *Rune* case) *(shipped 2026-04-28; Freelancer/SafeDisc fixture)*
@@ -173,51 +135,6 @@ non-zero lead-in data that produces coincidental sync-pattern
 matches; original code took the first match and aborted. Fix
 iterates candidates and accepts the first BCD-valid + sample-
 aligned offset.
-
----
-
-### B2. Subchannel preservation (`.subcode` integration)
-
-**Goal:** Redumper produces a `.subcode` file with 96 bytes of
-subchannel data per sector. It contains the Q-channel (with ISRC,
-MCN, copy bits), and the P/R/S/T/U/V/W channels. Currently miniscram
-discards it. Preserving it brings miniscram closer to "whole-disc"
-preservation.
-
-**Architecture sketch:**
-- Subchannel is independent of the main-channel data; we don't need
-  EDC/ECC of any kind for it.
-- Pure raw-bytes preservation — for clean discs, the subchannel is
-  highly repetitive (control bits + incrementing ISRC) so it
-  compresses well via the same byte-keyed override format.
-- Predicted "ε̂" for subchannel: assume Q-channel is well-formed
-  with sequential addresses and zero R-W, pre-emit those, diff
-  against actual.
-- Add a second container payload section: `[u32 main_delta_len]
-  [main_delta] [u32 sub_delta_len] [sub_delta]`. Or a second
-  container file `<stem>.miniscram-sub`.
-
-**Acceptance:**
-- [ ] Pack with `--include-subcode` packs the `.subcode` file
-      alongside the main channel.
-- [ ] Unpack reproduces the `.subcode` byte-for-byte.
-- [ ] On Deus Ex, the subchannel delta is also small (likely <10 KiB).
-- [ ] Manifest grows a `subcode_size` and `subcode_sha256` field.
-- [ ] Without `--include-subcode`, behavior is unchanged from v0.2.
-
-**Files:** new `subcode.go`, `subcode_test.go`; touches `pack.go`,
-`unpack.go`, `manifest.go` (new fields, format_version → 3).
-
-**Effort:** Substantial — needs design work first (single container
-vs sidecar file, subchannel "ε̂" model, etc.). Brainstorm + spec +
-plan + implement: 2-3 cycles. Definitely the heaviest item.
-
-**Depends on:** B1 ideally (the protected-disc test would also
-exercise the subchannel path), but not strictly required.
-
-**Open questions:** Major. Bumping `format_version` means another
-v0.1-style migration story. Worth doing alongside any other
-container changes that accumulate.
 
 ---
 
@@ -301,29 +218,6 @@ renamed `errBinSHA256Mismatch` → `errBinHashMismatch` and
 
 ---
 
-### C3. Cross-platform CI
-
-**Goal:** v0.2 spec calls out Linux-only as a known untested gap.
-The codebase is stdlib-only and uses no syscalls, but Windows path
-quirks could bite.
-
-**Acceptance:**
-- [ ] GitHub Actions workflow runs `go test ./...` on Linux, macOS,
-      and Windows runners.
-- [ ] Any platform-specific bugs surfaced are fixed (likely path
-      separator handling in `discover.go` is the main risk).
-- [ ] Build artifacts are produced for all three platforms.
-
-**Files:** `.github/workflows/test.yml` (new); possibly minor edits
-elsewhere.
-
-**Effort:** Half a day, mostly waiting for CI feedback.
-
-**Depends on:** the repo being pushed to GitHub. Currently it lives
-locally on `main` only.
-
----
-
 ## Theme D — Probably not worth doing (flagged for completeness)
 
 These came up during brainstorming but I don't recommend pursuing
@@ -354,6 +248,24 @@ them without a clear motivating use case:
   no scratch disk, byte-offset diagnostics) doesn't justify a
   new subcommand. If the disk-cheap-check becomes a real need,
   add `verify --structural-only` rather than a separate command.
+- **Layout-failure diagnostics.** Was A3. Heuristic "likely cause"
+  analysis of `LayoutMismatchError`'s mismatched-LBA pattern. Worth
+  reconsidering only if a real disc actually triggers
+  `LayoutMismatchError` in practice — currently zero hits across
+  the dataset (clean Deus Ex, SafeDisc Freelancer). Without
+  failure data to ground heuristics on, "Likely cause: …" claims
+  risk being confidently wrong. Revisit when there's a real
+  failure case.
+- **Subchannel (`.subcode`) preservation.** Was B2. miniscram's
+  role is to replace the `.scram` (save disk via structured delta
+  against the `.bin`); subchannel preservation is already handled
+  by Redumper's output bundle (`*_logs.zip` and friends). Re-encoding
+  it inside `.miniscram` adds no archival value over keeping the
+  Redumper bundle alongside.
+- **Cross-platform CI.** Was C3. Multi-OS GitHub Actions matrix.
+  Codebase is stdlib-only with no syscalls, so platform-specific
+  bugs are unlikely. Revisit if/when the repo is pushed to GitHub
+  and someone other than the author starts using it.
 
 ---
 
