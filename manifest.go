@@ -11,7 +11,7 @@ import (
 
 const (
 	containerMagic      = "MSCM"
-	containerVersion    = byte(0x01)
+	containerVersion    = byte(0x02)
 	errorSectorsListCap = 10000
 )
 

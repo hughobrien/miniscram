@@ -10,7 +10,6 @@ import (
 )
 
 func TestUnpackRoundTripSynthDisc(t *testing.T) {
-	ensureXDelta3(t)
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, -48, 10)
 	containerPath := filepath.Join(dir, "x.miniscram")
 	rep := NewReporter(io.Discard, true)
@@ -41,7 +40,6 @@ func TestUnpackRoundTripSynthDisc(t *testing.T) {
 }
 
 func TestUnpackRejectsWrongBin(t *testing.T) {
-	ensureXDelta3(t)
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
 	containerPath := filepath.Join(dir, "x.miniscram")
 	if err := Pack(PackOptions{
@@ -65,7 +63,6 @@ func TestUnpackRejectsWrongBin(t *testing.T) {
 }
 
 func TestUnpackRefusesOverwrite(t *testing.T) {
-	ensureXDelta3(t)
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
 	containerPath := filepath.Join(dir, "x.miniscram")
 	if err := Pack(PackOptions{

@@ -2,8 +2,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -103,30 +105,48 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	hatFile.Close()
 	st.Done("ok")
 
-	// 3. write delta to a temp file (xdelta3 -d needs a real file)
-	deltaFile, err := os.CreateTemp("", "miniscram-unpack-delta-*")
+	// 3. ε̂ is now at hatPath. Rename to opts.OutputPath (or copy on cross-fs failure).
+	if err := os.Rename(hatPath, opts.OutputPath); err != nil {
+		hatF, oerr := os.Open(hatPath)
+		if oerr != nil {
+			st.Fail(oerr)
+			return oerr
+		}
+		outF, oerr := os.Create(opts.OutputPath)
+		if oerr != nil {
+			hatF.Close()
+			st.Fail(oerr)
+			return oerr
+		}
+		_, cerr := io.Copy(outF, hatF)
+		hatF.Close()
+		outF.Close()
+		os.Remove(hatPath)
+		if cerr != nil {
+			st.Fail(cerr)
+			return cerr
+		}
+	}
+	st = r.Step("applying delta")
+	outFile, err := os.OpenFile(opts.OutputPath, os.O_RDWR, 0)
 	if err != nil {
-		return err
-	}
-	deltaPath := deltaFile.Name()
-	defer os.Remove(deltaPath)
-	if _, err := deltaFile.Write(delta); err != nil {
-		deltaFile.Close()
-		return err
-	}
-	if err := deltaFile.Close(); err != nil {
-		return err
-	}
-
-	// 4. run xdelta3 -d
-	st = r.Step("running xdelta3 -d")
-	if err := XDelta3Decode(hatPath, deltaPath, opts.OutputPath); err != nil {
 		st.Fail(err)
 		return err
 	}
-	st.Done("wrote %s", opts.OutputPath)
+	if err := ApplyDelta(outFile, bytes.NewReader(delta)); err != nil {
+		outFile.Close()
+		st.Fail(err)
+		return err
+	}
+	if err := outFile.Sync(); err != nil {
+		outFile.Close()
+		st.Fail(err)
+		return err
+	}
+	outFile.Close()
+	st.Done("%d byte(s) of delta applied", len(delta))
 
-	// 5. verify output sha256
+	// 4. verify output sha256
 	if !opts.Verify {
 		r.Warn("verification skipped (--no-verify)")
 		return nil

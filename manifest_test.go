@@ -10,7 +10,7 @@ import (
 
 func TestContainerRoundtrip(t *testing.T) {
 	m := &Manifest{
-		FormatVersion:        1,
+		FormatVersion:        2,
 		ToolVersion:          "miniscram 0.0.1-test",
 		CreatedUTC:           "2026-04-27T17:00:00Z",
 		ScramSize:            897527784,
@@ -43,6 +43,18 @@ func TestContainerRoundtrip(t *testing.T) {
 	}
 	if !bytes.Equal(gotDelta, delta) {
 		t.Fatalf("delta bytes mismatch")
+	}
+}
+
+func TestContainerRejectsLegacyV1(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v1.miniscram")
+	body := []byte{'M', 'S', 'C', 'M', 0x01, 0, 0, 0, 0}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ReadContainer(path); err == nil {
+		t.Fatal("expected error rejecting v1 container")
 	}
 }
 
