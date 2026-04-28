@@ -34,7 +34,7 @@
     {
       "id": 5,
       "subject": "Task 6: Epsilon-hat builder + lockstep pre-check",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         0
       ],
@@ -43,7 +43,7 @@
     {
       "id": 6,
       "subject": "Task 7: Pack pipeline",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         0,
         1,
@@ -57,7 +57,7 @@
     {
       "id": 7,
       "subject": "Task 8: Unpack pipeline",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         0,
         2,
@@ -71,7 +71,7 @@
     {
       "id": 8,
       "subject": "Task 9: CLI / file discovery / source removal / main",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         6,
         7
@@ -81,12 +81,12 @@
     {
       "id": 9,
       "subject": "Task 10: Real-world Deus Ex end-to-end test (build-tagged)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         8
       ],
       "description": "**Goal:** Full pipeline against the 1.7 GB Deus Ex Redumper dump.\n\n**Files:**\n- Create: e2e_redump_test.go (build tag: redump_data)\n\n**Verify:** `cd /home/hugh/miniscram && go test -tags redump_data -run TestE2EDeusEx -timeout 10m -v`\n\n```json:metadata\n{\"files\":[\"e2e_redump_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -tags redump_data -run TestE2EDeusEx -timeout 10m -v\",\"acceptanceCriteria\":[\"pack succeeds\",\"zero error sectors\",\"delta < 1% of scram\",\"byte-equal recovery\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-04-28T01:59:30Z"
+  "lastUpdated": "2026-04-28T02:30:03Z"
 }
