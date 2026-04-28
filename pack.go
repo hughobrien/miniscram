@@ -121,53 +121,29 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	st.Done("%s", scramSHA[:12])
 
-	// 6. build ε̂ and run lockstep pre-check
-	st = r.Step("building ε̂ + lockstep pre-check")
-	hatPath, errSectors, err := buildHatTempFile(opts, tracks, scramSize, writeOffsetBytes, binSectors)
+	// 6. build ε̂ + delta in one pass
+	st = r.Step("building ε̂ + delta")
+	hatPath, deltaPath, errSectors, deltaSize, err := buildHatAndDelta(opts, tracks, scramSize, writeOffsetBytes, binSectors)
 	if err != nil {
 		st.Fail(err)
 		return err
 	}
-	// hatPath is removed below right after xdelta3 -e finishes. We do
-	// NOT defer it: ε̂ is the same size as the .scram (often hundreds of
-	// MB) and the verify step will rebuild a fresh one — keeping both
-	// alive simultaneously can blow up small temp filesystems.
-	st.Done("%d sector(s) differ", len(errSectors))
-
-	// Track ε̂ removal explicitly so we can free it before the verify
-	// pass rebuilds a fresh one (ε̂ is the same size as .scram, often
-	// hundreds of MB; keeping two alive simultaneously can blow up
-	// small temp filesystems). The deferred remove is a safety net in
-	// case we return early before the explicit free.
+	defer os.Remove(deltaPath)
 	hatRemoved := false
 	defer func() {
 		if !hatRemoved {
 			_ = os.Remove(hatPath)
 		}
 	}()
-
-	// 7. run xdelta3 -e
-	st = r.Step("running xdelta3 -e")
-	deltaPath := hatPath + ".delta"
-	if err := XDelta3Encode(hatPath, opts.ScramPath, deltaPath, scramSize); err != nil {
-		st.Fail(err)
-		return err
-	}
-	defer os.Remove(deltaPath)
-	deltaInfo, err := os.Stat(deltaPath)
-	if err != nil {
-		return err
-	}
+	// Free ε̂ now; verify will rebuild it.
 	if err := os.Remove(hatPath); err == nil {
 		hatRemoved = true
-	} else if !os.IsNotExist(err) {
-		r.Warn("could not remove temporary ε̂ %s: %v", hatPath, err)
 	}
-	st.Done("%d bytes", deltaInfo.Size())
+	st.Done("%d override(s), delta %d bytes", len(errSectors), deltaSize)
 
-	// 8. assemble manifest and write container
+	// 7. assemble manifest and write container
 	m := &Manifest{
-		FormatVersion:        1,
+		FormatVersion:        2,
 		ToolVersion:          toolVersion + " (" + runtime.Version() + ")",
 		CreatedUTC:           time.Now().UTC().Format(time.RFC3339),
 		ScramSize:            scramSize,
@@ -181,25 +157,25 @@ func Pack(opts PackOptions, r Reporter) error {
 		BinSectorCount:       binSectors,
 		ErrorSectors:         errSectors,
 		ErrorSectorCount:     len(errSectors),
-		DeltaSize:            deltaInfo.Size(),
+		DeltaSize:            deltaSize,
 		ScramblerTableSHA256: expectedScrambleTableSHA256,
 	}
 
 	st = r.Step("writing container")
-	deltaFile, err := os.Open(deltaPath)
+	deltaF, err := os.Open(deltaPath)
 	if err != nil {
 		st.Fail(err)
 		return err
 	}
-	if err := WriteContainer(opts.OutputPath, m, deltaFile); err != nil {
-		deltaFile.Close()
+	if err := WriteContainer(opts.OutputPath, m, deltaF); err != nil {
+		deltaF.Close()
 		st.Fail(err)
 		return err
 	}
-	deltaFile.Close()
+	deltaF.Close()
 	st.Done("%s", opts.OutputPath)
 
-	// 9. verify by round-tripping (unless --no-verify)
+	// 8. verify by round-tripping (unless --no-verify)
 	if !opts.Verify {
 		r.Warn("verification skipped (--no-verify)")
 		return nil
@@ -383,29 +359,42 @@ func checkConstantOffset(scramPath string, scramSize int64) error {
 	return nil
 }
 
-func buildHatTempFile(opts PackOptions, tracks []Track, scramSize int64, writeOffsetBytes int, binSectors int32) (string, []int32, error) {
-	// Temp files live next to the output container so they share a
-	// filesystem with the data they're being diffed against. xdelta3 and
-	// our verify pass both stream multi-hundred-MB files; /tmp is often
-	// a small tmpfs.
+// buildHatAndDelta produces the ε̂ temp file and the delta temp file
+// in one pass. Returns paths to both plus the override LBA list and
+// the delta payload size in bytes.
+func buildHatAndDelta(opts PackOptions, tracks []Track, scramSize int64, writeOffsetBytes int, binSectors int32) (string, string, []int32, int64, error) {
 	hatFile, err := os.CreateTemp(filepath.Dir(opts.OutputPath), "miniscram-hat-*")
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, 0, err
 	}
 	hatPath := hatFile.Name()
-	defer func() {
-		_ = hatFile.Close()
-	}()
+	deltaFile, err := os.CreateTemp(filepath.Dir(opts.OutputPath), "miniscram-delta-*")
+	if err != nil {
+		hatFile.Close()
+		os.Remove(hatPath)
+		return "", "", nil, 0, err
+	}
+	deltaPath := deltaFile.Name()
+
 	binFile, err := os.Open(opts.BinPath)
 	if err != nil {
-		return "", nil, err
+		hatFile.Close()
+		deltaFile.Close()
+		os.Remove(hatPath)
+		os.Remove(deltaPath)
+		return "", "", nil, 0, err
 	}
 	defer binFile.Close()
 	scramFile, err := os.Open(opts.ScramPath)
 	if err != nil {
-		return "", nil, err
+		hatFile.Close()
+		deltaFile.Close()
+		os.Remove(hatPath)
+		os.Remove(deltaPath)
+		return "", "", nil, 0, err
 	}
 	defer scramFile.Close()
+
 	params := BuildParams{
 		LeadinLBA:        opts.LeadinLBA,
 		WriteOffsetBytes: writeOffsetBytes,
@@ -414,15 +403,23 @@ func buildHatTempFile(opts PackOptions, tracks []Track, scramSize int64, writeOf
 		BinSectorCount:   binSectors,
 		Tracks:           tracks,
 	}
-	errs, err := BuildEpsilonHat(hatFile, params, binFile, scramFile)
+	_, errs, err := BuildEpsilonHatAndDelta(hatFile, deltaFile, params, binFile, scramFile)
+	hatFile.Sync()
+	deltaFile.Sync()
+	hatFile.Close()
+	deltaFile.Close()
 	if err != nil {
 		os.Remove(hatPath)
-		return "", nil, err
+		os.Remove(deltaPath)
+		return "", "", nil, 0, err
 	}
-	if err := hatFile.Sync(); err != nil {
-		return "", nil, err
+	deltaInfo, err := os.Stat(deltaPath)
+	if err != nil {
+		os.Remove(hatPath)
+		os.Remove(deltaPath)
+		return "", "", nil, 0, err
 	}
-	return hatPath, errs, nil
+	return hatPath, deltaPath, errs, deltaInfo.Size(), nil
 }
 
 func verifyRoundTrip(containerPath, binPath string, want *Manifest) error {

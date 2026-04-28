@@ -163,6 +163,31 @@ func TestBuilderRefusesAtTooManyMismatches(t *testing.T) {
 	}
 }
 
+func TestBuildEpsilonHatAndDeltaCleanRoundTrip(t *testing.T) {
+	bin, scram, params := synthDisc(t, 100, -48, 10)
+	var hatBuf bytes.Buffer
+	var deltaBuf bytes.Buffer
+	count, errs, err := BuildEpsilonHatAndDelta(
+		&hatBuf, &deltaBuf, params,
+		bytes.NewReader(bin), bytes.NewReader(scram),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 || len(errs) != 0 {
+		t.Fatalf("expected 0 overrides, got count=%d errs=%v", count, errs)
+	}
+	if int64(hatBuf.Len()) != params.ScramSize {
+		t.Fatalf("ε̂ size %d != scramSize %d", hatBuf.Len(), params.ScramSize)
+	}
+	if !bytes.Equal(hatBuf.Bytes(), scram) {
+		t.Fatal("ε̂ != scram on clean disc")
+	}
+	if !bytes.Equal(deltaBuf.Bytes(), []byte{0, 0, 0, 0}) {
+		t.Fatalf("delta = % x; want 00 00 00 00", deltaBuf.Bytes())
+	}
+}
+
 func TestBuilderCleanRoundTripPositiveOffset(t *testing.T) {
 	bin, scram, params := synthDisc(t, 100, 48, 10)
 	var hat bytes.Buffer

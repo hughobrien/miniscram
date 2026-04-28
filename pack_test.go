@@ -37,7 +37,6 @@ func writeSynthDiscFiles(t *testing.T, mainSectors int, writeOffsetBytes int, le
 }
 
 func TestPackCleanDisc(t *testing.T) {
-	ensureXDelta3(t)
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
 	// synthDisc above uses LeadinLBA = -150 (no leadin). Real Pack uses
 	// LBALeadinStart = -45150, so we override via PackOptions.LeadinLBA.
@@ -73,7 +72,6 @@ func TestPackCleanDisc(t *testing.T) {
 }
 
 func TestPackDetectsNegativeWriteOffset(t *testing.T) {
-	ensureXDelta3(t)
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, -48, 10)
 	outPath := filepath.Join(dir, "x.miniscram")
 	err := Pack(PackOptions{
