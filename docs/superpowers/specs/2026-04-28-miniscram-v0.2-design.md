@@ -23,8 +23,10 @@ discovery, source removal, container framing, manifest schema (with
 
 ## Non-goals
 
-- Backward-compatibility with v1 containers. v2 readers reject v1
-  containers cleanly via the existing version-byte check.
+- Backward-compatibility with v1 containers. v0.1 was a development
+  milestone, not a shipped release; no real-world v1 containers
+  exist. v2 readers reject v1 containers cleanly via the existing
+  version-byte check, and that's the entire migration story.
 - General-purpose binary diff. The structured delta is tailored to
   miniscram's "ε̂ vs scram" pattern.
 - Mode 2 EDC/ECC. Mode 2 sectors don't carry the same EDC/ECC fields
@@ -459,16 +461,3 @@ Not relevant: miniscram doesn't touch audio offsets. Audio sectors
 in `.bin` are passed through unscrambled and round-trip exactly via
 the byte-keyed delta mechanism.
 
-## Migration path from v0.1
-
-1. v0.1 containers (`format_version: 1`) cannot be unpacked by v0.2.
-   The v0.2 unpacker rejects them with the existing "unsupported
-   container version 0x01 (this build expects 0x02)" message.
-2. To migrate, run `miniscram unpack` with v0.1 to recover the
-   `.scram`, then `miniscram pack` with v0.2.
-3. Don't auto-delete the source on the v0.1 side until you've
-   verified the v0.2 round-trip works.
-
-A future v0.3 *could* add a v0.1 reader for backward compatibility,
-but at this stage no real-world v0.1 containers exist outside
-development environments.
