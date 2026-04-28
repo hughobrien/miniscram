@@ -15,7 +15,7 @@ for the architectural baseline.
 
 ## Theme A — Archivist UX (small, high daily value)
 
-### A1. `miniscram inspect <miniscram>` subcommand
+### A1. `miniscram inspect <miniscram>` subcommand *(shipped 2026-04-28)*
 
 **Goal:** Read-only pretty-print of a `.miniscram` container for an
 archivist auditing or debugging a packed file.
@@ -33,13 +33,15 @@ archivist auditing or debugging a packed file.
   via `--full`).
 
 **Acceptance:**
-- [ ] `miniscram inspect <path>` works for any v2 container.
-- [ ] Refuses v1 containers with the existing version-byte error.
-- [ ] Reads container without writing or temp files.
-- [ ] Output is greppable; one field per line.
-- [ ] `--json` flag emits the manifest verbatim plus a `delta_records`
+- [x] `miniscram inspect <path>` works for any current-version container.
+      (Container is now v3 since C1; rejects older versions with a
+      migration error.)
+- [x] Refuses v1 / v2 containers with the version-byte error.
+- [x] Reads container without writing or temp files.
+- [x] Output is greppable; one field per line.
+- [x] `--json` flag emits the manifest verbatim plus a `delta_records`
       array (count, offsets, lengths — no payload bytes).
-- [ ] `inspect --help` documents the format.
+- [x] `inspect --help` documents the format.
 
 **Files:** new `inspect.go`, `inspect_test.go`; touches `main.go`
 (subcommand dispatch) and `help.go`.
@@ -52,7 +54,7 @@ archivist auditing or debugging a packed file.
 
 ---
 
-### A2. `miniscram verify <bin> <miniscram>` subcommand
+### A2. `miniscram verify <bin> <miniscram>` subcommand *(shipped 2026-04-28)*
 
 **Goal:** Non-destructive integrity check. Rebuild ε̂, apply delta,
 hash the result, compare against `manifest.scram_sha256` — but
@@ -60,31 +62,29 @@ hash the result, compare against `manifest.scram_sha256` — but
 without taking the multi-hundred-MB disk hit of `unpack`.
 
 **Acceptance:**
-- [ ] `miniscram verify` runs without producing any output file.
-- [ ] Reports OK / FAIL, with the manifest's recorded sha256 and the
-      computed sha256 on FAIL.
-- [ ] Same input shapes as `unpack` (cwd / stem / explicit; default
+- [x] `miniscram verify` runs without producing any output file.
+- [x] Reports OK / FAIL, with the manifest's recorded hashes and the
+      computed hashes on FAIL. (After C1: all three hashes are
+      compared, strict any-of-three policy.)
+- [x] Same input shapes as `unpack` (cwd / stem / explicit; default
       no `-o`).
-- [ ] Build ε̂ to a temp file (we need somewhere for ApplyDelta to
-      WriteAt), then sha256 the temp file, then delete it. Document
-      that this temporarily uses ~scram_size of disk.
-- [ ] Exit codes: 0 success, 3 verification failed, 4 I/O error,
-      5 wrong .bin (sha256 mismatch with manifest).
-- [ ] Reporter shows the same step list as unpack minus "wrote .scram".
+- [x] Build ε̂ to a temp file (Unpack handles this internally), hash
+      the temp file, then delete it. Documented as temporarily using
+      ~scram_size of disk.
+- [x] Exit codes: 0 success, 3 verification failed, 4 I/O error,
+      5 wrong .bin (hash mismatch with manifest).
+- [x] Reporter shows the same step list as unpack minus the final
+      output write.
 
-**Files:** new `verify.go`, `verify_test.go`; touches `main.go` and
-`help.go`. Reuses `BuildEpsilonHat` and `ApplyDelta` directly.
+**Decision (open question resolved):** No `--full-bin-check` flag;
+the normal flow already fast-exits on wrong bin via the bin-hash
+check at step 3.
 
-**Effort:** ~120 LOC. Half a day.
-
-**Depends on:** A1's manifest formatting helpers can be shared if
-A1 lands first; not strictly required.
-
-**Open questions:** Whether to add a `--full-bin-check` flag that
-also verifies the bin sha256 against `manifest.bin_sha256` (we already
-do this implicitly, but a fast path that skips ε̂ rebuild entirely
-when the bin doesn't match manifest would save time on the common
-"wrong bin" mistake).
+**Outcome:** New `Verify` Go function in `verify.go`; thin
+`runVerify` CLI wrapper in `main.go`. Wraps `Unpack(Verify:false)`
+to a tempfile, then `hashFile` + `compareHashes` against the
+manifest. `UnpackOptions.SuppressVerifyWarning` added to silence
+the "verification skipped" warning during verify's internal unpack.
 
 ---
 
@@ -128,7 +128,7 @@ instead"). Probably no — too magical.
 
 ## Theme B — Preservation completeness (highest archival value)
 
-### B1. Real copy-protected disc test (the *Rune* case)
+### B1. Real copy-protected disc test (the *Rune* case) *(shipped 2026-04-28; Freelancer/SafeDisc fixture)*
 
 **Goal:** The whole motivation of the Hauenstein paper is preserving
 hidden text in error sectors of copy-protected discs (notably *Rune*,
@@ -145,30 +145,34 @@ would prove that:
    intentional EDC/ECC corruption).
 
 **Acceptance:**
-- [ ] At least one real Redumper dump of a copy-protected disc is
-      added to `deus-ex/` (or a new sibling dir) — gated behind the
-      `redump_data` build tag so the dataset is optional.
-- [ ] An e2e test packs and unpacks the protected disc; round-trip
+- [x] At least one real Redumper dump of a copy-protected disc is
+      runnable via the `redump_data` build tag. Freelancer
+      (SafeDisc 2.70.030, 588 documented intentional errors) lives
+      at `freelancer/` (gitignored).
+- [x] An e2e test packs and unpacks the protected disc; round-trip
       is byte-equal.
-- [ ] `manifest.error_sector_count` is non-zero and matches the
-      disc's known intentional-error count (from the Redumper
-      submission info).
-- [ ] Spot-check: descramble one error sector from the recovered
-      `.scram`, dump its bytes, confirm the hidden content (e.g.
-      Rune's text string) is present.
+- [x] Data-track ECC/EDC error count is asserted exactly. Test-side
+      `countDataTrackErrors` walks the bin and counts invalid-EDC
+      sectors; for Freelancer that's 588 (a stable SafeDisc-class
+      signature). `manifest.error_sector_count` is *not* the same
+      metric — see manifest.go's ErrorSectorCount comment for why.
+- [~] Spot-check waived: byte-equal round-trip already proves every
+      byte of the protection sectors (including deliberately-broken
+      EDC) is preserved. No SafeDisc-specific descramble-and-look-for-
+      string check needed.
 
-**Files:** `e2e_redump_test.go` (new test); test data lives outside
-git via `.gitignore`.
+**Outcome:** Table-driven `TestE2ERoundTripRealDiscs` and
+`TestE2EEDCAndECCRealDiscs` in `e2e_redump_test.go`, each ranging
+over a `realDiscFixtures` slice. Currently 2 fixtures: deus-ex
+(skipped, data absent) and freelancer (running). HL1 multi-track
+fixture deferred — needs multi-FILE `.cue` support first.
 
-**Effort:** Mostly procurement (finding/downloading a known
-protected disc dump in Redumper format). Test code is ~80 LOC.
-
-**Depends on:** access to a copy-protected dump. Public databases
-like redump.org list protected titles; some hashes are in the
-documentation.
-
-**Open questions:** Whether to also include LibCrypt PSX as a second
-real-world fixture (different protection scheme).
+**Side effect:** Surfaced and fixed a real bug in `pack.go`'s
+`detectWriteOffset` — real Redumper dumps of protected discs have
+non-zero lead-in data that produces coincidental sync-pattern
+matches; original code took the first match and aborted. Fix
+iterates candidates and accepts the first BCD-valid + sample-
+aligned offset.
 
 ---
 
