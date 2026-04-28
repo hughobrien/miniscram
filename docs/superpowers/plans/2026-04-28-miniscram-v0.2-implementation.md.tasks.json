@@ -10,13 +10,13 @@
     {
       "id": 1,
       "subject": "Task 2: ECC implementation (ECMA-130 \u00a714.5/14.6 + Annex A)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Pure-Go RSPC over GF(256). Computes 276 bytes of P+Q parity for Mode 1 sectors.\n\n**Files:** ecc.go, ecc_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run 'TestECC|TestGF' -v`\n\n```json:metadata\n{\"files\":[\"ecc.go\",\"ecc_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run 'TestECC|TestGF' -v\",\"acceptanceCriteria\":[\"GF table invariants\",\"GF table sha256\",\"LBA-0 ECC sha256\",\"LBA-0 full sector sha256\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 3: Smarter builder pregap/leadout + LBAToBCDMSF",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         0,
         1
@@ -26,13 +26,13 @@
     {
       "id": 3,
       "subject": "Task 4: Structured delta format (delta.go)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Byte-keyed override list with EncodeDelta and ApplyDelta.\n\n**Files:** delta.go, delta_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -run TestDelta -v`\n\n```json:metadata\n{\"files\":[\"delta.go\",\"delta_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -run TestDelta -v\",\"acceptanceCriteria\":[\"empty diff is 4 bytes\",\"single byte override\",\"coalescing\",\"non-adjacent separated\",\"apply round-trip\",\"truncated rejected\"]}\n```"
     },
     {
       "id": 4,
       "subject": "Task 5: BuildEpsilonHatAndDelta + Pack/Unpack rewire + container v2",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         2,
         3
@@ -58,5 +58,5 @@
       "description": "**Goal:** Tighten e2e test: delta < 1024 bytes, .miniscram < 2 KiB. Add EDC/ECC cross-validation.\n\n**Files:** e2e_redump_test.go\n\n**Verify:** `cd /home/hugh/miniscram && go test -tags redump_data -run TestE2EDeusEx -timeout 10m -v`\n\n```json:metadata\n{\"files\":[\"e2e_redump_test.go\"],\"verifyCommand\":\"cd /home/hugh/miniscram && go test -tags redump_data -run 'TestE2EDeusEx|TestEDCAndECCAgainstDeusEx' -timeout 10m -v\",\"acceptanceCriteria\":[\"delta < 1024\",\"container < 2 KiB\",\"byte-equal recovery\",\"EDC/ECC validate vs real sectors\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-04-28T05:54:05Z"
+  "lastUpdated": "2026-04-28T06:10:51Z"
 }

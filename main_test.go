@@ -4,15 +4,11 @@ package main
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
 
 func TestCLIPackDiscovers(t *testing.T) {
-	if _, err := exec.LookPath("xdelta3"); err != nil {
-		t.Skip("xdelta3 not available")
-	}
 	dir := t.TempDir()
 	binPath, _, scramPath, _ := writeSynthDiscFiles(t, 100, 0, 10)
 	// move the synth files into a clean dir so cwd discovery is unambiguous

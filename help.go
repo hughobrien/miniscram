@@ -30,17 +30,21 @@ COMMANDS:
     unpack     reproduce a .scram from .bin + .miniscram
     help       show this help, or 'miniscram help <command>'
 
-REQUIRES:
-    xdelta3 binary on PATH (e.g. apt install xdelta3)
+ABOUT:
+    miniscram stores the bytes of a .scram (Redumper's scrambled
+    intermediate CD-ROM dump) as a small structured delta against the
+    unscrambled .bin final dump. With this tool and the .bin, you
+    can reproduce the original .scram byte-for-byte. Implements the
+    method from Hauenstein, "Compact Preservation of Scrambled CD-ROM
+    Data" (IJCSIT, August 2022), specialised for Redumper output.
 
 EXIT CODES:
     0    success
     1    usage / input error
     2    layout mismatch
-    3    xdelta3 failed
-    4    verification failed
-    5    I/O error
-    6    wrong .bin for this .miniscram
+    3    verification failed
+    4    I/O error
+    5    wrong .bin for this .miniscram
 `
 
 const packHelpText = `USAGE:

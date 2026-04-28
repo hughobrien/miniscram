@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -18,9 +17,6 @@ const (
 )
 
 func TestE2EDeusEx(t *testing.T) {
-	if _, err := exec.LookPath("xdelta3"); err != nil {
-		t.Skip("xdelta3 not on PATH")
-	}
 	if _, err := os.Stat(filepath.Join(deusExDir, deusExStem+".scram")); err != nil {
 		t.Skipf("deus ex dataset not present: %v", err)
 	}
