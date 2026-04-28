@@ -215,3 +215,38 @@ func TestCompareHashes_AllMismatch(t *testing.T) {
 		}
 	}
 }
+
+func TestPackPopulatesAllSixHashFields(t *testing.T) {
+	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
+	containerPath := filepath.Join(dir, "x.miniscram")
+	if err := Pack(PackOptions{
+		BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
+	}, NewReporter(io.Discard, true)); err != nil {
+		t.Fatal(err)
+	}
+	m, _, err := ReadContainer(containerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]string{
+		"BinMD5":      m.BinMD5,
+		"BinSHA1":     m.BinSHA1,
+		"BinSHA256":   m.BinSHA256,
+		"ScramMD5":    m.ScramMD5,
+		"ScramSHA1":   m.ScramSHA1,
+		"ScramSHA256": m.ScramSHA256,
+	} {
+		if got == "" {
+			t.Errorf("%s is empty in manifest", name)
+		}
+	}
+	// Cross-check: recompute bin hashes via hashFile and compare.
+	fresh, err := hashFile(binPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.MD5 != m.BinMD5 || fresh.SHA1 != m.BinSHA1 || fresh.SHA256 != m.BinSHA256 {
+		t.Errorf("bin hashes don't match a fresh hashFile run")
+	}
+}

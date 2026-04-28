@@ -109,20 +109,20 @@ func Pack(opts PackOptions, r Reporter) error {
 
 	// 5. hash bin and scram
 	st = r.Step("hashing bin")
-	binSHA, err := sha256File(opts.BinPath)
+	binHashes, err := hashFile(opts.BinPath)
 	if err != nil {
 		st.Fail(err)
 		return err
 	}
-	st.Done("%s", binSHA[:12])
+	st.Done("%s", binHashes.SHA256[:12])
 
 	st = r.Step("hashing scram")
-	scramSHA, err := sha256File(opts.ScramPath)
+	scramHashes, err := hashFile(opts.ScramPath)
 	if err != nil {
 		st.Fail(err)
 		return err
 	}
-	st.Done("%s", scramSHA[:12])
+	st.Done("%s", scramHashes.SHA256[:12])
 
 	// 6. build ε̂ + delta in one pass
 	st = r.Step("building ε̂ + delta")
@@ -146,13 +146,17 @@ func Pack(opts PackOptions, r Reporter) error {
 
 	// 7. assemble manifest and write container
 	m := &Manifest{
-		FormatVersion:        2,
+		FormatVersion:        3,
 		ToolVersion:          toolVersion + " (" + runtime.Version() + ")",
 		CreatedUTC:           time.Now().UTC().Format(time.RFC3339),
 		ScramSize:            scramSize,
-		ScramSHA256:          scramSHA,
+		ScramMD5:             scramHashes.MD5,
+		ScramSHA1:            scramHashes.SHA1,
+		ScramSHA256:          scramHashes.SHA256,
 		BinSize:              binSize,
-		BinSHA256:            binSHA,
+		BinMD5:               binHashes.MD5,
+		BinSHA1:              binHashes.SHA1,
+		BinSHA256:            binHashes.SHA256,
 		WriteOffsetBytes:     writeOffsetBytes,
 		LeadinLBA:            opts.LeadinLBA,
 		Tracks:               tracks,
@@ -191,19 +195,6 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	st.Done("ok")
 	return nil
-}
-
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // FileHashes holds the three hashes miniscram records per file.
@@ -519,12 +510,13 @@ func verifyRoundTrip(containerPath, binPath string, want *Manifest) error {
 	}, quietReporter{}); err != nil {
 		return err
 	}
-	got, err := sha256File(tmpOutPath)
+	got, err := hashFile(tmpOutPath)
 	if err != nil {
 		return err
 	}
-	if got != want.ScramSHA256 {
-		return fmt.Errorf("%w: round-trip sha256 %s != recorded %s", errVerifyMismatch, got, want.ScramSHA256)
+	wantHashes := FileHashes{MD5: want.ScramMD5, SHA1: want.ScramSHA1, SHA256: want.ScramSHA256}
+	if err := compareHashes(got, wantHashes); err != nil {
+		return fmt.Errorf("%w: round-trip hash mismatch: %v", errVerifyMismatch, err)
 	}
 	return nil
 }

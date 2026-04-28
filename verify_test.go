@@ -54,7 +54,7 @@ func TestVerifySynthDiscOK(t *testing.T) {
 	assertNoVerifyTempfile(t, dir)
 }
 
-func TestVerifyDetectsScramSHA256Mismatch(t *testing.T) {
+func TestVerifyDetectsScramHashMismatch(t *testing.T) {
 	binPath, containerPath, dir, m := packForVerify(t)
 
 	// Locate the recorded scram_sha256 string inside the container's
@@ -76,8 +76,8 @@ func TestVerifyDetectsScramSHA256Mismatch(t *testing.T) {
 	err = Verify(VerifyOptions{
 		BinPath: binPath, ContainerPath: containerPath,
 	}, NewReporter(io.Discard, true))
-	if !errors.Is(err, errOutputSHA256Mismatch) {
-		t.Fatalf("expected errOutputSHA256Mismatch, got %v", err)
+	if !errors.Is(err, errOutputHashMismatch) {
+		t.Fatalf("expected errOutputHashMismatch, got %v", err)
 	}
 	assertNoVerifyTempfile(t, dir)
 }
@@ -91,8 +91,8 @@ func TestVerifyDetectsWrongBin(t *testing.T) {
 	err := Verify(VerifyOptions{
 		BinPath: wrongBin, ContainerPath: containerPath,
 	}, NewReporter(io.Discard, true))
-	if !errors.Is(err, errBinSHA256Mismatch) {
-		t.Fatalf("expected errBinSHA256Mismatch, got %v", err)
+	if !errors.Is(err, errBinHashMismatch) {
+		t.Fatalf("expected errBinHashMismatch, got %v", err)
 	}
 	assertNoVerifyTempfile(t, dir)
 }
@@ -258,5 +258,48 @@ func TestCLIVerifyUsageErrors(t *testing.T) {
 	code = run([]string{"verify", "/no/such/stem"}, io.Discard, &stderr)
 	if code != exitUsage {
 		t.Fatalf("missing-stem exit %d, want %d", code, exitUsage)
+	}
+}
+
+// TestVerifyDetectsScramHashMismatchAllThree confirms the strict
+// any-of-three policy: tampering ANY single recorded scram hash in
+// the container's manifest causes Verify to fail with errOutputHashMismatch,
+// not just sha256 mismatches.
+func TestVerifyDetectsScramHashMismatchAllThree(t *testing.T) {
+	for _, hashName := range []string{"scram_md5", "scram_sha1", "scram_sha256"} {
+		t.Run(hashName, func(t *testing.T) {
+			binPath, containerPath, _, m := packForVerify(t)
+
+			// Identify which manifest hex string to tamper.
+			var target string
+			switch hashName {
+			case "scram_md5":
+				target = m.ScramMD5
+			case "scram_sha1":
+				target = m.ScramSHA1
+			case "scram_sha256":
+				target = m.ScramSHA256
+			}
+
+			data, err := os.ReadFile(containerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			idx := bytes.Index(data, []byte(target))
+			if idx < 0 {
+				t.Fatalf("hash %q (%s) not found in container", hashName, target)
+			}
+			data[idx] ^= 1
+			if err := os.WriteFile(containerPath, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			err = Verify(VerifyOptions{
+				BinPath: binPath, ContainerPath: containerPath,
+			}, NewReporter(io.Discard, true))
+			if !errors.Is(err, errOutputHashMismatch) {
+				t.Fatalf("expected errOutputHashMismatch tampering %s, got %v", hashName, err)
+			}
+		})
 	}
 }
