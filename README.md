@@ -1,46 +1,45 @@
 # miniscram
 
-Compactly preserve scrambled CD-ROM dumps. Stores the bytes of a
-Redumper `.scram` file as a small structured delta against the
-unscrambled `.bin`. With miniscram and your `.bin`, you can reproduce
-the original `.scram` byte-for-byte. Implements the method from
-Hauenstein, "Compact Preservation of Scrambled CD-ROM Data"
-(IJCSIT, August 2022), specialised for Redumper output.
+Compactly preserve scrambled CD-ROM dumps. miniscram stores a
+[Redumper](https://github.com/superg/redumper) `.scram` file as a small
+structured delta against the unscrambled `.bin`, so you keep the
+original byte-for-byte but only pay for the parts that can't be
+recomputed from the cuesheet and bins.
+
+Implements the method from Hauenstein, *"Compact Preservation of
+Scrambled CD-ROM Data"* (IJCSIT, August 2022), specialised for Redumper
+output.
 
 ## Install
 
-```sh
-go install ./...    # produces ./miniscram
-```
+    go install ./...    # produces ./miniscram
 
 ## CLI
 
-### pack
+### `pack`
 
 Pack a `.scram` into a `.miniscram` container.
 
     miniscram pack disc.cue [-o out.miniscram] [-f] [--no-verify] [--keep-source]
 
 Reads `disc.scram` (derived from the cue stem) and the `.bin` files
-referenced by `disc.cue`. Writes `disc.miniscram` (or `-o`) and
-removes `disc.scram` after a verified round-trip.
+referenced by `disc.cue`. Writes `disc.miniscram` and removes
+`disc.scram` after a verified round-trip.
 
-### unpack
+### `unpack`
 
 Reproduce the `.scram` from `.bin` + `.miniscram`.
 
     miniscram unpack disc.miniscram [-o out.scram] [-f] [--no-verify]
 
-### verify
+### `verify`
 
-Non-destructive integrity check.
+Non-destructive integrity check. Rebuilds the recovered `.scram` in a
+temp file, hashes it, compares against the manifest, deletes the temp.
 
     miniscram verify disc.miniscram
 
-Rebuilds the recovered `.scram` in a temp file, hashes it, compares
-against the manifest's recorded hashes, deletes the temp file.
-
-### inspect
+### `inspect`
 
 Pretty-print a container.
 
@@ -56,6 +55,56 @@ Pretty-print a container.
 | 3 | verification failed |
 | 4 | I/O error |
 | 5 | wrong .bin for this .miniscram |
+
+## What miniscram targets
+
+**Redumper-output CD-ROM dumps.** Tested against real fixtures of
+varying complexity:
+
+- **Deus Ex** — clean Mode 1, single track.
+- **Freelancer** — SafeDisc 2.70.030, 588 deliberately corrupted
+  sectors per the redump.org submission. Round-trips byte-equal.
+- **Half-Life** — multi-FILE cue, 1 Mode 1 + 27 audio tracks.
+
+A safety net aborts pack if more than 5% of disc sectors disagree with
+the bin-driven prediction — that catches wrong-bin / wrong-cue /
+wrong-scram pairings and malformed inputs.
+
+### Things that should work, untested
+
+- **Mode 2/2352 data tracks** (CD-i, VCD, PSX-XA Form 2). The
+  scrambler treats Mode 1 and Mode 2 identically.
+- **Audio-only discs.** The disc round-trips, but ~150 pregap
+  sectors get baked into the delta as overrides (~350 KiB extra
+  noise) because pregap is synthesised as Mode 1 zero sectors.
+
+### Refuses or under-performs
+
+- **Variable write offset** — refused; miniscram can't reconstruct a
+  varying offset.
+- **Layout mismatch > 5%** — refused.
+- **Cuesheets with multi-track-per-FILE** — rejected by the parser.
+  Redumper produces one TRACK per FILE; convert from DiscImageCreator
+  or IsoBuster output beforehand.
+- **Modes other than `MODE1/2352`, `MODE2/2352`, `AUDIO`** — rejected.
+- **Discs with non-zero pregap or leadout** (CD+, Enhanced CDs) —
+  pregap/leadout is synthesised as zero sectors; real content becomes
+  delta overrides. Functional but inflates the delta.
+- **Non-zero lead-in.** Lead-in (LBAs -45150 to -150) is filled with
+  zeros. SafeDisc / SecuROM dumps have non-zero lead-in data; those
+  bytes flow through the delta. This is why protected-disc deltas are
+  measured in MiB rather than KiB.
+
+### Out of scope
+
+- **DVD / Blu-ray.** Different sector format, not addressable by
+  miniscram's ECMA-130 pipeline.
+- **Multi-session CDs with non-trivial second sessions.** The cuesheet
+  parser doesn't model session boundaries.
+- **Subchannel data.** Main channel only. PSX libcrypt-class
+  protection lives in subchannel and is invisible to miniscram.
+  Redumper preserves it in the `*_logs.zip` it produces alongside the
+  `.scram`; keep that bundle next to the `.miniscram`.
 
 ## Container format (v1)
 
@@ -147,113 +196,18 @@ To reconstruct the `.scram`, a reader:
 
 The result must hash to `scram.hashes`.
 
-## Scope and durability
+## License
 
-miniscram targets **Redumper-output CD-ROM dumps**. The lockstep
-layout-mismatch check (Pack aborts when more than 5% of disc sectors
-disagree with the bin-driven prediction) is the primary safety net —
-it protects against wrong-bin / wrong-cue / wrong-scram pairings and
-catches malformed inputs early.
+GPL-3.0 — see [LICENSE](./LICENSE).
 
-### Spec-defined constants
-
-The constants governing scrambling, EDC, ECC, sync detection, and MSF
-addressing are all fixed by ECMA-130 / Red Book. The codebase pins the
-three generated tables by SHA-256 and panics at process start if any
-table-builder drifts:
-
-- `expectedScrambleTableSHA256` — `ecma130.go:20`, checked in `init()` at line 61.
-- `expectedEDCTableSHA256` — `ecma130.go:82`, checked in `init()` at line 84.
-- `expectedGFTablesSHA256` — `ecma130.go:145`, checked in `init()` at line 147.
-
-### Tested end-to-end
-
-Real-disc fixtures in `e2e_redump_test.go` (run with `-tags redump_data`):
-
-- **Deus Ex v1002f** (clean single-track Mode 1, 0 ECC/EDC errors).
-- **Freelancer FL_v1** (SafeDisc 2.70.030; 588 deliberately corrupted
-  sectors per the redump.org submission). Round-trip byte-equal +
-  exact assertion on the data-track ECC/EDC error count.
-- **Half-Life HALFLIFE** (multi-FILE cue, 1 Mode 1 + 27 audio tracks,
-  0 ECC/EDC errors).
-
-Synthetic fixtures in `e2e_test.go` table:
-
-- Clean Mode 1, single track.
-- Negative write offset (-48 bytes) and positive write offset
-  (+48 bytes). Note: the engine accepts up to ±2 sectors (±4704 bytes)
-  per `validateSyncCandidate`'s `writeOffsetLimit`, but the test
-  matrix only exercises ±48.
-- Mode 2/2352 single track.
-- Three injected error sectors.
-- Data + 1 audio track.
-
-### Should work, untested
-
-- **Mode 2/2352 with bin-covered sectors that have non-trivial EDC/ECC
-  layout** (CD-i, VCD, PSX-XA Form 2). The scrambler path treats Mode 1
-  and Mode 2 identically — both go through `Scramble` at
-  `builder.go:175` (only AUDIO is skipped). miniscram does not compute
-  EDC/ECC for bin-covered sectors; it just scrambles the bytes you
-  hand it. Form 1 vs Form 2 layout differences in user data should
-  pass through unchanged. *Untested against real CD-i / VCD / PSX-XA
-  dumps.*
-
-- **Audio-only discs (no data tracks).** Conjectural. The bin-walk is
-  audio-friendly (AUDIO tracks skip the scrambler), but the pregap is
-  still synthesised as Mode 1 zero sectors at `builder.go:45-62`. On
-  an audio-only disc, the actual pregap is unscrambled silence, so the
-  prediction will mismatch the real bytes — those ~150 pregap sectors
-  become delta overrides. The disc round-trips, but the delta carries
-  ~350 KiB of avoidable noise.
-
-### Refuses or under-performs
-
-- **Variable write offset.** `checkConstantOffset` (`pack.go:406`)
-  samples sync positions across the scram and aborts with `"variable
-  write offset detected"` if they don't agree. Refusal is correct —
-  miniscram can't reconstruct a varying offset.
-- **Layout mismatch > 5%.** `layoutMismatchAbortRatio = 0.05`
-  (`builder.go:39`), measured against total disc sectors (leadin +
-  pregap + bin + leadout). Pack aborts with `LayoutMismatchError`.
-  Freelancer's 588 corrupted sectors sit well under the threshold —
-  the round-trip in `e2e_redump_test.go` proves Pack accepts it. A
-  heavily protected small disc could plausibly approach 5%; there is
-  no user knob today.
-- **Cuesheets with multi-track-per-FILE.** Rejected by `ParseCue`
-  (`cue.go:106`). Redumper produces one TRACK per FILE; cuesheets
-  from DiscImageCreator or IsoBuster may not. Convert beforehand.
-- **Modes other than `MODE1/2352`, `MODE2/2352`, `AUDIO`.** Rejected
-  by the `validModes` whitelist in `cue.go:29`. No `MODE2/2336`, no
-  PSX-style packed Mode 2.
-- **Discs with non-zero pregap data** (e.g. CD+ / Enhanced CDs).
-  Pregap is synthesised as Mode 1 zero sectors at
-  `builder.go:45-62` (with computed EDC + ECC). Any disc whose
-  pregap contains real data will produce delta overrides for those
-  sectors. Functional, but inflates the delta.
-- **Discs with non-Mode-0 leadout.** Same shape — leadout is
-  synthesised as Mode 0 zero sectors at `builder.go:64-83`. Different
-  leadout content becomes delta overrides.
-- **Non-zero lead-in.** Lead-in (LBAs -45150 to -150) is filled with
-  zeros at `builder.go` LBA-walk default. SafeDisc and SecuROM tend to
-  have non-zero lead-in data; those bytes flow through the delta. This
-  is why a SafeDisc dump's delta is several MiB rather than KiB.
-
-### Out of scope (architectural)
-
-- **DVD / Blu-ray.** Different sector format (2048-byte data blocks,
-  no scrambling, different ECC). Not addressable by miniscram's
-  ECMA-130 pipeline.
-- **Multi-session CDs with non-trivial second sessions.** The cuesheet
-  parser doesn't model session boundaries.
-- **Subchannel data.** Main-channel only — `grep -i "subchannel"` over
-  the source returns zero hits. PSX libcrypt-class protection lives in
-  subchannel and is invisible to miniscram. Redumper preserves it in
-  the `*_logs.zip` it produces alongside the `.scram`; keep that
-  bundle next to the `.miniscram`.
+Some routines are adapted from
+[redumper](https://github.com/superg/redumper) (also GPL-3.0). The
+scrambler in `ecma130.go` in particular is a near-verbatim port of
+redumper's canonical implementation. Attribution is noted at each lift
+point in source.
 
 ## Design history
 
 Architecture, design rationale, and per-feature decisions live in
 `docs/superpowers/specs/`. This README is the authoritative reference
-for the wire format only.
+for the wire format and external behaviour.
