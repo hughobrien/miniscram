@@ -2,8 +2,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -101,208 +99,45 @@ func trackModeAt(tracks []Track, lba int32) string {
 	return mode
 }
 
-// scramFileOffset returns the byte offset within the .scram file for a
-// given LBA. Uses p.LeadinLBA as the base (rather than the hardcoded
-// LBALeadinStart) so that unit tests with truncated disc layouts work
-// correctly.
-func scramFileOffset(lba, leadinLBA int32, writeOffsetBytes int) int64 {
-	return int64(lba-leadinLBA)*int64(SectorSize) + int64(writeOffsetBytes)
-}
-
-// BuildEpsilonHat writes the reconstructed scrambled image to out. If
-// scram is non-nil, sectors covered by .bin are compared against it in
-// lockstep and the list of mismatched LBAs is returned. The caller is
-// responsible for closing the io.Reader handles; out must be a Writer
-// that can absorb ScramSize bytes (typically a *os.File — random
-// access is not required).
+// BuildEpsilonHat writes the reconstructed scrambled image to out.
 //
-// Implementation note: bin must be a stream-readable source delivering
-// (BinSectorCount × SectorSize) bytes in order. scram, if provided,
-// must also be sequentially readable from byte 0 of the .scram file.
-func BuildEpsilonHat(out io.Writer, p BuildParams, bin io.Reader, scram io.Reader) ([]int32, error) {
-	if p.ScramSize <= 0 {
-		return nil, errors.New("ScramSize must be positive")
-	}
-	totalLBAs := TotalLBAs(p.ScramSize, p.WriteOffsetBytes)
-	endLBA := p.LeadinLBA + totalLBAs
-
-	// Position in scram (read cursor). When scram != nil we read it in
-	// lockstep with our writes.
-	var scramCursor int64
-	advanceScram := func(to int64) error {
-		if scram == nil || to <= scramCursor {
-			return nil
-		}
-		_, err := io.CopyN(io.Discard, scram, to-scramCursor)
-		if err != nil {
-			return fmt.Errorf("seeking scram to %d: %w", to, err)
-		}
-		scramCursor = to
-		return nil
-	}
-
-	// Apply leading shift (positive offset prepends zeros to ε̂).
-	written := int64(0)
-	if p.WriteOffsetBytes > 0 {
-		zeros := make([]byte, p.WriteOffsetBytes)
-		if _, err := out.Write(zeros); err != nil {
-			return nil, err
-		}
-		written = int64(p.WriteOffsetBytes)
-	}
-	skipFirst := 0
-	if p.WriteOffsetBytes < 0 {
-		skipFirst = -p.WriteOffsetBytes
-	}
-
-	binBuf := make([]byte, SectorSize)
-	scramBuf := make([]byte, SectorSize)
-	var errSectors []int32
-
-	for lba := p.LeadinLBA; lba < endLBA; lba++ {
-		var sec [SectorSize]byte
-		switch {
-		case lba < LBAPregapStart:
-			// leadin: zeros (Redumper convention; drives don't read here)
-		case lba < p.BinFirstLBA:
-			sec = generateMode1ZeroSector(lba)
-		case lba < p.BinFirstLBA+p.BinSectorCount:
-			if _, err := io.ReadFull(bin, binBuf); err != nil {
-				return nil, fmt.Errorf("reading bin LBA %d: %w", lba, err)
-			}
-			copy(sec[:], binBuf)
-			if trackModeAt(p.Tracks, lba) != "AUDIO" {
-				Scramble(&sec)
-			}
-		default:
-			sec = generateLeadoutSector(lba)
-		}
-
-		// Apply skipFirst on the very first sector if needed.
-		secBytes := sec[:]
-		if skipFirst > 0 {
-			secBytes = secBytes[skipFirst:]
-			skipFirst = 0
-		}
-		// Don't write past ScramSize.
-		remain := p.ScramSize - written
-		if int64(len(secBytes)) > remain {
-			secBytes = secBytes[:remain]
-		}
-		if _, err := out.Write(secBytes); err != nil {
-			return nil, err
-		}
-		written += int64(len(secBytes))
-
-		// Lockstep pre-check (only for full bin-covered sectors).
-		// Use p.LeadinLBA as the scram-file base so truncated test
-		// layouts (LeadinLBA = -150) work as well as real ones (-45150).
-		secOffset := scramFileOffset(lba, p.LeadinLBA, p.WriteOffsetBytes)
-		if scram != nil &&
-			secOffset >= 0 && secOffset+SectorSize <= p.ScramSize {
-			if err := advanceScram(secOffset); err != nil {
-				return nil, err
-			}
-			if _, err := io.ReadFull(scram, scramBuf); err != nil {
-				return nil, fmt.Errorf("reading scram LBA %d: %w", lba, err)
-			}
-			// ReadFull advanced the underlying reader by SectorSize but
-			// does not touch scramCursor; resync.
-			scramCursor = secOffset + SectorSize
-			if !bytes.Equal(sec[:], scramBuf) {
-				errSectors = append(errSectors, lba)
-			}
-		}
-		if written >= p.ScramSize {
-			break
-		}
-	}
-
-	if endLBA > p.LeadinLBA {
-		totalDisc := int32(endLBA - p.LeadinLBA)
-		ratio := float64(len(errSectors)) / float64(totalDisc)
-		if ratio > layoutMismatchAbortRatio {
-			head := errSectors
-			if len(head) > 10 {
-				head = head[:10]
-			}
-			return errSectors, &LayoutMismatchError{
-				BinSectors:    totalDisc,
-				ErrorSectors:  head,
-				MismatchRatio: ratio,
-			}
-		}
-	}
-	return errSectors, nil
-}
-
-// BuildEpsilonHatAndDelta walks bin and scram in lockstep, writing the
-// reconstructed scrambled image to epsilonHat and the structured
-// delta to deltaOut. scram and deltaOut must both be nil or both
-// non-nil.
+// If scram is non-nil, every byte written is compared against scram in
+// lockstep. onMismatch (if non-nil) is invoked for each contiguous
+// run of mismatching bytes, with the file offset of the run start and
+// the *scram* bytes (so the caller can encode delta records).
 //
-// Returns the number of override records written and the LBAs they
-// cover (capped at errorSectorsListCap). Aborts with
-// LayoutMismatchError if more than 5% of disc sectors mismatch.
-func BuildEpsilonHatAndDelta(
-	epsilonHat io.Writer,
-	deltaOut io.Writer,
+// Returns the list of LBAs that contained at least one mismatch
+// (capped at errorSectorsListCap) and the count of mismatched sectors
+// (uncapped). The caller decides what to do with this — see
+// CheckLayoutMismatch.
+//
+// scram == nil implies onMismatch is ignored. The function does not
+// emit anything on its own beyond writing to out; callers that need
+// a delta payload supply onMismatch via a DeltaEncoder.
+func BuildEpsilonHat(
+	out io.Writer,
 	p BuildParams,
 	bin io.Reader,
 	scram io.Reader,
-) (int, []int32, error) {
-	if (scram == nil) != (deltaOut == nil) {
-		return 0, nil, errors.New("BuildEpsilonHatAndDelta: scram and deltaOut must both be nil or both non-nil")
-	}
-	if scram == nil {
-		// Build-only mode: no delta, no comparison.
-		_, err := BuildEpsilonHat(epsilonHat, p, bin, nil)
-		return 0, nil, err
-	}
-
+	onMismatch func(off int64, scramRun []byte),
+) ([]int32, int, error) {
 	if p.ScramSize <= 0 {
-		return 0, nil, errors.New("ScramSize must be positive")
+		return nil, 0, errors.New("ScramSize must be positive")
 	}
 	totalLBAs := TotalLBAs(p.ScramSize, p.WriteOffsetBytes)
 	endLBA := p.LeadinLBA + totalLBAs
 
-	// Delta encoder state.
-	var body []byte
-	count := 0
-	var run []byte
-	var runStart int64
-
-	flush := func(off int64, r []byte) {
-		i := 0
-		for i < len(r) {
-			n := len(r) - i
-			if n > SectorSize {
-				n = SectorSize
-			}
-			var hdr [12]byte
-			binary.BigEndian.PutUint64(hdr[:8], uint64(off+int64(i)))
-			binary.BigEndian.PutUint32(hdr[8:], uint32(n))
-			body = append(body, hdr[:]...)
-			body = append(body, r[i:i+n]...)
-			count++
-			i += n
-		}
-	}
-
-	// Apply leading shift.
+	var written int64
 	if p.WriteOffsetBytes > 0 {
 		zeros := make([]byte, p.WriteOffsetBytes)
-		if _, err := epsilonHat.Write(zeros); err != nil {
-			return 0, nil, err
+		if _, err := out.Write(zeros); err != nil {
+			return nil, 0, err
 		}
+		written = int64(p.WriteOffsetBytes)
 	}
 	skipFirst := 0
 	if p.WriteOffsetBytes < 0 {
 		skipFirst = -p.WriteOffsetBytes
-	}
-	written := int64(0)
-	if p.WriteOffsetBytes > 0 {
-		written = int64(p.WriteOffsetBytes)
 	}
 
 	binBuf := make([]byte, SectorSize)
@@ -311,8 +146,8 @@ func BuildEpsilonHatAndDelta(
 	var mismatchedSectors int
 	var scramCur int64
 
-	advanceScramTo := func(target int64) error {
-		if target <= scramCur {
+	advanceScram := func(target int64) error {
+		if scram == nil || target <= scramCur {
 			return nil
 		}
 		if _, err := io.CopyN(io.Discard, scram, target-scramCur); err != nil {
@@ -321,6 +156,9 @@ func BuildEpsilonHatAndDelta(
 		scramCur = target
 		return nil
 	}
+
+	var run []byte
+	var runStart int64
 
 	for lba := p.LeadinLBA; lba < endLBA; lba++ {
 		var sec [SectorSize]byte
@@ -331,7 +169,7 @@ func BuildEpsilonHatAndDelta(
 			sec = generateMode1ZeroSector(lba)
 		case lba < p.BinFirstLBA+p.BinSectorCount:
 			if _, err := io.ReadFull(bin, binBuf); err != nil {
-				return 0, nil, fmt.Errorf("reading bin LBA %d: %w", lba, err)
+				return nil, 0, fmt.Errorf("reading bin LBA %d: %w", lba, err)
 			}
 			copy(sec[:], binBuf)
 			if trackModeAt(p.Tracks, lba) != "AUDIO" {
@@ -351,72 +189,71 @@ func BuildEpsilonHatAndDelta(
 			secBytes = secBytes[:remain]
 		}
 		hatStart := written
-		if _, err := epsilonHat.Write(secBytes); err != nil {
-			return 0, nil, err
+		if _, err := out.Write(secBytes); err != nil {
+			return nil, 0, err
 		}
 		written += int64(len(secBytes))
 
-		// Compare against scram for this byte range.
-		if err := advanceScramTo(hatStart); err != nil {
-			return 0, nil, err
-		}
-		if _, err := io.ReadFull(scram, scramBuf[:len(secBytes)]); err != nil {
-			return 0, nil, fmt.Errorf("reading scram at %d: %w", hatStart, err)
-		}
-		scramCur = hatStart + int64(len(secBytes))
-
-		sectorMismatch := false
-		for i := 0; i < len(secBytes); i++ {
-			if secBytes[i] != scramBuf[i] {
-				if len(run) == 0 {
-					runStart = hatStart + int64(i)
-				}
-				run = append(run, scramBuf[i])
-				sectorMismatch = true
-			} else if len(run) > 0 {
-				flush(runStart, run)
-				run = run[:0]
+		if scram != nil {
+			if err := advanceScram(hatStart); err != nil {
+				return nil, 0, err
 			}
-		}
-		if sectorMismatch {
-			mismatchedSectors++
-			if len(errLBAs) < errorSectorsListCap {
-				errLBAs = append(errLBAs, lba)
+			if _, err := io.ReadFull(scram, scramBuf[:len(secBytes)]); err != nil {
+				return nil, 0, fmt.Errorf("reading scram at %d: %w", hatStart, err)
+			}
+			scramCur = hatStart + int64(len(secBytes))
+
+			sectorMismatch := false
+			for i := 0; i < len(secBytes); i++ {
+				if secBytes[i] != scramBuf[i] {
+					if len(run) == 0 {
+						runStart = hatStart + int64(i)
+					}
+					run = append(run, scramBuf[i])
+					sectorMismatch = true
+				} else if len(run) > 0 {
+					if onMismatch != nil {
+						onMismatch(runStart, run)
+					}
+					run = run[:0]
+				}
+			}
+			if sectorMismatch {
+				mismatchedSectors++
+				if len(errLBAs) < errorSectorsListCap {
+					errLBAs = append(errLBAs, lba)
+				}
 			}
 		}
 		if written >= p.ScramSize {
 			break
 		}
 	}
-	if len(run) > 0 {
-		flush(runStart, run)
+	if scram != nil && len(run) > 0 && onMismatch != nil {
+		onMismatch(runStart, run)
 	}
 
-	// Mismatch ratio check (5% of total disc sectors).
-	if endLBA > p.LeadinLBA {
-		totalDisc := int32(endLBA - p.LeadinLBA)
-		ratio := float64(mismatchedSectors) / float64(totalDisc)
-		if ratio > layoutMismatchAbortRatio {
-			head := errLBAs
-			if len(head) > 10 {
-				head = head[:10]
-			}
-			return 0, errLBAs, &LayoutMismatchError{
-				BinSectors:    totalDisc,
-				ErrorSectors:  head,
-				MismatchRatio: ratio,
-			}
-		}
-	}
+	return errLBAs, mismatchedSectors, nil
+}
 
-	// Write count + body to deltaOut.
-	var hdr [4]byte
-	binary.BigEndian.PutUint32(hdr[:], uint32(count))
-	if _, err := deltaOut.Write(hdr[:]); err != nil {
-		return 0, nil, err
+// CheckLayoutMismatch returns *LayoutMismatchError when the mismatch
+// ratio exceeds layoutMismatchAbortRatio. Callers that have a scram to
+// compare against (Pack) run this; callers that don't (Unpack) skip it.
+func CheckLayoutMismatch(errLBAs []int32, mismatchedSectors int, totalDiscSectors int32) error {
+	if totalDiscSectors <= 0 {
+		return nil
 	}
-	if _, err := deltaOut.Write(body); err != nil {
-		return 0, nil, err
+	ratio := float64(mismatchedSectors) / float64(totalDiscSectors)
+	if ratio <= layoutMismatchAbortRatio {
+		return nil
 	}
-	return count, errLBAs, nil
+	head := errLBAs
+	if len(head) > 10 {
+		head = head[:10]
+	}
+	return &LayoutMismatchError{
+		BinSectors:    totalDiscSectors,
+		ErrorSectors:  head,
+		MismatchRatio: ratio,
+	}
 }

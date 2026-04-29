@@ -515,12 +515,22 @@ func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, sc
 		BinSectorCount:   binSectors,
 		Tracks:           tracks,
 	}
-	_, errs, err := BuildEpsilonHatAndDelta(hatFile, deltaFile, params, binReader, scramFile)
+	enc := NewDeltaEncoder(deltaFile)
+	errs, mismatched, err := BuildEpsilonHat(hatFile, params, binReader, scramFile, enc.Append)
 	hatFile.Sync()
 	deltaFile.Sync()
 	hatFile.Close()
+	if _, cerr := enc.Close(); err == nil && cerr != nil {
+		err = cerr
+	}
 	deltaFile.Close()
 	if err != nil {
+		os.Remove(hatPath)
+		os.Remove(deltaPath)
+		return "", "", nil, 0, err
+	}
+	totalDisc := TotalLBAs(scramSize, writeOffsetBytes)
+	if err := CheckLayoutMismatch(errs, mismatched, totalDisc); err != nil {
 		os.Remove(hatPath)
 		os.Remove(deltaPath)
 		return "", "", nil, 0, err
@@ -563,7 +573,7 @@ func verifyRoundTrip(containerPath string, files []ResolvedFile, want *Manifest)
 		BinSectorCount:   want.BinSectorCount(),
 		Tracks:           want.Tracks,
 	}
-	if _, err := BuildEpsilonHat(hatFile, params, binReader, nil); err != nil {
+	if _, _, err := BuildEpsilonHat(hatFile, params, binReader, nil, nil); err != nil {
 		closeBin()
 		hatFile.Close()
 		return err

@@ -152,12 +152,12 @@ func lbaToBCDMSF(lba int32) (byte, byte, byte) {
 func TestBuilderCleanRoundTrip(t *testing.T) {
 	bin, scram, params := synthDisc(t, 100, -48, 10)
 	var hat bytes.Buffer
-	errs, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram))
+	errs, mismatched, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(errs) != 0 {
-		t.Fatalf("got %d error sectors, want 0", len(errs))
+	if len(errs) != 0 || mismatched != 0 {
+		t.Fatalf("got %d error sectors / %d mismatched, want 0", len(errs), mismatched)
 	}
 	if int64(hat.Len()) != params.ScramSize {
 		t.Fatalf("ε̂ size %d != scramSize %d", hat.Len(), params.ScramSize)
@@ -176,12 +176,12 @@ func TestBuilderCleanRoundTrip(t *testing.T) {
 func TestBuilderCleanRoundTripMode2(t *testing.T) {
 	bin, scram, params := synthDiscWithMode(t, 100, -48, 10, 0x02, "MODE2/2352")
 	var hat bytes.Buffer
-	errs, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram))
+	errs, mismatched, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(errs) != 0 {
-		t.Fatalf("got %d error sectors, want 0", len(errs))
+	if len(errs) != 0 || mismatched != 0 {
+		t.Fatalf("got %d error sectors / %d mismatched, want 0", len(errs), mismatched)
 	}
 	if !bytes.Equal(hat.Bytes(), scram) {
 		t.Fatalf("ε̂ != scram for clean Mode 2 disc")
@@ -193,12 +193,15 @@ func TestBuilderDetectsErrorSector(t *testing.T) {
 	// flip a byte inside the third main sector of .scram (LBA 2)
 	scram[(150+2)*SectorSize+200] ^= 0xFF
 	var hat bytes.Buffer
-	errs, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram))
+	errs, mismatched, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(errs) != 1 || errs[0] != 2 {
 		t.Fatalf("got error sectors %v, want [2]", errs)
+	}
+	if mismatched != 1 {
+		t.Fatalf("got mismatched %d, want 1", mismatched)
 	}
 	if int64(hat.Len()) != params.ScramSize {
 		t.Fatalf("ε̂ size mismatch")
@@ -211,9 +214,14 @@ func TestBuilderRefusesAtTooManyMismatches(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		scram[(150+i)*SectorSize+50] ^= 0xFF
 	}
-	_, err := BuildEpsilonHat(io.Discard, params, bytes.NewReader(bin), bytes.NewReader(scram))
+	errLBAs, mismatched, err := BuildEpsilonHat(io.Discard, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
+	if err != nil {
+		t.Fatal("BuildEpsilonHat itself should not error; CheckLayoutMismatch does")
+	}
+	totalDisc := TotalLBAs(params.ScramSize, params.WriteOffsetBytes)
+	err = CheckLayoutMismatch(errLBAs, mismatched, totalDisc)
 	if err == nil {
-		t.Fatal("expected layout-mismatch error")
+		t.Fatal("expected layout-mismatch error from CheckLayoutMismatch")
 	}
 	var lme *LayoutMismatchError
 	if !errors.As(err, &lme) {
@@ -221,19 +229,21 @@ func TestBuilderRefusesAtTooManyMismatches(t *testing.T) {
 	}
 }
 
-func TestBuildEpsilonHatAndDeltaCleanRoundTrip(t *testing.T) {
+func TestBuildEpsilonHatWithDeltaEncoderCleanRoundTrip(t *testing.T) {
 	bin, scram, params := synthDisc(t, 100, -48, 10)
 	var hatBuf bytes.Buffer
 	var deltaBuf bytes.Buffer
-	count, errs, err := BuildEpsilonHatAndDelta(
-		&hatBuf, &deltaBuf, params,
-		bytes.NewReader(bin), bytes.NewReader(scram),
-	)
+	enc := NewDeltaEncoder(&deltaBuf)
+	errs, mismatched, err := BuildEpsilonHat(&hatBuf, params, bytes.NewReader(bin), bytes.NewReader(scram), enc.Append)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 0 || len(errs) != 0 {
-		t.Fatalf("expected 0 overrides, got count=%d errs=%v", count, errs)
+	count, cerr := enc.Close()
+	if cerr != nil {
+		t.Fatal(cerr)
+	}
+	if count != 0 || len(errs) != 0 || mismatched != 0 {
+		t.Fatalf("expected 0 overrides, got count=%d errs=%v mismatched=%d", count, errs, mismatched)
 	}
 	if int64(hatBuf.Len()) != params.ScramSize {
 		t.Fatalf("ε̂ size %d != scramSize %d", hatBuf.Len(), params.ScramSize)
@@ -249,12 +259,12 @@ func TestBuildEpsilonHatAndDeltaCleanRoundTrip(t *testing.T) {
 func TestBuilderCleanRoundTripPositiveOffset(t *testing.T) {
 	bin, scram, params := synthDisc(t, 100, 48, 10)
 	var hat bytes.Buffer
-	errs, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram))
+	errs, mismatched, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(errs) != 0 {
-		t.Fatalf("got %d error sectors, want 0", len(errs))
+	if len(errs) != 0 || mismatched != 0 {
+		t.Fatalf("got %d error sectors / %d mismatched, want 0", len(errs), mismatched)
 	}
 	if int64(hat.Len()) != params.ScramSize {
 		t.Fatalf("ε̂ size %d != scramSize %d", hat.Len(), params.ScramSize)
@@ -264,16 +274,23 @@ func TestBuilderCleanRoundTripPositiveOffset(t *testing.T) {
 	}
 }
 
-func TestBuildEpsilonHatAndDeltaRefusesAtTooManyMismatches(t *testing.T) {
+func TestBuildEpsilonHatWithDeltaEncoderRefusesAtTooManyMismatches(t *testing.T) {
 	bin, scram, params := synthDisc(t, 100, 0, 10)
 	// flip every main sector (100% mismatch in bin range; ~38% across full disc)
 	for i := 0; i < 100; i++ {
 		scram[(150+i)*SectorSize+50] ^= 0xFF
 	}
 	var hat, delta bytes.Buffer
-	_, _, err := BuildEpsilonHatAndDelta(&hat, &delta, params, bytes.NewReader(bin), bytes.NewReader(scram))
+	enc := NewDeltaEncoder(&delta)
+	errLBAs, mismatched, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), enc.Append)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc.Close()
+	totalDisc := TotalLBAs(params.ScramSize, params.WriteOffsetBytes)
+	err = CheckLayoutMismatch(errLBAs, mismatched, totalDisc)
 	if err == nil {
-		t.Fatal("expected layout-mismatch error")
+		t.Fatal("expected layout-mismatch error from CheckLayoutMismatch")
 	}
 	var lme *LayoutMismatchError
 	if !errors.As(err, &lme) {
