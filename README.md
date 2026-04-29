@@ -61,17 +61,72 @@ Pretty-print a container.
 
 ## What miniscram targets
 
-**Redumper-output CD-ROM dumps.** Tested against real fixtures of
-varying complexity:
+**Redumper-output CD-ROM dumps.** A safety net aborts pack if more
+than 5% of disc sectors disagree with the bin-driven prediction —
+that catches wrong-bin / wrong-cue / wrong-scram pairings and
+malformed inputs.
 
-- **Deus Ex** — clean Mode 1, single track.
-- **Freelancer** — SafeDisc 2.70.030, 588 deliberately corrupted
-  sectors per the redump.org submission. Round-trips byte-equal.
-- **Half-Life** — multi-FILE cue, 1 Mode 1 + 27 audio tracks.
+## Demonstrations
 
-A safety net aborts pack if more than 5% of disc sectors disagree with
-the bin-driven prediction — that catches wrong-bin / wrong-cue /
-wrong-scram pairings and malformed inputs.
+Three real-disc fixtures exercise different parts of the pipeline.
+Each is picked for what it stresses, not because of the game.
+
+### Half-Life GOTY — mixed-mode hybrid CD
+
+- **Copy protection:** none (`Error Count: 0` in the
+  [redump submission](http://redump.org/disc/25966/)).
+- **Why this disc:** 1 Mode 1 data track + 27 Red Book audio tracks.
+  The audio dominates the disc surface and exercises the audio-bypass
+  path of the scrambler (audio sectors are not descrambled — only the
+  data track is).
+
+```
+$ miniscram pack -f --keep-source HALFLIFE.cue
+[02:25:31] running scramble-table self-test ... OK ok
+[02:25:31] resolving cue HALFLIFE.cue ... OK 28 track(s), 695747472 bytes total
+[02:25:31] detecting write offset ... OK -48 bytes
+[02:25:31] checking constant offset ... OK ok
+[02:25:31] hashing tracks ... OK 28 track(s) hashed
+[02:25:34] hashing scram ... OK 78f21058c2c7
+[02:25:37] building scram prediction + delta ... OK 2150 override(s), delta 5483541 bytes
+[02:25:40] writing container ... OK HALFLIFE.miniscram
+[02:25:40] reading manifest ... OK ok
+[02:25:41] running scramble-table self-test ... OK ok
+[02:25:41] reading container HALFLIFE.miniscram ... OK delta 5483541 bytes
+[02:25:41] verifying bin hashes ... OK all tracks match
+[02:25:43] building scram prediction ... OK ok
+[02:25:45] applying delta ... OK 5483541 byte(s) of delta applied
+[02:25:45] verifying scram hashes ... OK all three match
+
+$ ls -lh HALFLIFE.scram HALFLIFE.miniscram
+-rwxr--r-- 1 hugh hugh 766M HALFLIFE.scram
+-rw-rw-r-- 1 hugh hugh 337K HALFLIFE.miniscram
+```
+
+The original `.scram` is 766 MB. With the bins you already have,
+miniscram preserves it as a 337 KB sidecar — about 2300× smaller —
+and round-trips byte-equal in 18 seconds on a laptop.
+
+### Freelancer — SafeDisc 2.70.030
+
+- **Copy protection:** SafeDisc 2.70.030 + Macrovision Security
+  Driver. 588 deliberately corrupted sectors per the protection
+  scheme.
+- **Why this disc:** demonstrates that miniscram captures intentional
+  ECC errors as delta overrides. The protection's bytes flow through
+  the container so `unpack` reproduces the protected disc verbatim.
+
+*(Transcript pending.)*
+
+### Deus Ex v1002f — clean Mode 1 baseline
+
+- **Copy protection:** none ("None found [OMIT FROM SUBMISSION]" per
+  redump verification, write offset −22).
+- **Why this disc:** the simplest case — a single Mode 1 data track,
+  zero ECC/EDC errors. Establishes the baseline: with no protection,
+  no audio, and no errors, the delta is near-empty.
+
+*(Transcript pending.)*
 
 ### Things that should work, untested
 

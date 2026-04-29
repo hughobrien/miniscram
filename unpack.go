@@ -86,8 +86,9 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	}
 	st.Done("all tracks match")
 
-	// Build ε̂ to a tempfile next to the output path.
-	st = r.Step("building ε̂")
+	// Build the scram prediction (ε̂ in Hauenstein's notation) to a
+	// tempfile next to the output path.
+	st = r.Step("building scram prediction")
 	hatFile, err := os.CreateTemp(filepath.Dir(opts.OutputPath), "miniscram-unpack-hat-*")
 	if err != nil {
 		st.Fail(err)
@@ -124,7 +125,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	hatFile.Close()
 	st.Done("ok")
 
-	// Move ε̂ into place at OutputPath.
+	// Move the scram prediction file into place at OutputPath.
 	if err := os.Rename(hatPath, opts.OutputPath); err != nil {
 		hatF, oerr := os.Open(hatPath)
 		if oerr != nil {
