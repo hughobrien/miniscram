@@ -1,0 +1,26 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-28-miniscram-hash-parity.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: hashFile + FileHashes + compareHashes helpers",
+      "status": "completed",
+      "description": "**Goal:** Add hashFile (single-pass md5+sha1+sha256) and compareHashes helpers with unit tests. sha256File preserved for now; integration is Task 2.\n\n**Files:**\n- Modify: pack.go (add helpers)\n- Modify: pack_test.go (add unit tests)\n\n**Acceptance Criteria:**\n- [ ] FileHashes struct with MD5/SHA1/SHA256 string fields\n- [ ] hashFile single I/O pass, lowercase hex\n- [ ] compareHashes nil on match, per-hash diff on mismatch\n- [ ] 7 unit tests pass\n\n**Verify:** `go test ./... -run \"TestHashFile|TestCompareHashes\" -v && go vet ./...`\n\n```json:metadata\n{\"files\": [\"pack.go\", \"pack_test.go\"], \"verifyCommand\": \"go test ./... -run \\\"TestHashFile|TestCompareHashes\\\" -v && go vet ./...\", \"acceptanceCriteria\": [\"hashFile single-pass\", \"compareHashes per-hash diff\", \"7 unit tests pass\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Manifest fields, version bump, integrate hashFile across pack/unpack/verify",
+      "status": "completed",
+      "blockedBy": [1],
+      "description": "**Goal:** Add 4 hash fields to Manifest. Bump container 0x02→0x03 + FormatVersion 2→3. Rename sentinels SHA256→Hash. Replace all sha256File call sites with hashFile+compareHashes. Delete sha256File. Add per-hash tampering tests.\n\n**Files:**\n- Modify: manifest.go, pack.go, unpack.go, verify.go, main.go, pack_test.go, verify_test.go, inspect_test.go\n\n**Acceptance Criteria:**\n- [ ] 6 hash fields populated; cross-check via hashFile passes\n- [ ] Per-hash tamper detection: bin md5/sha1/sha256 → exit 5; scram md5/sha1/sha256 → exit 3 (Unpack and Verify)\n- [ ] v0.2 containers rejected with new migration message\n- [ ] sha256File removed\n- [ ] go test ./... PASS; go vet clean\n\n**Verify:** `go test ./... -v && go vet ./...`\n\n```json:metadata\n{\"files\": [\"manifest.go\", \"pack.go\", \"unpack.go\", \"verify.go\", \"main.go\", \"pack_test.go\", \"verify_test.go\", \"inspect_test.go\"], \"verifyCommand\": \"go test ./... -v && go vet ./...\", \"acceptanceCriteria\": [\"6 hash fields populated\", \"per-hash tamper detection bin (md5/sha1/sha256)\", \"per-hash tamper detection scram (md5/sha1/sha256)\", \"Verify same matrix\", \"v0.2 rejection message\", \"sha256File deleted\", \"go test clean\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Inspect human-format display of all six hashes + tests",
+      "status": "completed",
+      "blockedBy": [2],
+      "description": "**Goal:** inspect.go formatHumanInspect adds 4 lines (md5/sha1 for bin and scram) alongside existing sha256. JSON output passes through automatically. Tests assert all six hashes appear.\n\n**Files:**\n- Modify: inspect.go (formatHumanInspect)\n- Modify: inspect_test.go (TestInspectShowsAllSixHashes, TestInspectJSONIncludesAllSixHashes)\n\n**Acceptance Criteria:**\n- [ ] 6 hash lines in human format\n- [ ] 4 new keys in JSON\n- [ ] existing inspect tests pass\n\n**Verify:** `go test ./... -run TestInspect -v && go vet ./...`\n\n```json:metadata\n{\"files\": [\"inspect.go\", \"inspect_test.go\"], \"verifyCommand\": \"go test ./... -run TestInspect -v && go vet ./...\", \"acceptanceCriteria\": [\"6 hash lines in human format\", \"4 new JSON keys\", \"existing inspect tests pass\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-28T16:11:00Z"
+}
