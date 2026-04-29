@@ -11,7 +11,7 @@ import (
 
 const (
 	containerMagic      = "MSCM"
-	containerVersion    = byte(0x03)
+	containerVersion    = byte(0x04)
 	errorSectorsListCap = 10000
 )
 
@@ -121,7 +121,7 @@ func ReadContainer(path string) (*Manifest, []byte, error) {
 	}
 	if header[4] != containerVersion {
 		return nil, nil, fmt.Errorf("unsupported container version 0x%02x (this build expects 0x%02x); "+
-			"v0.2 .miniscram files cannot be read directly by this build — re-pack from the original .bin",
+			"v0.3 .miniscram files cannot be read directly by this build — re-pack from the original .bin",
 			header[4], containerVersion)
 	}
 	mlen := binary.BigEndian.Uint32(header[5:9])

@@ -39,12 +39,12 @@ func writeSynthDiscFiles(t *testing.T, mainSectors int, writeOffsetBytes int, le
 
 func TestPackCleanDisc(t *testing.T) {
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
+	_ = binPath // .bin lives next to .cue; ResolveCue finds it via cue
 	// synthDisc above uses LeadinLBA = -150 (no leadin). Real Pack uses
 	// LBALeadinStart = -45150, so we override via PackOptions.LeadinLBA.
 	outPath := filepath.Join(dir, "x.miniscram")
 	rep := NewReporter(io.Discard, true)
 	err := Pack(PackOptions{
-		BinPath:    binPath,
 		CuePath:    cuePath,
 		ScramPath:  scramPath,
 		OutputPath: outPath,
@@ -74,9 +74,10 @@ func TestPackCleanDisc(t *testing.T) {
 
 func TestPackDetectsNegativeWriteOffset(t *testing.T) {
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, -48, 10)
+	_ = binPath // .bin lives next to .cue; ResolveCue finds it via cue
 	outPath := filepath.Join(dir, "x.miniscram")
 	err := Pack(PackOptions{
-		BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+		CuePath: cuePath, ScramPath: scramPath,
 		OutputPath: outPath, LeadinLBA: LBAPregapStart, Verify: true,
 	}, NewReporter(io.Discard, true))
 	if err != nil {
@@ -220,7 +221,7 @@ func TestPackPopulatesAllSixHashFields(t *testing.T) {
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
 	containerPath := filepath.Join(dir, "x.miniscram")
 	if err := Pack(PackOptions{
-		BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+		CuePath: cuePath, ScramPath: scramPath,
 		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
 	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatal(err)
@@ -248,5 +249,57 @@ func TestPackPopulatesAllSixHashFields(t *testing.T) {
 	}
 	if fresh.MD5 != m.BinMD5 || fresh.SHA1 != m.BinSHA1 || fresh.SHA256 != m.BinSHA256 {
 		t.Errorf("bin hashes don't match a fresh hashFile run")
+	}
+}
+
+func TestPackPopulatesPerTrackAndRollupHashes(t *testing.T) {
+	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
+	_ = binPath // .bin lives next to .cue; ResolveCue finds it via cue
+	containerPath := filepath.Join(dir, "x.miniscram")
+	if err := Pack(PackOptions{
+		CuePath: cuePath, ScramPath: scramPath,
+		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
+	}, NewReporter(io.Discard, true)); err != nil {
+		t.Fatal(err)
+	}
+	m, _, err := ReadContainer(containerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.FormatVersion != 4 {
+		t.Errorf("FormatVersion = %d; want 4", m.FormatVersion)
+	}
+	if len(m.Tracks) != 1 {
+		t.Fatalf("got %d tracks, want 1", len(m.Tracks))
+	}
+	tr := m.Tracks[0]
+	if tr.MD5 == "" || tr.SHA1 == "" || tr.SHA256 == "" {
+		t.Errorf("track hashes empty: %+v", tr)
+	}
+	if tr.Size == 0 {
+		t.Errorf("track size = 0")
+	}
+	if tr.Filename == "" {
+		t.Errorf("track filename empty")
+	}
+	// Single-FILE: per-track hashes should equal top-level roll-up.
+	if tr.MD5 != m.BinMD5 || tr.SHA1 != m.BinSHA1 || tr.SHA256 != m.BinSHA256 {
+		t.Errorf("single-FILE: per-track hashes don't match roll-up")
+	}
+}
+
+func TestReadContainerRejectsV3(t *testing.T) {
+	dir := t.TempDir()
+	v3 := filepath.Join(dir, "v3.miniscram")
+	header := []byte{'M', 'S', 'C', 'M', 0x03, 0, 0, 0, 0}
+	if err := os.WriteFile(v3, header, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := ReadContainer(v3)
+	if err == nil {
+		t.Fatal("expected error reading v0.3 container")
+	}
+	if !strings.Contains(err.Error(), "v0.3") {
+		t.Errorf("error doesn't mention v0.3: %v", err)
 	}
 }

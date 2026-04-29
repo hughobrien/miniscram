@@ -10,7 +10,7 @@ import (
 
 func TestContainerRoundtrip(t *testing.T) {
 	m := &Manifest{
-		FormatVersion:        3,
+		FormatVersion:        4,
 		ToolVersion:          "miniscram 0.0.1-test",
 		CreatedUTC:           "2026-04-27T17:00:00Z",
 		ScramSize:            897527784,

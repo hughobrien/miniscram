@@ -116,7 +116,7 @@ func runPack(args []string, stderr io.Writer) int {
 		rep.Info("--no-verify implies --keep-source; original .scram will be kept")
 	}
 	err = Pack(PackOptions{
-		BinPath: in.Bin, CuePath: in.Cue, ScramPath: in.Scram,
+		CuePath: in.Cue, ScramPath: in.Scram,
 		OutputPath: out, Verify: !*noVerify,
 	}, rep)
 	if err != nil {
