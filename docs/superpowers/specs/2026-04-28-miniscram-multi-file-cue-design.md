@@ -305,7 +305,7 @@ Synthetic fixtures (no Redumper data needed):
 E2E (real disc, build-tagged):
 
 - HL1 row added to `realDiscFixtures` in `e2e_redump_test.go`:
-  `{Name: "half-life", Dir: "/home/hugh/miniscram/half-life",
+  `{Name: "half-life", Dir: "test-discs/half-life",
   Stem: "HALFLIFE", ExpectedDataTrackErrors: 0,
   MaxDeltaBytes: 10240, MaxContainerBytes: 20480, EDCSampleLBAs:
   [...]}`. Round-trip exercises the multi-FILE bin path. Audio
