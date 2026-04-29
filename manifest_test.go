@@ -17,7 +17,7 @@ func TestContainerRoundtrip(t *testing.T) {
 		WriteOffsetBytes: -48,
 		LeadinLBA:        -45150,
 		Scram: ScramInfo{
-			Size: 897527784,
+			Size:   897527784,
 			Hashes: FileHashes{MD5: "abc", SHA1: "def", SHA256: "ghi"},
 		},
 		Tracks: []Track{{
@@ -49,7 +49,7 @@ func TestContainerRoundtrip(t *testing.T) {
 func TestContainerRejectsInvalid(t *testing.T) {
 	// bad-magic and unknown-version: just check error is non-nil.
 	for _, body := range [][]byte{
-		append([]byte("BADM"), make([]byte, containerHeaderSize-4)...), // bad magic
+		append([]byte("BADM"), make([]byte, containerHeaderSize-4)...),     // bad magic
 		append([]byte("MSCM\x09"), make([]byte, containerHeaderSize-5)...), // unknown version
 	} {
 		path := filepath.Join(t.TempDir(), "bad.miniscram")
