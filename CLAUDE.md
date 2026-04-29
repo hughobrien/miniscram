@@ -9,10 +9,10 @@ design docs in [`docs/superpowers/specs/`](./docs/superpowers/specs/).
 - `*.go` — single Go package `main`, ~5K lines.
 - `docs/superpowers/specs/` — design specs (dated). Authoritative
   source of architectural intent.
-- `docs/superpowers/plans/` — implementation plans that were executed
-  to produce the current code.
-- `TASKS.md` — user-authored work plan; recommendations there reflect
-  the maintainer's judgment, not auto-generated suggestions.
+- `TASKS.md` — maintainer's work plan; recommendations there reflect
+  Hugh's judgment, not auto-generated suggestions.
+- `test-discs/<name>/` — gitignored real-disc fixtures (multi-GB
+  redumper dumps, see README's Demonstrations section).
 
 ## Spec references (gitignored)
 
@@ -93,8 +93,7 @@ when the builder code is edited.
 This repo is developed with the **superpowers-extended-cc** plugin for
 Claude Code, which provides skills for brainstorming, plan-writing,
 plan-execution, code review, and TDD-aware implementation. The
-`docs/superpowers/specs/` and `docs/superpowers/plans/` directories
-are produced by that workflow.
+`docs/superpowers/specs/` directory is produced by that workflow.
 
 When in this repo, prefer those skills for non-trivial work:
 brainstorming → write-plan → execute-plan → requesting-code-review.

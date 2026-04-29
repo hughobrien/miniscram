@@ -47,9 +47,8 @@ track exercise — see "Out of scope" for what's deferred).
 | Freelancer | `/data/roms/redumper/freelancer` | `FL_v1` | 1 | MODE1/2352 | 588 | SafeDisc 2.70.030 |
 | Half-Life | `/data/roms/redumper/half-life` | `HALFLIFE` | 28 | MODE1/2352 + 27 AUDIO | 0 | **deferred** — see Out of scope |
 
-The user's actual filesystem may symlink or remount these under
-`/home/hugh/miniscram/<dir>/`; the test uses the same convention as
-the existing `e2e_redump_test.go` (an absolute constant per dataset).
+The test uses relative paths rooted at `test-discs/<dir>/` (the same
+convention as the existing `e2e_redump_test.go`).
 If a dataset's `.scram` doesn't exist at the configured path, the
 sub-test calls `t.Skipf` and proceeds. CI on a machine without the
 data simply runs zero of these tests.

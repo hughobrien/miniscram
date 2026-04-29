@@ -285,7 +285,7 @@ Each entry is sized to be picked up cold. The recommended workflow:
    straight to writing-plans.
 3. If the task says "needs design first" (B2 in particular), run
    the brainstorming skill on it — the open questions are real.
-4. The Deus Ex test data at `/home/hugh/miniscram/deus-ex/` is the
+4. The Deus Ex test data at `test-discs/deus-ex/` is the
    golden reference for any real-world test. Don't commit it — it's
    already in `.gitignore`.
 
