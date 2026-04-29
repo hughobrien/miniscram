@@ -166,13 +166,18 @@ func Pack(opts PackOptions, r Reporter) error {
 		r.Warn("verification skipped (--no-verify)")
 		return nil
 	}
-	st = r.Step("verifying round-trip")
-	if err := verifyRoundTrip(opts.OutputPath, resolved.Files, m); err != nil {
-		st.Fail(err)
-		_ = os.Remove(opts.OutputPath)
-		return err
+	if err := Verify(VerifyOptions{ContainerPath: opts.OutputPath}, r); err != nil {
+		// Only delete the just-written container when the failure
+		// implicates the container itself (e.g. round-trip output
+		// hash mismatch). errBinHashMismatch means the user's .bin
+		// files changed between Pack's hashing and Verify's re-hash;
+		// the container is internally consistent and worth keeping
+		// for diagnosis.
+		if !errors.Is(err, errBinHashMismatch) {
+			_ = os.Remove(opts.OutputPath)
+		}
+		return fmt.Errorf("%w: %w", errVerifyMismatch, err)
 	}
-	st.Done("ok")
 	return nil
 }
 
@@ -544,74 +549,3 @@ func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, sc
 	return hatPath, deltaPath, errs, deltaInfo.Size(), nil
 }
 
-func verifyRoundTrip(containerPath string, files []ResolvedFile, want *Manifest) error {
-	// Recovered .scram is the same size as the original — keep it next
-	// to the container output so we don't fill /tmp.
-	tmpOut, err := os.CreateTemp(filepath.Dir(containerPath), "miniscram-verify-*")
-	if err != nil {
-		return err
-	}
-	tmpOutPath := tmpOut.Name()
-	tmpOut.Close()
-	defer os.Remove(tmpOutPath)
-
-	// Build ε̂ from the multi-bin stream into the tempfile.
-	hatFile, err := os.OpenFile(tmpOutPath, os.O_RDWR, 0)
-	if err != nil {
-		return err
-	}
-	binReader, closeBin, err := OpenBinStream(files)
-	if err != nil {
-		hatFile.Close()
-		return err
-	}
-	params := BuildParams{
-		LeadinLBA:        want.LeadinLBA,
-		WriteOffsetBytes: want.WriteOffsetBytes,
-		ScramSize:        want.Scram.Size,
-		BinFirstLBA:      want.BinFirstLBA(),
-		BinSectorCount:   want.BinSectorCount(),
-		Tracks:           want.Tracks,
-	}
-	if _, _, err := BuildEpsilonHat(hatFile, params, binReader, nil, nil); err != nil {
-		closeBin()
-		hatFile.Close()
-		return err
-	}
-	closeBin()
-	if err := hatFile.Sync(); err != nil {
-		hatFile.Close()
-		return err
-	}
-	hatFile.Close()
-
-	// Apply delta from the container.
-	_, _, deltaBytes, err := ReadContainer(containerPath)
-	if err != nil {
-		return err
-	}
-	outFile, err := os.OpenFile(tmpOutPath, os.O_RDWR, 0)
-	if err != nil {
-		return err
-	}
-	if err := ApplyDelta(outFile, bytes.NewReader(deltaBytes)); err != nil {
-		outFile.Close()
-		return err
-	}
-	if err := outFile.Sync(); err != nil {
-		outFile.Close()
-		return err
-	}
-	outFile.Close()
-
-	// Hash the result and compare against the manifest's recorded scram hashes.
-	got, err := hashFile(tmpOutPath)
-	if err != nil {
-		return err
-	}
-	wantHashes := want.Scram.Hashes
-	if err := compareHashes(got, wantHashes); err != nil {
-		return fmt.Errorf("%w: round-trip hash mismatch: %v", errVerifyMismatch, err)
-	}
-	return nil
-}
