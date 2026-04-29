@@ -28,7 +28,7 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		printTopHelp(stderr)
+		printHelp(stderr, topHelpText)
 		return exitUsage
 	}
 	switch args[0] {
@@ -44,90 +44,125 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if len(args) >= 2 {
 			switch args[1] {
 			case "pack":
-				printPackHelp(stderr)
+				printHelp(stderr, packHelpText)
 				return exitOK
 			case "unpack":
-				printUnpackHelp(stderr)
+				printHelp(stderr, unpackHelpText)
 				return exitOK
 			case "verify":
-				printVerifyHelp(stderr)
+				printHelp(stderr, verifyHelpText)
 				return exitOK
 			case "inspect":
-				printInspectHelp(stderr)
+				printHelp(stderr, inspectHelpText)
 				return exitOK
 			}
 		}
-		printTopHelp(stderr)
+		printHelp(stderr, topHelpText)
 		return exitOK
 	case "--version":
 		fmt.Fprintln(stderr, toolVersion)
 		return exitOK
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", args[0])
-		printTopHelp(stderr)
+		printHelp(stderr, topHelpText)
 		return exitUsage
 	}
 }
 
-func runPack(args []string, stderr io.Writer) int {
-	fs := flag.NewFlagSet("pack", flag.ContinueOnError)
+// commonFlags is the set of flags every subcommand shares.
+type commonFlags struct {
+	quiet bool
+}
+
+// parseSubcommand registers help + quiet flags, parses args, and
+// handles the help/usage exit code logic. The caller passes a
+// configure callback to register subcommand-specific flags.
+//
+// Returns the positional args (caller checks NArg requirements) and
+// the parsed common flags.
+//
+// If parsing failed or help was requested, returns (nil, _, exitCode,
+// false) and the caller should return exitCode immediately. Otherwise
+// returns (positional, flags, 0, true).
+func parseSubcommand(name, helpText string, args []string, stderr io.Writer, configure func(*flag.FlagSet)) ([]string, commonFlags, int, bool) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	output := fs.String("o", "", "output path (alias --output)")
-	outputLong := fs.String("output", "", "output path")
-	keepSource := fs.Bool("keep-source", false, "do not remove .scram after verification")
-	noVerify := fs.Bool("no-verify", false, "skip inline round-trip verification")
-	allowCrossFS := fs.Bool("allow-cross-fs", false, "allow auto-delete across filesystems")
-	force := fs.Bool("f", false, "overwrite output if it exists (alias --force)")
-	forceLong := fs.Bool("force", false, "overwrite output if it exists")
-	quiet := fs.Bool("q", false, "suppress progress (alias --quiet)")
-	quietLong := fs.Bool("quiet", false, "suppress progress")
-	help := fs.Bool("help", false, "show help for pack")
-	helpShort := fs.Bool("h", false, "show help for pack")
+	quiet := fs.Bool("q", false, "quiet")
+	quietLong := fs.Bool("quiet", false, "quiet")
+	help := fs.Bool("h", false, "help")
+	helpLong := fs.Bool("help", false, "help")
+	if configure != nil {
+		configure(fs)
+	}
 	if err := fs.Parse(args); err != nil {
+		return nil, commonFlags{}, exitUsage, false
+	}
+	if *help || *helpLong {
+		fmt.Fprint(stderr, helpText)
+		return nil, commonFlags{}, exitOK, false
+	}
+	return fs.Args(), commonFlags{quiet: *quiet || *quietLong}, 0, true
+}
+
+// requireOnePositional asserts exactly one positional and prints a
+// usage error otherwise.
+func requireOnePositional(stderr io.Writer, helpText string, positional []string, label string) bool {
+	if len(positional) != 1 {
+		fmt.Fprintf(stderr, "expected exactly one %s; got %d\n", label, len(positional))
+		fmt.Fprint(stderr, helpText)
+		return false
+	}
+	return true
+}
+
+func runPack(args []string, stderr io.Writer) int {
+	var output, outputLong string
+	var keepSource, noVerify, allowCrossFS, force, forceLong bool
+	positional, common, exit, ok := parseSubcommand("pack", packHelpText, args, stderr, func(fs *flag.FlagSet) {
+		fs.StringVar(&output, "o", "", "output path")
+		fs.StringVar(&outputLong, "output", "", "output path")
+		fs.BoolVar(&keepSource, "keep-source", false, "keep .scram after verified pack")
+		fs.BoolVar(&noVerify, "no-verify", false, "skip round-trip verification")
+		fs.BoolVar(&allowCrossFS, "allow-cross-fs", false, "permit auto-delete across filesystems")
+		fs.BoolVar(&force, "f", false, "overwrite output")
+		fs.BoolVar(&forceLong, "force", false, "overwrite output")
+	})
+	if !ok {
+		return exit
+	}
+	if !requireOnePositional(stderr, packHelpText, positional, "positional argument (cue path)") {
 		return exitUsage
 	}
-	if *help || *helpShort {
-		printPackHelp(stderr)
-		return exitOK
-	}
-	if fs.NArg() != 1 {
-		fmt.Fprintf(stderr, "expected exactly one positional argument (cue path); got %d\n", fs.NArg())
-		printPackHelp(stderr)
-		return exitUsage
-	}
-	cuePath := fs.Arg(0)
+	cuePath := positional[0]
 	scramPath := strings.TrimSuffix(cuePath, filepath.Ext(cuePath)) + ".scram"
-	out := pickFirst(*output, *outputLong)
+	out := pickFirst(output, outputLong)
 	if out == "" {
 		out = DefaultPackOutput(cuePath)
 	}
-	beQuiet := *quiet || *quietLong
-	beForce := *force || *forceLong
-
+	beForce := force || forceLong
 	if !beForce {
 		if _, err := os.Stat(out); err == nil {
 			fmt.Fprintf(stderr, "output %s already exists (pass -f / --force to overwrite)\n", out)
 			return exitUsage
 		}
 	}
-	noVerifyImpliesKeep := *noVerify && !*keepSource
-	if *noVerify {
-		*keepSource = true
+	noVerifyImpliesKeep := noVerify && !keepSource
+	if noVerify {
+		keepSource = true
 	}
-	rep := NewReporter(stderr, beQuiet)
+	rep := NewReporter(stderr, common.quiet)
 	if noVerifyImpliesKeep {
 		rep.Info("--no-verify implies --keep-source; original .scram will be kept")
 	}
 	err := Pack(PackOptions{
 		CuePath: cuePath, ScramPath: scramPath, OutputPath: out,
-		LeadinLBA: LBALeadinStart,
-		Verify:    !*noVerify,
+		LeadinLBA: LBALeadinStart, Verify: !noVerify,
 	}, rep)
 	if err != nil {
-		return packErrorToExit(err)
+		return errToExit(err)
 	}
-	if !*keepSource {
-		if removed, removeErr := maybeRemoveSource(scramPath, out, *allowCrossFS, rep); removeErr != nil {
+	if !keepSource {
+		if removed, removeErr := maybeRemoveSource(scramPath, out, allowCrossFS, rep); removeErr != nil {
 			rep.Warn("source removal skipped: %v", removeErr)
 		} else if removed {
 			rep.Info("removed source %s", scramPath)
@@ -137,72 +172,47 @@ func runPack(args []string, stderr io.Writer) int {
 }
 
 func runUnpack(args []string, stderr io.Writer) int {
-	fs := flag.NewFlagSet("unpack", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	output := fs.String("o", "", "output path")
-	outputLong := fs.String("output", "", "output path")
-	noVerify := fs.Bool("no-verify", false, "skip output hash verification")
-	force := fs.Bool("f", false, "overwrite output")
-	forceLong := fs.Bool("force", false, "overwrite output")
-	quiet := fs.Bool("q", false, "quiet")
-	quietLong := fs.Bool("quiet", false, "quiet")
-	help := fs.Bool("help", false, "show help for unpack")
-	helpShort := fs.Bool("h", false, "show help for unpack")
-	if err := fs.Parse(args); err != nil {
+	var output, outputLong string
+	var noVerify, force, forceLong bool
+	positional, common, exit, ok := parseSubcommand("unpack", unpackHelpText, args, stderr, func(fs *flag.FlagSet) {
+		fs.StringVar(&output, "o", "", "output path")
+		fs.StringVar(&outputLong, "output", "", "output path")
+		fs.BoolVar(&noVerify, "no-verify", false, "skip output hash verification")
+		fs.BoolVar(&force, "f", false, "overwrite output")
+		fs.BoolVar(&forceLong, "force", false, "overwrite output")
+	})
+	if !ok {
+		return exit
+	}
+	if !requireOnePositional(stderr, unpackHelpText, positional, "positional argument (container path)") {
 		return exitUsage
 	}
-	if *help || *helpShort {
-		printUnpackHelp(stderr)
-		return exitOK
-	}
-	if fs.NArg() != 1 {
-		fmt.Fprintf(stderr, "expected exactly one positional argument (container path); got %d\n", fs.NArg())
-		printUnpackHelp(stderr)
-		return exitUsage
-	}
-	containerPath := fs.Arg(0)
-	out := pickFirst(*output, *outputLong)
+	containerPath := positional[0]
+	out := pickFirst(output, outputLong)
 	if out == "" {
 		out = DefaultUnpackOutput(containerPath)
 	}
-	beQuiet := *quiet || *quietLong
-	beForce := *force || *forceLong
-
-	rep := NewReporter(stderr, beQuiet)
-	err := Unpack(UnpackOptions{
+	rep := NewReporter(stderr, common.quiet)
+	if err := Unpack(UnpackOptions{
 		ContainerPath: containerPath, OutputPath: out,
-		Verify: !*noVerify, Force: beForce,
-	}, rep)
-	if err != nil {
-		return unpackErrorToExit(err)
+		Verify: !noVerify, Force: force || forceLong,
+	}, rep); err != nil {
+		return errToExit(err)
 	}
 	return exitOK
 }
 
 func runVerify(args []string, stderr io.Writer) int {
-	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	quiet := fs.Bool("q", false, "quiet")
-	quietLong := fs.Bool("quiet", false, "quiet")
-	help := fs.Bool("help", false, "show help for verify")
-	helpShort := fs.Bool("h", false, "show help for verify")
-	if err := fs.Parse(args); err != nil {
+	positional, common, exit, ok := parseSubcommand("verify", verifyHelpText, args, stderr, nil)
+	if !ok {
+		return exit
+	}
+	if !requireOnePositional(stderr, verifyHelpText, positional, "positional argument (container path)") {
 		return exitUsage
 	}
-	if *help || *helpShort {
-		printVerifyHelp(stderr)
-		return exitOK
-	}
-	if fs.NArg() != 1 {
-		fmt.Fprintf(stderr, "expected exactly one positional argument (container path); got %d\n", fs.NArg())
-		printVerifyHelp(stderr)
-		return exitUsage
-	}
-	containerPath := fs.Arg(0)
-	beQuiet := *quiet || *quietLong
-	rep := NewReporter(stderr, beQuiet)
-	if err := Verify(VerifyOptions{ContainerPath: containerPath}, rep); err != nil {
-		return verifyErrorToExit(err)
+	rep := NewReporter(stderr, common.quiet)
+	if err := Verify(VerifyOptions{ContainerPath: positional[0]}, rep); err != nil {
+		return errToExit(err)
 	}
 	return exitOK
 }
@@ -220,7 +230,7 @@ func maybeRemoveSource(scramPath, outPath string, allowCrossFS bool, r Reporter)
 
 func sameFilesystem(a, b string) bool {
 	sa, errA := os.Stat(a)
-	sb, errB := os.Stat(filepathDir(b))
+	sb, errB := os.Stat(filepath.Dir(b))
 	if errA != nil || errB != nil {
 		return false
 	}
@@ -230,13 +240,6 @@ func sameFilesystem(a, b string) bool {
 		return false
 	}
 	return stA.Dev == stB.Dev
-}
-
-func filepathDir(p string) string {
-	if i := strings.LastIndexByte(p, '/'); i >= 0 {
-		return p[:i+1]
-	}
-	return "."
 }
 
 func pickFirst(a, b string) string {
@@ -254,7 +257,10 @@ func DefaultUnpackOutput(containerPath string) string {
 	return strings.TrimSuffix(containerPath, filepath.Ext(containerPath)) + ".scram"
 }
 
-func packErrorToExit(err error) int {
+func errToExit(err error) int {
+	if err == nil {
+		return exitOK
+	}
 	var lme *LayoutMismatchError
 	switch {
 	case errors.As(err, &lme):
@@ -263,28 +269,6 @@ func packErrorToExit(err error) int {
 		return exitWrongBin
 	case errors.Is(err, errVerifyMismatch),
 		errors.Is(err, errOutputHashMismatch):
-		return exitVerifyFail
-	default:
-		return exitIO
-	}
-}
-
-func unpackErrorToExit(err error) int {
-	switch {
-	case errors.Is(err, errBinHashMismatch):
-		return exitWrongBin
-	case errors.Is(err, errOutputHashMismatch):
-		return exitVerifyFail
-	default:
-		return exitIO
-	}
-}
-
-func verifyErrorToExit(err error) int {
-	switch {
-	case errors.Is(err, errBinHashMismatch):
-		return exitWrongBin
-	case errors.Is(err, errOutputHashMismatch):
 		return exitVerifyFail
 	default:
 		return exitIO
