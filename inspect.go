@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,19 +10,18 @@ import (
 )
 
 // formatHumanInspect produces the default `miniscram inspect` text
-// output. magic, version, and scramblerHash come from the raw container
-// header. delta is the full delta payload as returned by ReadContainer.
-// If full is true and there is at least one override record, an
-// `overrides:` block is appended.
+// output. magic and version come from the raw container header. delta
+// is the full delta payload as returned by ReadContainer. If full is
+// true and there is at least one override record, an `overrides:`
+// block is appended.
 //
 // On a framing error walking the delta, partial output before the
 // failure is returned as the string and the iterator error is returned
 // as the error. The caller is responsible for routing the error to
 // stderr and producing the I/O exit code (per spec §Errors).
-func formatHumanInspect(m *Manifest, magic string, version byte, scramblerHash [32]byte, delta []byte, full bool) (string, error) {
+func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, full bool) (string, error) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "container:  %s v%d (scrambler %s…)\n",
-		magic, version, hex.EncodeToString(scramblerHash[:6]))
+	fmt.Fprintf(&b, "container:  %s v%d\n", magic, version)
 	b.WriteString("manifest:\n")
 	fmt.Fprintf(&b, "  tool_version:           %s\n", m.ToolVersion)
 	fmt.Fprintf(&b, "  created_utc:            %s\n", m.CreatedUTC)
@@ -115,7 +113,7 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	path := positional[0]
-	m, scramblerHash, delta, err := ReadContainer(path)
+	m, delta, err := ReadContainer(path)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitIO
@@ -129,7 +127,7 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, string(body))
 		return exitOK
 	}
-	human, ferr := formatHumanInspect(m, containerMagic, containerVersion, scramblerHash, delta, full)
+	human, ferr := formatHumanInspect(m, containerMagic, containerVersion, delta, full)
 	fmt.Fprint(stdout, human)
 	if ferr != nil {
 		fmt.Fprintln(stderr, ferr)

@@ -11,16 +11,14 @@ import (
 
 func TestInspectFormatHuman(t *testing.T) {
 	m := sampleManifest()
-	var fakeHash [32]byte
-	copy(fakeHash[:], bytes.Repeat([]byte{0x88}, 32))
 
 	t.Run("clean-delta", func(t *testing.T) {
-		out, err := formatHumanInspect(m, "MSCM", 0x01, fakeHash, []byte{0, 0, 0, 0}, false)
+		out, err := formatHumanInspect(m, "MSCM", 0x02, []byte{0, 0, 0, 0}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, want := range []string{
-			"container:  MSCM v1",
+			"container:  MSCM v2",
 			"scram.hashes.sha256:    " + strings.Repeat("c", 64),
 			"track 1: MODE1/2352",
 			"md5:    " + strings.Repeat("a", 32),
@@ -40,7 +38,7 @@ func TestInspectFormatHuman(t *testing.T) {
 
 	t.Run("full-lists-overrides", func(t *testing.T) {
 		delta := buildDelta(t, []uint64{2352, 4804, 7056})
-		out, err := formatHumanInspect(m, "MSCM", 0x01, fakeHash, delta, true)
+		out, err := formatHumanInspect(m, "MSCM", 0x02, delta, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,14 +53,14 @@ func TestInspectFormatHuman(t *testing.T) {
 	})
 
 	t.Run("full-empty-hides-section", func(t *testing.T) {
-		out, _ := formatHumanInspect(m, "MSCM", 0x01, fakeHash, []byte{0, 0, 0, 0}, true)
+		out, _ := formatHumanInspect(m, "MSCM", 0x02, []byte{0, 0, 0, 0}, true)
 		if strings.Contains(out, "overrides:") {
 			t.Errorf("unexpected overrides: section with 0 records:\n%s", out)
 		}
 	})
 
 	t.Run("delta-error-reported", func(t *testing.T) {
-		out, err := formatHumanInspect(m, "MSCM", 0x01, fakeHash, []byte{0, 0, 0, 1}, false)
+		out, err := formatHumanInspect(m, "MSCM", 0x02, []byte{0, 0, 0, 1}, false)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -74,7 +72,7 @@ func TestInspectFormatHuman(t *testing.T) {
 	t.Run("track-padding", func(t *testing.T) {
 		m2 := sampleManifest()
 		m2.Tracks = append(m2.Tracks, Track{Number: 2, Mode: "AUDIO", FirstLBA: 12345, Size: 47040, Filename: "y.bin"})
-		out, err := formatHumanInspect(m2, "MSCM", 0x01, fakeHash, []byte{0, 0, 0, 0}, false)
+		out, err := formatHumanInspect(m2, "MSCM", 0x02, []byte{0, 0, 0, 0}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +121,7 @@ func TestCLIInspect(t *testing.T) {
 		if code := run([]string{"inspect", packSyntheticContainer(t)}, &stdout, &stderr); code != exitOK {
 			t.Fatalf("exit %d; stderr=%s", code, stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "container:  MSCM v0") {
+		if !strings.Contains(stdout.String(), "container:  MSCM v2") {
 			t.Errorf("missing header in stdout:\n%s", stdout.String())
 		}
 		if stderr.Len() > 0 {
