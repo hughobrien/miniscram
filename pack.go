@@ -247,7 +247,7 @@ func hashTrackFiles(files []ResolvedFile) ([]FileHashes, error) {
 // compareHashes returns nil iff all three hashes match. Otherwise it
 // returns a plain (un-sentinel-wrapped) error whose message describes
 // each hash's status. Callers wrap with their own sentinel via
-// fmt.Errorf("%w: %v", sentinel, err) to attach the appropriate exit
+// fmt.Errorf("%w: %w", sentinel, err) to attach the appropriate exit
 // code semantics.
 func compareHashes(got, want FileHashes) error {
 	var diffs []string
