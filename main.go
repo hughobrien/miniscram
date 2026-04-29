@@ -171,8 +171,8 @@ func runUnpack(args []string, stderr io.Writer) int {
 	}
 	rep := NewReporter(stderr, beQuiet)
 	err = Unpack(UnpackOptions{
-		BinPath: in.Bin, ContainerPath: in.Container,
-		OutputPath: out, Verify: !*noVerify, Force: beForce,
+		ContainerPath: in.Container,
+		OutputPath:    out, Verify: !*noVerify, Force: beForce,
 	}, rep)
 	if err != nil {
 		return unpackErrorToExit(err)
@@ -203,7 +203,7 @@ func runVerify(args []string, stderr io.Writer) int {
 	}
 	rep := NewReporter(stderr, beQuiet)
 	if err := Verify(VerifyOptions{
-		BinPath: in.Bin, ContainerPath: in.Container,
+		ContainerPath: in.Container,
 	}, rep); err != nil {
 		return verifyErrorToExit(err)
 	}
