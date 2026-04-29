@@ -22,8 +22,11 @@ The repo root contains two PDFs that are not committed:
   layer. Clauses cited throughout `ecma130.go`. Page-to-clause map:
   §14 → PDF p. 20–22, §15 → p. 22, Annex A → p. 31–35, Annex B → p. 37.
 - `Compact representation of scrambled cdrom data.pdf` — Hauenstein
-  (IJCSIT 2022). Algorithmic basis for the delta-vs-prediction
-  approach.
+  (IJCSIT 2022), [doi:10.5121/ijcsit.2022.14401](https://doi.org/10.5121/ijcsit.2022.14401).
+  Conceptual inspiration for the delta-against-prediction approach.
+  miniscram's container format, override-record delta encoding, and
+  write-offset handling are its own — the paper uses xdelta3 against
+  DiscImageCreator output.
 
 Both are freely available from their original publishers.
 
