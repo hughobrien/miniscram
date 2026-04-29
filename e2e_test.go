@@ -113,7 +113,7 @@ func runE2E(t *testing.T, opts SynthOpts) {
 	}
 
 	// Inspect smoke: manifest must parse and write offset must match.
-	m, _, _, err := ReadContainer(outPath)
+	m, _, err := ReadContainer(outPath)
 	if err != nil {
 		t.Fatalf("ReadContainer: %v", err)
 	}
