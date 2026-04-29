@@ -47,7 +47,6 @@ func (m *Manifest) Marshal() ([]byte, error) {
 }
 
 // BinSize returns the total .bin size as the sum of per-track sizes.
-// Replaces the v0.2 manifest field of the same name.
 func (m *Manifest) BinSize() int64 {
 	var n int64
 	for _, t := range m.Tracks {
@@ -57,7 +56,7 @@ func (m *Manifest) BinSize() int64 {
 }
 
 // BinFirstLBA returns tracks[0].FirstLBA — i.e. where the .bin's data
-// track starts on disc. Replaces the v0.2 manifest field.
+// track starts on disc.
 func (m *Manifest) BinFirstLBA() int32 {
 	if len(m.Tracks) == 0 {
 		return 0
