@@ -76,8 +76,8 @@ Each is picked for what it stresses, not because of the game.
 
 ### Half-Life GOTY — mixed-mode hybrid CD
 
-- **Copy protection:** none (`Error Count: 0` in the
-  [redump submission](http://redump.org/disc/25966/)).
+- **Copy protection:** none (`Error Count: 0` per the
+  [redump entry](http://redump.org/disc/25966/)).
 - **Why this disc:** 1 Mode 1 data track + 27 Red Book audio tracks.
   The audio dominates the disc surface and exercises the audio-bypass
   path of the scrambler (audio sectors are not descrambled — only the
@@ -117,8 +117,7 @@ unpack has been proven byte-equal against the original.
 ### Freelancer — SafeDisc 2.70.030
 
 - **Copy protection:** SafeDisc 2.70.030 + Macrovision Security
-  Driver per the
-  [redump verification](http://forum.redump.org/post/122822/).
+  Driver per the [redump entry](http://redump.org/disc/42536/).
   Thousands of sectors are deliberately corrupted as part of the
   protection scheme.
 - **Why this disc:** demonstrates that miniscram captures intentional
@@ -161,7 +160,7 @@ more than a clean disc but is still a substantial saving.
 ### Max Payne 2: The Fall of Max Payne — SecuROM (main-channel clean)
 
 - **Copy protection:** SecuROM/LibCrypt per the
-  [redump verification](http://forum.redump.org/post/122805/).
+  [redump entry](http://redump.org/disc/10508/).
   Unlike SafeDisc, SecuROM/LibCrypt protection lives in the
   *subchannel*, not the main data sectors.
 - **Why this disc:** demonstrates that miniscram *works fine* with
@@ -205,9 +204,8 @@ the `.scram`.
 
 ### Deus Ex v1002f — clean Mode 1 baseline
 
-- **Copy protection:** none ("None found [OMIT FROM SUBMISSION]" per
-  [redump verification](http://forum.redump.org/post/128271/),
-  write offset −48).
+- **Copy protection:** none per the
+  [redump entry](http://redump.org/disc/14933/) (write offset −48).
 - **Why this disc:** the simplest case — a single Mode 1 data track,
   zero ECC/EDC errors. Establishes the lower bound: with no
   protection, no audio, and no errors, the bin fully predicts the
