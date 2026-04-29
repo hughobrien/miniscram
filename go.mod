@@ -1,3 +1,3 @@
-module github.com/hugh/miniscram
+module github.com/hughobrien/miniscram
 
 go 1.26.2

@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/ecma130_test.go
 package main
 
 import (

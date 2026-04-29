@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/cli_test.go
 package main
 
 import (

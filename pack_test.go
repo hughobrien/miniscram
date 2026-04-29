@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/pack_test.go
 package main
 
 import (

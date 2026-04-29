@@ -2,9 +2,7 @@
 *.pdf
 
 # Test data / dumps (multi-GB, kept locally)
-/deus-ex/
-/freelancer/
-/half-life/
+/test-discs/
 
 # Go build artefacts
 /miniscram

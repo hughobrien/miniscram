@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/unpack.go
 package main
 
 import (

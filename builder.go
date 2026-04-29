@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/builder.go
 package main
 
 import (

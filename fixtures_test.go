@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/fixtures_test.go
 package main
 
 import (

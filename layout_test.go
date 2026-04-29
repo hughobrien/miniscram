@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/layout_test.go
 package main
 
 import "testing"

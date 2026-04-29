@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/reporter_test.go
 package main
 
 import (

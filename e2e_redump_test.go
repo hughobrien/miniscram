@@ -30,7 +30,7 @@ type realDiscFixture struct {
 var realDiscFixtures = []realDiscFixture{
 	{
 		Name:                    "deus-ex",
-		Dir:                     "/home/hugh/miniscram/deus-ex",
+		Dir:                     "test-discs/deus-ex",
 		Stem:                    "DeusEx_v1002f",
 		ExpectedDataTrackErrors: 0,
 		MaxDeltaBytes:           1024,
@@ -39,7 +39,7 @@ var realDiscFixtures = []realDiscFixture{
 	},
 	{
 		Name: "freelancer",
-		Dir:  "/home/hugh/miniscram/freelancer",
+		Dir:  "test-discs/freelancer",
 		Stem: "FL_v1",
 		// SafeDisc 2.70.030; per redump.org submission, 588 deliberately
 		// corrupted sectors. Round-trip byte-equality plus this exact
@@ -53,7 +53,7 @@ var realDiscFixtures = []realDiscFixture{
 	},
 	{
 		Name: "half-life",
-		Dir:  "/home/hugh/miniscram/half-life",
+		Dir:  "test-discs/half-life",
 		Stem: "HALFLIFE",
 		// Clean retail disc, 1 Mode 1 data track + 27 audio tracks.
 		// Multi-FILE cue (one .bin per track). 0 ECC/EDC errors per

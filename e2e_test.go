@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/e2e_test.go
 package main
 
 import (
