@@ -95,30 +95,15 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	st.Done("ok")
 
-	// 5. single hashing pass over track files: per-track + disc-level
-	//    roll-up via fan-out MultiWriter.
+	// 5. single hashing pass over track files.
 	st = r.Step("hashing tracks")
-	rollupMD5, rollupSHA1, rollupSHA256 := md5.New(), sha1.New(), sha256.New()
-	rollupWriter := io.MultiWriter(rollupMD5, rollupSHA1, rollupSHA256)
-	for i, rf := range resolved.Files {
-		f, err := os.Open(rf.Path)
-		if err != nil {
-			st.Fail(err)
-			return err
-		}
-		trackMD5, trackSHA1, trackSHA256 := md5.New(), sha1.New(), sha256.New()
-		w := io.MultiWriter(trackMD5, trackSHA1, trackSHA256, rollupWriter)
-		if _, err := io.Copy(w, f); err != nil {
-			f.Close()
-			st.Fail(err)
-			return err
-		}
-		f.Close()
-		tracks[i].Hashes = FileHashes{
-			MD5:    hex.EncodeToString(trackMD5.Sum(nil)),
-			SHA1:   hex.EncodeToString(trackSHA1.Sum(nil)),
-			SHA256: hex.EncodeToString(trackSHA256.Sum(nil)),
-		}
+	perTrack, err := hashTrackFiles(resolved.Files)
+	if err != nil {
+		st.Fail(err)
+		return err
+	}
+	for i := range tracks {
+		tracks[i].Hashes = perTrack[i]
 	}
 	st.Done("%d track(s) hashed", len(tracks))
 
@@ -222,6 +207,34 @@ func hashFile(path string) (FileHashes, error) {
 	}
 	defer f.Close()
 	return hashReader(f)
+}
+
+// hashTrackFiles streams every file once, returning per-file
+// MD5/SHA-1/SHA-256 hashes in input order. Used by Pack (to populate
+// the manifest) and by Unpack (to verify against the manifest's
+// recorded values). Files are read sequentially; failure on any file
+// aborts. Returns one FileHashes per input file, in order.
+func hashTrackFiles(files []ResolvedFile) ([]FileHashes, error) {
+	perFile := make([]FileHashes, len(files))
+	for i, rf := range files {
+		f, err := os.Open(rf.Path)
+		if err != nil {
+			return nil, err
+		}
+		m, s1, s256 := md5.New(), sha1.New(), sha256.New()
+		w := io.MultiWriter(m, s1, s256)
+		_, copyErr := io.Copy(w, f)
+		f.Close()
+		if copyErr != nil {
+			return nil, copyErr
+		}
+		perFile[i] = FileHashes{
+			MD5:    hex.EncodeToString(m.Sum(nil)),
+			SHA1:   hex.EncodeToString(s1.Sum(nil)),
+			SHA256: hex.EncodeToString(s256.Sum(nil)),
+		}
+	}
+	return perFile, nil
 }
 
 // compareHashes returns nil iff all three hashes match. Otherwise it
