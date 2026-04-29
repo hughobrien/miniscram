@@ -93,8 +93,8 @@ func TestContainerDeltaIsZlibFramed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mlen := binary.BigEndian.Uint32(raw[37:41])
-	postManifest := raw[41+int(mlen):]
+	mlen := binary.BigEndian.Uint32(raw[containerHeaderSize-4 : containerHeaderSize])
+	postManifest := raw[containerHeaderSize+int(mlen):]
 	if len(postManifest) < 2 {
 		t.Fatalf("post-manifest too short: %d bytes", len(postManifest))
 	}
@@ -121,7 +121,7 @@ func TestContainerRejectsPlaintextDelta(t *testing.T) {
 	buf.Write(tableHash)
 	binary.Write(&buf, binary.BigEndian, uint32(len(manifest)))
 	buf.Write(manifest)
-	buf.Write([]byte{0, 0, 0, 0}) // plaintext count = 0
+	buf.Write([]byte{0, 0, 0, 0}) // any non-zlib bytes; zlib.NewReader fails on the magic
 	path := filepath.Join(t.TempDir(), "plain.miniscram")
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
