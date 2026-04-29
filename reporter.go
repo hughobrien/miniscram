@@ -91,6 +91,25 @@ type quietStep struct{}
 func (quietStep) Done(string, ...any) {}
 func (quietStep) Fail(error)          {}
 
+// runStep wraps the Step/Done/Fail pattern. fn returns (doneMsg, err);
+// on success runStep calls Done(doneMsg), on failure Fail(err) and
+// returns the error.
+//
+// Use for the common case where a step's body is a single computation
+// whose result narrates the Done line. Steps with mid-body Info/Warn
+// calls or whose Done message depends on multiple values should still
+// hand-roll.
+func runStep(r Reporter, label string, fn func() (string, error)) error {
+	st := r.Step(label)
+	msg, err := fn()
+	if err != nil {
+		st.Fail(err)
+		return err
+	}
+	st.Done("%s", msg)
+	return nil
+}
+
 // isStderrTTY returns true when w is the same fd as os.Stderr and that
 // fd is a TTY. We deliberately avoid third-party deps here.
 func isStderrTTY(w io.Writer) bool {
