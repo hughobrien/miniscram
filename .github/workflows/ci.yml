@@ -24,7 +24,8 @@ jobs:
       - name: Verify go.mod is tidy
         run: |
           go mod tidy
-          git diff --exit-code go.mod go.sum
+          # go.sum is absent because miniscram has no third-party deps.
+          git diff --exit-code go.mod
 
       - name: Build
         run: go build ./...

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // Exit codes match the spec.
@@ -225,20 +224,6 @@ func maybeRemoveSource(scramPath, outPath string, allowCrossFS bool, r Reporter)
 		return false, err
 	}
 	return true, nil
-}
-
-func sameFilesystem(a, b string) bool {
-	sa, errA := os.Stat(a)
-	sb, errB := os.Stat(filepath.Dir(b))
-	if errA != nil || errB != nil {
-		return false
-	}
-	stA, okA := sa.Sys().(*syscall.Stat_t)
-	stB, okB := sb.Sys().(*syscall.Stat_t)
-	if !okA || !okB {
-		return false
-	}
-	return stA.Dev == stB.Dev
 }
 
 func pickFirst(a, b string) string {
