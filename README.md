@@ -155,6 +155,51 @@ so they ride through the delta. zlib brings the 7 MB payload down to
 ~1.5 MB. 798 MB → 1.5 MB is still ~530× — a heavy protection costs
 more than a clean disc but is still a substantial saving.
 
+### Max Payne 2: The Fall of Max Payne — SecuROM (main-channel clean)
+
+- **Copy protection:** SecuROM/LibCrypt per the
+  [redump verification](http://forum.redump.org/post/122805/).
+  Unlike SafeDisc, SecuROM/LibCrypt protection lives in the
+  *subchannel*, not the main data sectors.
+- **Why this disc:** demonstrates that miniscram *works fine* with
+  SecuROM-protected games — "works fine" meaning *doesn't break
+  them*. miniscram doesn't preserve the SecuROM subchannel itself
+  ([out of scope](#out-of-scope)), but the main-channel `.scram`
+  round-trips byte-equal exactly like any unprotected disc. For
+  end-to-end preservation keep redumper's `_logs.zip` (which
+  contains the subchannel) next to the `.miniscram`.
+
+```
+$ ls -lh MP2_Play.scram
+-rwxr--r-- 1 hugh hugh 811M MP2_Play.scram
+
+$ miniscram pack MP2_Play.cue
+[02:47:09] running scramble-table self-test ... OK ok
+[02:47:09] resolving cue MP2_Play.cue ... OK 1 track(s), 743253168 bytes total
+[02:47:09] detecting write offset ... OK -48 bytes
+[02:47:09] checking constant offset ... OK ok
+[02:47:09] hashing tracks ... OK 1 track(s) hashed
+[02:47:12] hashing scram ... OK 1424e03e4afd
+[02:47:16] building scram prediction + delta ... OK 2390 override(s), delta 5864494 bytes
+[02:47:20] writing container ... OK MP2_Play.miniscram
+[02:47:20] reading manifest ... OK ok
+[02:47:20] running scramble-table self-test ... OK ok
+[02:47:20] reading container MP2_Play.miniscram ... OK delta 5864494 bytes
+[02:47:20] verifying bin hashes ... OK all tracks match
+[02:47:23] building scram prediction ... OK ok
+[02:47:25] applying delta ... OK 5864494 byte(s) of delta applied
+[02:47:25] verifying scram hashes ... OK all three match
+[02:47:29] removed source MP2_Play.scram
+
+$ ls -lh MP2_Play.miniscram
+-rw-rw-r-- 1 hugh hugh 367K MP2_Play.miniscram
+```
+
+811 MB → 367 KB (~2200×). Smaller delta than Freelancer because
+SecuROM doesn't corrupt main-channel sectors the way SafeDisc does;
+the protection bytes that matter sit in `MP2_Play_logs.zip`, not in
+the `.scram`.
+
 ### Deus Ex v1002f — clean Mode 1 baseline
 
 - **Copy protection:** none ("None found [OMIT FROM SUBMISSION]" per
