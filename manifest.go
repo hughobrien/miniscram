@@ -117,8 +117,10 @@ func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
 		return fmt.Errorf("creating zlib writer: %w", err)
 	}
 	if _, err := io.Copy(zw, deltaSrc); err != nil {
-		return err
+		return fmt.Errorf("compressing delta payload: %w", err)
 	}
+	// Close flushes the zlib trailer; must precede f.Sync so the
+	// trailer is on disk by the time fsync returns.
 	if err := zw.Close(); err != nil {
 		return fmt.Errorf("flushing zlib writer: %w", err)
 	}
