@@ -125,12 +125,44 @@ unpack has been proven byte-equal against the original.
 ### Deus Ex v1002f — clean Mode 1 baseline
 
 - **Copy protection:** none ("None found [OMIT FROM SUBMISSION]" per
-  redump verification, write offset −22).
+  [redump verification](http://forum.redump.org/post/128271/),
+  write offset −48).
 - **Why this disc:** the simplest case — a single Mode 1 data track,
-  zero ECC/EDC errors. Establishes the baseline: with no protection,
-  no audio, and no errors, the delta is near-empty.
+  zero ECC/EDC errors. Establishes the lower bound: with no
+  protection, no audio, and no errors, the bin fully predicts the
+  scram and the delta is empty.
 
-*(Transcript pending.)*
+```
+$ ls -lh DeusEx_v1002f.scram
+-rwxr--r-- 1 hugh hugh 856M DeusEx_v1002f.scram
+
+$ miniscram pack DeusEx_v1002f.cue
+[02:30:13] running scramble-table self-test ... OK ok
+[02:30:13] resolving cue DeusEx_v1002f.cue ... OK 1 track(s), 791104608 bytes total
+[02:30:13] detecting write offset ... OK -48 bytes
+[02:30:13] checking constant offset ... OK ok
+[02:30:13] hashing tracks ... OK 1 track(s) hashed
+[02:30:17] hashing scram ... OK 318c8497c2ca
+[02:30:21] building scram prediction + delta ... OK 0 override(s), delta 4 bytes
+[02:30:24] writing container ... OK DeusEx_v1002f.miniscram
+[02:30:24] reading manifest ... OK ok
+[02:30:24] running scramble-table self-test ... OK ok
+[02:30:24] reading container DeusEx_v1002f.miniscram ... OK delta 4 bytes
+[02:30:24] verifying bin hashes ... OK all tracks match
+[02:30:28] building scram prediction ... OK ok
+[02:30:30] applying delta ... OK 4 byte(s) of delta applied
+[02:30:30] verifying scram hashes ... OK all three match
+[02:30:34] removed source DeusEx_v1002f.scram
+
+$ ls -lh DeusEx_v1002f.miniscram
+-rw-rw-r-- 1 hugh hugh 673 DeusEx_v1002f.miniscram
+```
+
+**0 override records.** The 4-byte uncompressed delta is just the
+record count (`u32 = 0`); everything else in the 673-byte container
+is the binary header (41 bytes) plus the JSON manifest with track
+hashes. 856 MB → 673 bytes — about 1.3 million×, the irreducible
+cost being the manifest itself.
 
 ### Things that should work, untested
 
