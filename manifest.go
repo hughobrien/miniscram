@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -111,8 +112,15 @@ func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
 	if _, err := f.Write(body); err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, deltaSrc); err != nil {
+	zw, err := zlib.NewWriterLevel(f, zlib.BestCompression)
+	if err != nil {
+		return fmt.Errorf("creating zlib writer: %w", err)
+	}
+	if _, err := io.Copy(zw, deltaSrc); err != nil {
 		return err
+	}
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("flushing zlib writer: %w", err)
 	}
 	if err := f.Sync(); err != nil {
 		return err
@@ -165,9 +173,14 @@ func ReadContainer(path string) (*Manifest, [32]byte, []byte, error) {
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, [32]byte{}, nil, fmt.Errorf("parsing manifest JSON: %w", err)
 	}
-	delta, err := io.ReadAll(f)
+	zr, err := zlib.NewReader(f)
 	if err != nil {
-		return nil, [32]byte{}, nil, err
+		return nil, [32]byte{}, nil, fmt.Errorf("decompressing delta payload: %w", err)
+	}
+	defer zr.Close()
+	delta, err := io.ReadAll(zr)
+	if err != nil {
+		return nil, [32]byte{}, nil, fmt.Errorf("decompressing delta payload: %w", err)
 	}
 	return &m, scramblerHash, delta, nil
 }
