@@ -16,7 +16,14 @@ import (
 // and returns the file paths.
 func writeSynthDiscFiles(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSectors int32) (binPath, cuePath, scramPath, dir string) {
 	t.Helper()
-	bin, scram, params := synthDisc(t, mainSectors, writeOffsetBytes, leadoutSectors)
+	return writeSynthDiscFilesWithMode(t, mainSectors, writeOffsetBytes, leadoutSectors, 0x01, "MODE1/2352")
+}
+
+// writeSynthDiscFilesWithMode is the parameterized variant for tests
+// that need a specific mode (e.g. MODE2/2352 for B4's Mode 2 fixture).
+func writeSynthDiscFilesWithMode(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSectors int32, modeByte byte, modeStr string) (binPath, cuePath, scramPath, dir string) {
+	t.Helper()
+	bin, scram, params := synthDiscWithMode(t, mainSectors, writeOffsetBytes, leadoutSectors, modeByte, modeStr)
 	dir = t.TempDir()
 	binPath = filepath.Join(dir, "x.bin")
 	scramPath = filepath.Join(dir, "x.scram")
@@ -27,10 +34,11 @@ func writeSynthDiscFiles(t *testing.T, mainSectors int, writeOffsetBytes int, le
 	if err := os.WriteFile(scramPath, scram, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cuePath, []byte(`FILE "x.bin" BINARY
-  TRACK 01 MODE1/2352
+	cueContent := `FILE "x.bin" BINARY
+  TRACK 01 ` + modeStr + `
     INDEX 01 00:00:00
-`), 0o644); err != nil {
+`
+	if err := os.WriteFile(cuePath, []byte(cueContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_ = params // params reused via reading the .cue
