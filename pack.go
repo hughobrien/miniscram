@@ -332,14 +332,8 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	const (
-		chunkSize = 128 * 1024
-		maxScan   = 200 * 1024 * 1024
-	)
+	const chunkSize = 128 * 1024
 	limit := info.Size()
-	if limit > maxScan {
-		limit = maxScan
-	}
 
 	chunk := make([]byte, chunkSize)
 	carry := make([]byte, 0, SyncLen-1)
@@ -389,7 +383,7 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 		carry = append(carry[:0], chunk[tailStart:n]...)
 		pos += int64(n)
 	}
-	return 0, fmt.Errorf("no plausible scrambled sync field found in first %d bytes of scram", limit)
+	return 0, fmt.Errorf("no plausible scrambled sync field found in %d bytes of scram", limit)
 }
 
 // checkConstantOffset samples sync positions across the scram file and
