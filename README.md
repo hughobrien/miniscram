@@ -39,16 +39,6 @@ Install into a profile:
 
     nix profile install github:hughobrien/miniscram
 
-Development shell (Go + tools):
-
-    nix develop github:hughobrien/miniscram
-
-### From source
-
-    git clone https://github.com/hughobrien/miniscram
-    cd miniscram
-    go build -o miniscram ./...
-
 ## CLI
 
 ### `pack`

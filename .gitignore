@@ -15,6 +15,9 @@
 # Go workspace state
 go.work.sum
 
+# Nix build symlink (created by `nix build`)
+/result
+
 # Editor / OS noise
 .DS_Store
 .idea/
