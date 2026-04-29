@@ -24,9 +24,12 @@ import (
 //
 // The keystream-table builder below is a Go port of redumper's
 // Scrambler::_TABLE lambda (cd/cd_scrambler.ixx), kept near-verbatim
-// because it is the canonical, well-trusted implementation that the
-// CD-preservation community already relies on. Redumper is GPL-3.0;
-// miniscram matches that license.
+// because it is the canonical, well-trusted implementation the
+// CD-preservation community already relies on.
+//
+// Adapted from redumper, https://github.com/superg/redumper
+// Copyright (C) the redumper contributors
+// Licensed under GPL-3.0; miniscram matches that license. See ./LICENSE.
 //
 // The construction itself is ECMA-130 Annex B: a 15-bit LFSR with
 // feedback polynomial x^15 + x + 1, pre-set to 0x0001. Bytes 0..11 of
