@@ -10,6 +10,50 @@ import (
 	"testing"
 )
 
+// TestUnpackRoundTripMode2SynthDisc covers TASKS.md item B4: end-to-end
+// pack → unpack round-trip on a synthetic Mode 2 disc. The predictor
+// is mode-agnostic for non-AUDIO tracks, so this primarily confirms
+// the cue parser accepts MODE2/2352 and the container/manifest round-
+// trip preserves it.
+func TestUnpackRoundTripMode2SynthDisc(t *testing.T) {
+	binPath, cuePath, scramPath, dir := writeSynthDiscFilesWithMode(t, 100, -48, 10, 0x02, "MODE2/2352")
+	_ = binPath
+	containerPath := filepath.Join(dir, "x.miniscram")
+	rep := NewReporter(io.Discard, true)
+	if err := Pack(PackOptions{
+		CuePath: cuePath, ScramPath: scramPath,
+		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
+	}, rep); err != nil {
+		t.Fatal(err)
+	}
+	m, _, err := ReadContainer(containerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Tracks) != 1 || m.Tracks[0].Mode != "MODE2/2352" {
+		t.Fatalf("manifest tracks = %+v; want one MODE2/2352 entry", m.Tracks)
+	}
+	outPath := filepath.Join(dir, "x.scram.recovered")
+	if err := Unpack(UnpackOptions{
+		ContainerPath: containerPath,
+		OutputPath:    outPath,
+		Verify:        true,
+	}, rep); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(scramPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("Mode 2 round-trip differs (got %d bytes, want %d)", len(got), len(want))
+	}
+}
+
 func TestUnpackRoundTripSynthDisc(t *testing.T) {
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, -48, 10)
 	_ = binPath

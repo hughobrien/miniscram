@@ -45,19 +45,23 @@ func TestGenerateLeadoutSectorLBA0(t *testing.T) {
 	}
 }
 
-// synthDisc returns (bin, scram, params) for a small fake disc:
-//   - 100 Mode 1 data sectors with valid sync + BCD MSF header,
-//     starting at LBA 0 (bin).
-//   - scram = leadin zeros (45000 sectors) + pregap-of-zero (150
-//     sectors) + scrambled bin sectors (100 sectors) + leadout
-//     scrambled-zero (10 sectors), shifted by writeOffsetBytes.
-//   - writeOffsetBytes is configurable for testing both signs.
+// synthDiscWithMode returns (bin, scram, params) for a small fake disc
+// with a single data track in the requested mode. modeByte goes into
+// each bin sector's header byte (0x01 for MODE1/2352, 0x02 for
+// MODE2/2352); modeStr is the cuesheet-style mode string and goes into
+// the returned BuildParams' Tracks.
 //
-// Using full 45000-sector leadin would dominate the test; instead we
-// use a custom LeadinLBA = -150 (no leadin region) so the synthetic
-// .scram has only pregap + main + leadout. The builder must handle
-// this case correctly because BuildParams allows overriding LeadinLBA.
-func synthDisc(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSectors int32) ([]byte, []byte, BuildParams) {
+// Disc layout: pregap-of-zero (150 sectors) + scrambled bin sectors
+// (mainSectors) + leadout scrambled-zero (leadoutSectors), shifted by
+// writeOffsetBytes. LeadinLBA is set to -150 (no real leadin region)
+// to keep the synthetic .scram small; BuildParams allows the override.
+//
+// Mode 1 vs Mode 2 differ in the EDC/ECC layout of real-world sectors,
+// but miniscram's predictor doesn't compute EDC/ECC — it just scrambles
+// raw bytes per the ECMA-130 table. The round-trip is therefore
+// mode-agnostic, and this helper exists primarily to confirm that
+// pack/unpack/cue parsing all flow through correctly for MODE2/2352.
+func synthDiscWithMode(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSectors int32, modeByte byte, modeStr string) ([]byte, []byte, BuildParams) {
 	t.Helper()
 	const leadinLBA int32 = LBAPregapStart // -150; no real leadin region
 	binSize := mainSectors * SectorSize
@@ -71,7 +75,7 @@ func synthDisc(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSecto
 		s[12] = m
 		s[13] = sec
 		s[14] = f
-		s[15] = 0x01 // mode 1
+		s[15] = modeByte
 		// fill user data with deterministic noise
 		for j := 16; j < SectorSize; j++ {
 			s[j] = byte(j * (i + 1))
@@ -103,9 +107,16 @@ func synthDisc(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSecto
 		ScramSize:        int64(len(scram)),
 		BinFirstLBA:      0,
 		BinSectorCount:   int32(mainSectors),
-		Tracks:           []Track{{Number: 1, Mode: "MODE1/2352", FirstLBA: 0}},
+		Tracks:           []Track{{Number: 1, Mode: modeStr, FirstLBA: 0}},
 	}
 	return bin, scram, params
+}
+
+// synthDisc is the Mode 1 / 2352 specialization of synthDiscWithMode,
+// preserved as the default for the bulk of pre-existing tests.
+func synthDisc(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSectors int32) ([]byte, []byte, BuildParams) {
+	t.Helper()
+	return synthDiscWithMode(t, mainSectors, writeOffsetBytes, leadoutSectors, 0x01, "MODE1/2352")
 }
 
 // writeAt copies src into dst[at:], clipping if at < 0 or at+len > len(dst).
@@ -153,6 +164,27 @@ func TestBuilderCleanRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(hat.Bytes(), scram) {
 		t.Fatalf("ε̂ != scram for clean disc")
+	}
+}
+
+// TestBuilderCleanRoundTripMode2 exercises the MODE2/2352 path. Mode 1
+// vs Mode 2 differ in EDC/ECC layout in real-world sectors, but
+// miniscram's predictor is mode-agnostic for non-AUDIO tracks (it just
+// scrambles raw bytes per the ECMA-130 table). This test confirms the
+// predictor handles the Mode 2 mode byte (0x02 in sector header) and
+// the cue's "MODE2/2352" string without regression.
+func TestBuilderCleanRoundTripMode2(t *testing.T) {
+	bin, scram, params := synthDiscWithMode(t, 100, -48, 10, 0x02, "MODE2/2352")
+	var hat bytes.Buffer
+	errs, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("got %d error sectors, want 0", len(errs))
+	}
+	if !bytes.Equal(hat.Bytes(), scram) {
+		t.Fatalf("ε̂ != scram for clean Mode 2 disc")
 	}
 }
 
