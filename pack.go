@@ -89,7 +89,7 @@ func Pack(opts PackOptions, r Reporter) error {
 
 	// 4. constant-offset check.
 	st = r.Step("checking constant offset")
-	if err := checkConstantOffset(opts.ScramPath, scramSize); err != nil {
+	if err := checkConstantOffset(opts.ScramPath, scramSize, opts.LeadinLBA); err != nil {
 		st.Fail(err)
 		return err
 	}
@@ -381,20 +381,65 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 	return 0, fmt.Errorf("no plausible scrambled sync field found in first %d bytes of scram", limit)
 }
 
-// checkConstantOffset samples sync positions near the start, middle,
-// and end of the scram file and confirms they all share the same
-// (offset % SectorSize) value. A drift here would indicate a
-// variable-offset disc, which miniscram doesn't support.
-func checkConstantOffset(scramPath string, scramSize int64) error {
+// checkConstantOffset samples sync positions across the scram file and
+// confirms they all imply the same write offset. A drift here would
+// indicate a variable-offset disc, which miniscram doesn't support.
+//
+// Only "real" sync candidates count: a candidate must have valid BCD
+// MSF bytes after descrambling, decode to a plausible LBA, and imply
+// a write offset within ±2 sectors. This filters out coincidental Sync
+// byte sequences in audio regions (where there are no real scrambled
+// syncs, just PCM samples that may happen to match the sync pattern
+// AND have BCD-valid bytes following). Without this filter, multi-
+// track discs with audio (e.g. HL1) report spurious "variable write
+// offset" errors from audio coincidences.
+//
+// If fewer than 2 valid syncs are found across the sample anchors, the
+// check is skipped (constancy can't be verified with a single sample;
+// detectWriteOffset already verified the disc has a valid write offset
+// at the start).
+func checkConstantOffset(scramPath string, scramSize int64, leadinLBA int32) error {
 	f, err := os.Open(scramPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	// findSyncFrom searches forward from startAt (up to the end of the
-	// file) for the first sync field. It reads in 128 KB chunks to
-	// avoid loading the whole file.
-	findSyncFrom := func(startAt int64) (int64, error) {
+
+	isBCD := func(b byte) bool { return (b>>4) <= 9 && (b&0x0F) <= 9 }
+
+	// validateCandidate returns the implied write offset for a sync at
+	// syncOff if it passes BCD + LBA + offset-bound checks; otherwise
+	// returns ok=false.
+	validateCandidate := func(syncOff int64) (int, bool) {
+		if syncOff+int64(SyncLen)+3 > scramSize {
+			return 0, false
+		}
+		var header [3]byte
+		if _, err := f.ReadAt(header[:], syncOff+int64(SyncLen)); err != nil {
+			return 0, false
+		}
+		for i := 0; i < 3; i++ {
+			header[i] ^= scrambleTable[SyncLen+i]
+		}
+		if !isBCD(header[0]) || !isBCD(header[1]) || !isBCD(header[2]) {
+			return 0, false
+		}
+		decodedLBA := BCDMSFToLBA(header)
+		if decodedLBA < leadinLBA || decodedLBA > 500_000 {
+			return 0, false
+		}
+		expectedAt := int64(decodedLBA-leadinLBA) * SectorSize
+		impliedOffset := int(syncOff - expectedAt)
+		const writeOffsetLimit = 2 * SectorSize
+		if impliedOffset > writeOffsetLimit || impliedOffset < -writeOffsetLimit {
+			return 0, false
+		}
+		return impliedOffset, true
+	}
+
+	// findValidSyncFrom searches forward from startAt for the first
+	// sync that passes validateCandidate. Returns (-1, nil) if none.
+	findValidSyncFrom := func(startAt int64) (int, bool, error) {
 		const chunkSize = 128 * 1024
 		pos := startAt
 		for pos < scramSize {
@@ -404,40 +449,51 @@ func checkConstantOffset(scramPath string, scramSize int64) error {
 			}
 			buf := make([]byte, readLen)
 			if _, err := f.ReadAt(buf, pos); err != nil && err != io.EOF {
-				return 0, err
+				return 0, false, err
 			}
-			idx := bytes.Index(buf, Sync[:])
-			if idx >= 0 {
-				return pos + int64(idx), nil
+			searchPos := 0
+			for {
+				idx := bytes.Index(buf[searchPos:], Sync[:])
+				if idx < 0 {
+					break
+				}
+				idx += searchPos
+				syncOff := pos + int64(idx)
+				if off, ok := validateCandidate(syncOff); ok {
+					return off, true, nil
+				}
+				searchPos = idx + 1
 			}
-			// advance by chunkSize - SyncLen+1 to not straddle a boundary
 			pos += readLen - int64(SyncLen) + 1
 			if readLen < int64(SyncLen) {
 				break
 			}
 		}
-		return 0, fmt.Errorf("no sync field found from offset %d", startAt)
+		return 0, false, nil
 	}
+
 	if scramSize < 8*SectorSize {
 		return nil // file too small to bother
 	}
-	// Collect at most 3 sync positions spread across the file. We start
-	// the search at 0, scramSize/2, and scramSize*3/4 so that we always
-	// find syncs even when a large pregap occupies the first half of
-	// the file.
 	starts := []int64{0, scramSize / 2, scramSize * 3 / 4}
-	var mods []int64
+	var offsets []int
 	for _, s := range starts {
-		off, err := findSyncFrom(s)
+		off, ok, err := findValidSyncFrom(s)
 		if err != nil {
 			return err
 		}
-		mods = append(mods, off%int64(SectorSize))
+		if !ok {
+			continue // no valid sync from this anchor (e.g. anchor lands in audio)
+		}
+		offsets = append(offsets, off)
 	}
-	for i := 1; i < len(mods); i++ {
-		if mods[i] != mods[0] {
-			return fmt.Errorf("variable write offset detected (sync mod %d at sample %d differs from %d at sample 0)",
-				mods[i], i, mods[0])
+	if len(offsets) < 2 {
+		return nil // can't verify constancy with a single sample
+	}
+	for i := 1; i < len(offsets); i++ {
+		if offsets[i] != offsets[0] {
+			return fmt.Errorf("variable write offset detected (sample %d implies offset %d, sample 0 implies %d)",
+				i, offsets[i], offsets[0])
 		}
 	}
 	return nil
