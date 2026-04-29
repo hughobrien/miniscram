@@ -91,9 +91,9 @@ func TestDeltaEncodeKeepsSeparated(t *testing.T) {
 	}
 }
 
-func TestDeltaEncodeSplitsAtSectorSize(t *testing.T) {
-	// A run longer than SectorSize must split into multiple overrides
-	// of at most SectorSize bytes each.
+func TestDeltaEncodeLargeRunSingleRecord(t *testing.T) {
+	// A run longer than SectorSize is now emitted as a single record
+	// (no per-sector splitting). The DeltaEncoder lifts the cap.
 	const runLen = SectorSize*2 + 100
 	scram := bytes.Repeat([]byte{0x00}, runLen+1000)
 	hat := append([]byte{}, scram...)
@@ -105,9 +105,9 @@ func TestDeltaEncodeSplitsAtSectorSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// runLen / SectorSize = 2 full + 100 bytes leftover = 3 records
-	if n != 3 {
-		t.Fatalf("override count = %d; want 3", n)
+	// One contiguous run → exactly 1 record regardless of length.
+	if n != 1 {
+		t.Fatalf("override count = %d; want 1", n)
 	}
 }
 
@@ -238,14 +238,15 @@ func TestIterateDeltaRecordsBadLength(t *testing.T) {
 }
 
 func TestIterateDeltaRecordsLengthTooLarge(t *testing.T) {
-	// length = SectorSize+1 should be rejected (mirrors ApplyDelta's check)
+	// length = MaxDeltaRecordLength+1 should be rejected (sanity ceiling).
+	// MaxDeltaRecordLength = 0x40000000; +1 = 0x40000001
 	bad := []byte{
 		0, 0, 0, 1,
 		0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0x09, 0x31, // length = 2353 = SectorSize + 1, big-endian
+		0x40, 0x00, 0x00, 0x01, // 1<<30 + 1 = 0x40000001
 	}
 	if _, err := IterateDeltaRecords(bad, func(uint64, uint32) error { return nil }); err == nil {
-		t.Fatal("expected framing error for length > SectorSize")
+		t.Fatal("expected framing error for length > MaxDeltaRecordLength")
 	}
 }
 
@@ -262,3 +263,68 @@ func TestIterateDeltaRecordsCallbackError(t *testing.T) {
 		t.Fatalf("got err=%v; want %v", err, want)
 	}
 }
+
+// TestApplyDeltaRejectsImplausibleLength feeds ApplyDelta a hand-crafted
+// record whose length exceeds MaxDeltaRecordLength and confirms it
+// rejects rather than allocating the implausible buffer.
+func TestApplyDeltaRejectsImplausibleLength(t *testing.T) {
+	bad := []byte{
+		0, 0, 0, 1,
+		0, 0, 0, 0, 0, 0, 0, 0,
+		0x40, 0x00, 0x00, 0x01, // 1<<30 + 1 = 0x40000001
+	}
+	out := &nopWriterAt{}
+	err := ApplyDelta(out, bytes.NewReader(bad))
+	if err == nil {
+		t.Fatal("expected error for implausible length")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("implausible length")) {
+		t.Fatalf("error should mention implausible length; got: %v", err)
+	}
+}
+
+// TestDeltaEncoderDirectAppend exercises NewDeltaEncoder + Append +
+// Close without going through EncodeDelta. Locks in the encoder's
+// independent contract (Task 5 will drive Append directly from the
+// builder's mismatch callback, not via EncodeDelta).
+func TestDeltaEncoderDirectAppend(t *testing.T) {
+	var buf bytes.Buffer
+	enc := NewDeltaEncoder(&buf)
+	enc.Append(100, []byte{0x11, 0x22})
+	enc.Append(0, []byte{}) // zero-length: should be silently skipped
+	enc.Append(5000, []byte{0x33, 0x44, 0x55})
+	count, err := enc.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d; want 2 (zero-length Append should not increment)", count)
+	}
+	type rec struct {
+		off    uint64
+		length uint32
+	}
+	var got []rec
+	if _, err := IterateDeltaRecords(buf.Bytes(), func(off uint64, length uint32) error {
+		got = append(got, rec{off, length})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []rec{{100, 2}, {5000, 3}}
+	if len(got) != len(want) {
+		t.Fatalf("records = %v; want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("record %d = %+v; want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// nopWriterAt is a sink that satisfies io.WriterAt without keeping the
+// data — used by tests that only care about whether ApplyDelta returns
+// an error before reaching the WriteAt call.
+type nopWriterAt struct{}
+
+func (nopWriterAt) WriteAt(p []byte, off int64) (int, error) { return len(p), nil }
