@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/ecma130.go
 //
 // Implements the CD-ROM coding layers from Standard ECMA-130 (2nd
 // Edition, June 1996, "Data interchange on read-only 120 mm optical

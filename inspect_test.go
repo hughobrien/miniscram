@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/inspect_test.go
 package main
 
 import (

@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/delta.go
 package main
 
 import (

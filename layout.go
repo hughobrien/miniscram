@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/layout.go
 package main
 
 import "fmt"

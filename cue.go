@@ -1,4 +1,3 @@
-// /home/hugh/miniscram/cue.go
 package main
 
 import (
