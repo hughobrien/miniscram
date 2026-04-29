@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          BIN_NAME="miniscram-${VERSION}-${GOOS}-${GOARCH}"
+          if [ "$GOOS" = "windows" ]; then
+            BIN_NAME="${BIN_NAME}.exe"
+          fi
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "dist/${BIN_NAME}" ./...
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: miniscram-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/miniscram-*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum miniscram-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          # Use CHANGELOG.md section for the matching version, if any.
+          NOTES_FILE=""
+          if [ -f CHANGELOG.md ]; then
+            NOTES_FILE=$(mktemp)
+            awk -v ver="$VERSION" '
+              BEGIN { stripped=ver; sub(/^v/,"",stripped); want="^## \\["stripped"\\]"; printing=0 }
+              $0 ~ want { printing=1; next }
+              printing && /^## \[/ { exit }
+              printing { print }
+            ' CHANGELOG.md > "$NOTES_FILE"
+          fi
+          if [ -s "$NOTES_FILE" ]; then
+            gh release create "$VERSION" --title "$VERSION" --notes-file "$NOTES_FILE" dist/miniscram-* dist/SHA256SUMS
+          else
+            gh release create "$VERSION" --title "$VERSION" --generate-notes dist/miniscram-* dist/SHA256SUMS
+          fi
