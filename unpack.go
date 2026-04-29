@@ -107,7 +107,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		BinSectorCount:   m.BinSectorCount(),
 		Tracks:           m.Tracks,
 	}
-	if _, err := BuildEpsilonHat(hatFile, params, binReader, nil); err != nil {
+	if _, _, err := BuildEpsilonHat(hatFile, params, binReader, nil, nil); err != nil {
 		closeBin()
 		hatFile.Close()
 		st.Fail(err)
