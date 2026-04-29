@@ -1,5 +1,8 @@
 # miniscram
 
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](./LICENSE)
+[![Release](https://img.shields.io/github/v/release/hughobrien/miniscram?display_name=tag&sort=semver)](https://github.com/hughobrien/miniscram/releases)
+
 Compactly preserve scrambled CD-ROM dumps. miniscram stores a
 [Redumper](https://github.com/superg/redumper) `.scram` file as a small
 structured delta against the unscrambled `.bin`, so you keep the
@@ -368,15 +371,22 @@ To reconstruct the `.scram`, a reader:
 
 The result must hash to `scram.hashes`.
 
+## Acknowledgments
+
+- **Jacob Hauenstein** — the original method paper,
+  [*Compact Preservation of Scrambled CD-ROM Data*](https://doi.org/10.5121/ijcsit.2022.14401)
+  (IJCSIT, August 2022), which inspired this work.
+- **[redumper](https://github.com/superg/redumper)** — the upstream
+  CD-ROM dumper miniscram is built around. The scrambler in
+  `ecma130.go` is a near-verbatim Go port of redumper's
+  implementation; per-file attribution is in source.
+- **Redump.org community** — for the dumping standards and disc
+  verification submissions that the demonstration fixtures (Deus Ex,
+  Half-Life, Freelancer, Max Payne 2) come from.
+
 ## License
 
 GPL-3.0 — see [LICENSE](./LICENSE).
-
-Some routines are adapted from
-[redumper](https://github.com/superg/redumper) (also GPL-3.0). The
-scrambler in `ecma130.go` in particular is a near-verbatim port of
-redumper's canonical implementation. Attribution is noted at each lift
-point in source.
 
 ## Design history
 

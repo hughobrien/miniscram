@@ -32,10 +32,10 @@ Both are freely available from their original publishers.
 
 ## Upstream we draw from
 
-- [redumper](https://github.com/superg/redumper) — typically cloned to
-  `/home/hugh/redumper` for cross-reference. License-compatible (both
-  GPL-3.0). When lifting code from redumper, add an attribution
-  comment at the lift point that names the upstream file.
+- [redumper](https://github.com/superg/redumper) — clone locally for
+  cross-reference. License-compatible (both GPL-3.0). When lifting
+  code from redumper, add an attribution comment at the lift point
+  that names the upstream file.
 
 Existing lifts:
 

@@ -1,3 +1,24 @@
+miniscram — Compact preservation of scrambled CD-ROM data
+Copyright (C) 2026 Hugh O'Brien
+
+Portions of this program (notably the scrambler implementation in
+ecma130.go) are derived from redumper (https://github.com/superg/redumper),
+Copyright (C) the redumper contributors. Both projects are licensed
+under the GNU General Public License, version 3.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, version 3 of the License.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+General Public License for more details.
+
+The full text of the GPL-3.0 follows.
+
+================================================================================
+
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 
