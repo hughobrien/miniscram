@@ -14,7 +14,7 @@ import (
 
 func sampleManifest() *Manifest {
 	return &Manifest{
-		FormatVersion:        3,
+		FormatVersion:        4,
 		ToolVersion:          "miniscram 0.2.0 (go1.22)",
 		CreatedUTC:           "2026-04-28T14:30:21Z",
 		ScramSize:            739729728,
@@ -231,10 +231,11 @@ func TestInspectFormatHumanTrackPadding(t *testing.T) {
 func packSyntheticContainer(t *testing.T) string {
 	t.Helper()
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
+	_ = binPath // .bin lives next to .cue; ResolveCue finds it via cue
 	out := filepath.Join(dir, "x.miniscram")
 	rep := NewReporter(io.Discard, true)
 	if err := Pack(PackOptions{
-		BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+		CuePath: cuePath, ScramPath: scramPath,
 		OutputPath: out, LeadinLBA: LBAPregapStart, Verify: true,
 	}, rep); err != nil {
 		t.Fatal(err)
@@ -251,7 +252,7 @@ func TestCLIInspectHumanOutput(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"container:  MSCM v3",
+		"container:  MSCM v4",
 		"manifest:",
 		"tool_version:",
 		"bin_sha256:",
@@ -302,10 +303,10 @@ func TestCLIInspectFullFlag(t *testing.T) {
 	}
 }
 
-func TestCLIInspectRejectsV2(t *testing.T) {
+func TestCLIInspectRejectsV3(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "v2.miniscram")
-	body := []byte("MSCM\x02\x00\x00\x00\x00")
+	path := filepath.Join(dir, "v3.miniscram")
+	body := []byte("MSCM\x03\x00\x00\x00\x00")
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -314,8 +315,8 @@ func TestCLIInspectRejectsV2(t *testing.T) {
 	if code != exitIO {
 		t.Fatalf("exit %d; want %d (exitIO); stderr=%s", code, exitIO, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "v0.2 .miniscram files cannot be read") {
-		t.Errorf("missing v0.2 migration error in stderr:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "v0.3") {
+		t.Errorf("missing v0.3 migration error in stderr:\n%s", stderr.String())
 	}
 }
 

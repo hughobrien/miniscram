@@ -31,7 +31,10 @@ var (
 // (Verify on, LeadinLBA = LBALeadinStart). Fields without a comment
 // match the obvious thing.
 type PackOptions struct {
-	BinPath    string
+	// BinPath is unused as of v0.4; the cue sheet is the authoritative
+	// source for bin file locations. Retained for source compatibility
+	// until Task 5 rewrites callers.
+	BinPath    string // deprecated: ignored; cue resolves bin paths
 	CuePath    string
 	ScramPath  string
 	OutputPath string
@@ -57,41 +60,30 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	st.Done("ok")
 
-	// 1. parse cue
-	st = r.Step("parsing " + opts.CuePath)
-	cueFile, err := os.Open(opts.CuePath)
+	// 1. resolve cue (parse + stat + cumulative LBAs).
+	st = r.Step("resolving cue " + opts.CuePath)
+	resolved, err := ResolveCue(opts.CuePath)
 	if err != nil {
 		st.Fail(err)
 		return err
 	}
-	tracks, err := ParseCue(cueFile)
-	cueFile.Close()
-	if err != nil {
-		st.Fail(err)
-		return err
+	tracks := resolved.Tracks
+	binSize := int64(0)
+	for _, f := range resolved.Files {
+		binSize += f.Size
 	}
-	st.Done("%d track(s)", len(tracks))
+	binSectors := int32(binSize / int64(SectorSize))
+	st.Done("%d track(s), %d bytes total", len(tracks), binSize)
 
-	// 2. stat scram
+	// 2. stat scram.
 	scramInfo, err := os.Stat(opts.ScramPath)
 	if err != nil {
-		return fmt.Errorf("stat %s: %w", opts.ScramPath, err)
+		return err
 	}
 	scramSize := scramInfo.Size()
 
-	// stat bin
-	binInfo, err := os.Stat(opts.BinPath)
-	if err != nil {
-		return fmt.Errorf("stat %s: %w", opts.BinPath, err)
-	}
-	binSize := binInfo.Size()
-	if binSize%SectorSize != 0 {
-		return fmt.Errorf("bin size %d is not a multiple of %d", binSize, SectorSize)
-	}
-	binSectors := int32(binSize / SectorSize)
-
-	// 3. auto-detect write offset
-	st = r.Step("auto-detecting write offset")
+	// 3. detect write offset.
+	st = r.Step("detecting write offset")
 	writeOffsetBytes, err := detectWriteOffset(opts.ScramPath, opts.LeadinLBA)
 	if err != nil {
 		st.Fail(err)
@@ -99,7 +91,7 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	st.Done("%d bytes", writeOffsetBytes)
 
-	// 4. constant-offset check
+	// 4. constant-offset check.
 	st = r.Step("checking constant offset")
 	if err := checkConstantOffset(opts.ScramPath, scramSize); err != nil {
 		st.Fail(err)
@@ -107,14 +99,35 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	st.Done("ok")
 
-	// 5. hash bin and scram
-	st = r.Step("hashing bin")
-	binHashes, err := hashFile(opts.BinPath)
-	if err != nil {
-		st.Fail(err)
-		return err
+	// 5. single hashing pass over track files: per-track + disc-level
+	//    roll-up via fan-out MultiWriter.
+	st = r.Step("hashing tracks")
+	rollupMD5, rollupSHA1, rollupSHA256 := md5.New(), sha1.New(), sha256.New()
+	rollupWriter := io.MultiWriter(rollupMD5, rollupSHA1, rollupSHA256)
+	for i, rf := range resolved.Files {
+		f, err := os.Open(rf.Path)
+		if err != nil {
+			st.Fail(err)
+			return err
+		}
+		trackMD5, trackSHA1, trackSHA256 := md5.New(), sha1.New(), sha256.New()
+		w := io.MultiWriter(trackMD5, trackSHA1, trackSHA256, rollupWriter)
+		if _, err := io.Copy(w, f); err != nil {
+			f.Close()
+			st.Fail(err)
+			return err
+		}
+		f.Close()
+		tracks[i].MD5 = hex.EncodeToString(trackMD5.Sum(nil))
+		tracks[i].SHA1 = hex.EncodeToString(trackSHA1.Sum(nil))
+		tracks[i].SHA256 = hex.EncodeToString(trackSHA256.Sum(nil))
 	}
-	st.Done("%s", binHashes.SHA256[:12])
+	binHashes := FileHashes{
+		MD5:    hex.EncodeToString(rollupMD5.Sum(nil)),
+		SHA1:   hex.EncodeToString(rollupSHA1.Sum(nil)),
+		SHA256: hex.EncodeToString(rollupSHA256.Sum(nil)),
+	}
+	st.Done("%d track(s) hashed", len(tracks))
 
 	st = r.Step("hashing scram")
 	scramHashes, err := hashFile(opts.ScramPath)
@@ -124,9 +137,9 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	st.Done("%s", scramHashes.SHA256[:12])
 
-	// 6. build ε̂ + delta in one pass
+	// 6. build ε̂ + delta in one pass over the multi-bin stream.
 	st = r.Step("building ε̂ + delta")
-	hatPath, deltaPath, errSectors, deltaSize, err := buildHatAndDelta(opts, tracks, scramSize, writeOffsetBytes, binSectors)
+	hatPath, deltaPath, errSectors, deltaSize, err := buildHatAndDelta(opts, resolved.Files, tracks, scramSize, writeOffsetBytes, binSectors)
 	if err != nil {
 		st.Fail(err)
 		return err
@@ -138,15 +151,14 @@ func Pack(opts PackOptions, r Reporter) error {
 			_ = os.Remove(hatPath)
 		}
 	}()
-	// Free ε̂ now; verify will rebuild it.
 	if err := os.Remove(hatPath); err == nil {
 		hatRemoved = true
 	}
 	st.Done("%d override(s), delta %d bytes", len(errSectors), deltaSize)
 
-	// 7. assemble manifest and write container
+	// 7. assemble manifest and write container.
 	m := &Manifest{
-		FormatVersion:        3,
+		FormatVersion:        4,
 		ToolVersion:          toolVersion + " (" + runtime.Version() + ")",
 		CreatedUTC:           time.Now().UTC().Format(time.RFC3339),
 		ScramSize:            scramSize,
@@ -182,13 +194,13 @@ func Pack(opts PackOptions, r Reporter) error {
 	deltaF.Close()
 	st.Done("%s", opts.OutputPath)
 
-	// 8. verify by round-tripping (unless --no-verify)
+	// 8. verify by round-tripping (unless --no-verify).
 	if !opts.Verify {
 		r.Warn("verification skipped (--no-verify)")
 		return nil
 	}
 	st = r.Step("verifying round-trip")
-	if err := verifyRoundTrip(opts.OutputPath, opts.BinPath, m); err != nil {
+	if err := verifyRoundTrip(opts.OutputPath, resolved.Files, m); err != nil {
 		st.Fail(err)
 		_ = os.Remove(opts.OutputPath)
 		return err
@@ -438,7 +450,7 @@ func checkConstantOffset(scramPath string, scramSize int64) error {
 // buildHatAndDelta produces the ε̂ temp file and the delta temp file
 // in one pass. Returns paths to both plus the override LBA list and
 // the delta payload size in bytes.
-func buildHatAndDelta(opts PackOptions, tracks []Track, scramSize int64, writeOffsetBytes int, binSectors int32) (string, string, []int32, int64, error) {
+func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, scramSize int64, writeOffsetBytes int, binSectors int32) (string, string, []int32, int64, error) {
 	hatFile, err := os.CreateTemp(filepath.Dir(opts.OutputPath), "miniscram-hat-*")
 	if err != nil {
 		return "", "", nil, 0, err
@@ -452,7 +464,7 @@ func buildHatAndDelta(opts PackOptions, tracks []Track, scramSize int64, writeOf
 	}
 	deltaPath := deltaFile.Name()
 
-	binFile, err := os.Open(opts.BinPath)
+	binReader, closeBin, err := OpenBinStream(files)
 	if err != nil {
 		hatFile.Close()
 		deltaFile.Close()
@@ -460,7 +472,7 @@ func buildHatAndDelta(opts PackOptions, tracks []Track, scramSize int64, writeOf
 		os.Remove(deltaPath)
 		return "", "", nil, 0, err
 	}
-	defer binFile.Close()
+	defer closeBin()
 	scramFile, err := os.Open(opts.ScramPath)
 	if err != nil {
 		hatFile.Close()
@@ -479,7 +491,7 @@ func buildHatAndDelta(opts PackOptions, tracks []Track, scramSize int64, writeOf
 		BinSectorCount:   binSectors,
 		Tracks:           tracks,
 	}
-	_, errs, err := BuildEpsilonHatAndDelta(hatFile, deltaFile, params, binFile, scramFile)
+	_, errs, err := BuildEpsilonHatAndDelta(hatFile, deltaFile, params, binReader, scramFile)
 	hatFile.Sync()
 	deltaFile.Sync()
 	hatFile.Close()
@@ -498,7 +510,7 @@ func buildHatAndDelta(opts PackOptions, tracks []Track, scramSize int64, writeOf
 	return hatPath, deltaPath, errs, deltaInfo.Size(), nil
 }
 
-func verifyRoundTrip(containerPath, binPath string, want *Manifest) error {
+func verifyRoundTrip(containerPath string, files []ResolvedFile, want *Manifest) error {
 	// Recovered .scram is the same size as the original — keep it next
 	// to the container output so we don't fill /tmp.
 	tmpOut, err := os.CreateTemp(filepath.Dir(containerPath), "miniscram-verify-*")
@@ -508,15 +520,57 @@ func verifyRoundTrip(containerPath, binPath string, want *Manifest) error {
 	tmpOutPath := tmpOut.Name()
 	tmpOut.Close()
 	defer os.Remove(tmpOutPath)
-	if err := Unpack(UnpackOptions{
-		BinPath:       binPath,
-		ContainerPath: containerPath,
-		OutputPath:    tmpOutPath,
-		Verify:        false, // we'll hash here ourselves
-		Force:         true,
-	}, quietReporter{}); err != nil {
+
+	// Build ε̂ from the multi-bin stream into the tempfile.
+	hatFile, err := os.OpenFile(tmpOutPath, os.O_RDWR, 0)
+	if err != nil {
 		return err
 	}
+	binReader, closeBin, err := OpenBinStream(files)
+	if err != nil {
+		hatFile.Close()
+		return err
+	}
+	params := BuildParams{
+		LeadinLBA:        want.LeadinLBA,
+		WriteOffsetBytes: want.WriteOffsetBytes,
+		ScramSize:        want.ScramSize,
+		BinFirstLBA:      want.BinFirstLBA,
+		BinSectorCount:   want.BinSectorCount,
+		Tracks:           want.Tracks,
+	}
+	if _, err := BuildEpsilonHat(hatFile, params, binReader, nil); err != nil {
+		closeBin()
+		hatFile.Close()
+		return err
+	}
+	closeBin()
+	if err := hatFile.Sync(); err != nil {
+		hatFile.Close()
+		return err
+	}
+	hatFile.Close()
+
+	// Apply delta from the container.
+	_, deltaBytes, err := ReadContainer(containerPath)
+	if err != nil {
+		return err
+	}
+	outFile, err := os.OpenFile(tmpOutPath, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	if err := ApplyDelta(outFile, bytes.NewReader(deltaBytes)); err != nil {
+		outFile.Close()
+		return err
+	}
+	if err := outFile.Sync(); err != nil {
+		outFile.Close()
+		return err
+	}
+	outFile.Close()
+
+	// Hash the result and compare against the manifest's recorded scram hashes.
 	got, err := hashFile(tmpOutPath)
 	if err != nil {
 		return err
