@@ -14,34 +14,30 @@ import (
 
 func sampleManifest() *Manifest {
 	return &Manifest{
-		FormatVersion:    4,
-		ToolVersion:      "miniscram 0.2.0 (go1.22)",
+		ToolVersion:      "miniscram 1.0.0 (go1.22)",
 		CreatedUTC:       "2026-04-28T14:30:21Z",
-		ScramSize:        739729728,
-		ScramMD5:         strings.Repeat("1", 32),
-		ScramSHA1:        strings.Repeat("2", 40),
-		ScramSHA256:      strings.Repeat("c", 64),
-		BinSize:          739729728,
-		BinMD5:           strings.Repeat("3", 32),
-		BinSHA1:          strings.Repeat("4", 40),
-		BinSHA256:        strings.Repeat("a", 64),
 		WriteOffsetBytes: -52,
 		LeadinLBA:        -150,
+		Scram: ScramInfo{
+			Size: 739729728,
+			Hashes: FileHashes{
+				MD5:    strings.Repeat("1", 32),
+				SHA1:   strings.Repeat("2", 40),
+				SHA256: strings.Repeat("c", 64),
+			},
+		},
 		Tracks: []Track{{
 			Number:   1,
 			Mode:     "MODE1/2352",
 			FirstLBA: 0,
 			Size:     235200,
 			Filename: "x.bin",
-			MD5:      strings.Repeat("a", 32),
-			SHA1:     strings.Repeat("b", 40),
-			SHA256:   strings.Repeat("d", 64),
+			Hashes: FileHashes{
+				MD5:    strings.Repeat("a", 32),
+				SHA1:   strings.Repeat("b", 40),
+				SHA256: strings.Repeat("d", 64),
+			},
 		}},
-		BinFirstLBA:          0,
-		BinSectorCount:       314546,
-		ErrorSectorCount:     0,
-		DeltaSize:            312,
-		ScramblerTableSHA256: strings.Repeat("8", 64),
 	}
 }
 
@@ -66,21 +62,18 @@ func buildDelta(t *testing.T, offsets []uint64) []byte {
 func TestInspectFormatHumanCleanDelta(t *testing.T) {
 	m := sampleManifest()
 	delta := []byte{0, 0, 0, 0}
-	out, err := formatHumanInspect(m, "MSCM", 0x03, delta, false)
+	var fakeHash [32]byte
+	copy(fakeHash[:], bytes.Repeat([]byte{0x88}, 32))
+	out, err := formatHumanInspect(m, "MSCM", 0x01, fakeHash, delta, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	wantLines := []string{
-		"container:  MSCM v3",
-		"  tool_version:           miniscram 0.2.0 (go1.22)",
-		"  bin_sha256:             " + strings.Repeat("a", 64),
-		"  scram_sha256:           " + strings.Repeat("c", 64),
-		"  scrambler_table_sha256: " + strings.Repeat("8", 64),
+		"container:  MSCM v1",
+		"  tool_version:           miniscram 1.0.0 (go1.22)",
+		"  scram.hashes.sha256:    " + strings.Repeat("c", 64),
 		"  write_offset_bytes:     -52",
-		"  bin_first_lba:          0",
-		"  delta_size:             312",
-		"  error_sector_count:     0",
 		"  track 1: MODE1/2352  first_lba=0  size=235200  filename=x.bin",
 		"    md5:    " + strings.Repeat("a", 32),
 		"    sha1:   " + strings.Repeat("b", 40),
@@ -92,6 +85,12 @@ func TestInspectFormatHumanCleanDelta(t *testing.T) {
 			t.Errorf("missing line in human output:\n  want: %q\n  full output:\n%s", line, out)
 		}
 	}
+	// v0.2 fields must not appear
+	for _, absent := range []string{"bin_sha256:", "scram_sha256:", "scrambler_table_sha256:", "delta_size:", "error_sector_count:", "bin_first_lba:"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("v0.2 field %q should not appear in v1 output:\n%s", absent, out)
+		}
+	}
 	if strings.Contains(out, "overrides:") {
 		t.Errorf("unexpected overrides: section in human output without --full:\n%s", out)
 	}
@@ -100,7 +99,8 @@ func TestInspectFormatHumanCleanDelta(t *testing.T) {
 func TestInspectFormatHumanFullListsOverrides(t *testing.T) {
 	m := sampleManifest()
 	delta := buildDelta(t, []uint64{2352, 4704 + 100, 7056})
-	out, err := formatHumanInspect(m, "MSCM", 0x03, delta, true)
+	var fakeHash [32]byte
+	out, err := formatHumanInspect(m, "MSCM", 0x01, fakeHash, delta, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,8 @@ func TestInspectFormatHumanFullListsOverrides(t *testing.T) {
 func TestInspectFormatHumanFullEmptyHidesSection(t *testing.T) {
 	m := sampleManifest()
 	delta := []byte{0, 0, 0, 0}
-	out, err := formatHumanInspect(m, "MSCM", 0x03, delta, true)
+	var fakeHash [32]byte
+	out, err := formatHumanInspect(m, "MSCM", 0x01, fakeHash, delta, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,8 @@ func TestInspectFormatHumanFullEmptyHidesSection(t *testing.T) {
 func TestInspectFormatHumanReportsDeltaError(t *testing.T) {
 	m := sampleManifest()
 	delta := []byte{0, 0, 0, 1} // count=1, no record follows → framing error
-	out, err := formatHumanInspect(m, "MSCM", 0x03, delta, false)
+	var fakeHash [32]byte
+	out, err := formatHumanInspect(m, "MSCM", 0x01, fakeHash, delta, false)
 	if err == nil {
 		t.Fatal("expected framing error from formatHumanInspect")
 	}
@@ -162,11 +164,16 @@ func TestInspectFormatJSONStructure(t *testing.T) {
 		t.Fatalf("JSON did not parse: %v\n%s", err, body)
 	}
 	for _, k := range []string{
-		"format_version", "tool_version", "bin_sha256", "scram_sha256",
-		"tracks", "bin_first_lba", "delta_records",
+		"tool_version", "scram", "tracks", "delta_records",
 	} {
 		if _, ok := top[k]; !ok {
 			t.Errorf("missing top-level key %q in JSON", k)
+		}
+	}
+	// v0.2 fields must not appear
+	for _, absent := range []string{"format_version", "bin_sha256", "scram_sha256", "bin_first_lba"} {
+		if _, ok := top[absent]; ok {
+			t.Errorf("v0.2 field %q should not appear in v1 JSON output", absent)
 		}
 	}
 	records, ok := top["delta_records"].([]any)
@@ -202,13 +209,14 @@ func TestInspectFormatJSONFieldOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(body)
-	if !strings.HasPrefix(s, `{"format_version":`) {
-		t.Errorf("JSON does not start with format_version: %s", s[:60])
+	// v1 JSON starts with tool_version (first field in Manifest struct).
+	if !strings.HasPrefix(s, `{"tool_version":`) {
+		t.Errorf("JSON does not start with tool_version: %s", s[:min(60, len(s))])
 	}
-	idxFV := strings.Index(s, `"format_version"`)
+	idxTV := strings.Index(s, `"tool_version"`)
 	idxDR := strings.Index(s, `"delta_records"`)
-	if idxFV < 0 || idxDR < 0 || idxDR < idxFV {
-		t.Errorf("delta_records should come after format_version; got idxFV=%d idxDR=%d", idxFV, idxDR)
+	if idxTV < 0 || idxDR < 0 || idxDR < idxTV {
+		t.Errorf("delta_records should come after tool_version; got idxTV=%d idxDR=%d", idxTV, idxDR)
 	}
 }
 
@@ -226,7 +234,8 @@ func TestInspectFormatHumanTrackPadding(t *testing.T) {
 		{Number: 1, Mode: "MODE1/2352", FirstLBA: 0, Size: 235200, Filename: "x.bin"},
 		{Number: 2, Mode: "AUDIO", FirstLBA: 12345, Size: 47040, Filename: "y.bin"},
 	}
-	out, err := formatHumanInspect(m, "MSCM", 0x03, []byte{0, 0, 0, 0}, false)
+	var fakeHash [32]byte
+	out, err := formatHumanInspect(m, "MSCM", 0x01, fakeHash, []byte{0, 0, 0, 0}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,11 +273,10 @@ func TestCLIInspectHumanOutput(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"container:  MSCM v4",
+		"container:  MSCM v1",
 		"manifest:",
 		"tool_version:",
-		"bin_sha256:",
-		"scram_sha256:",
+		"scram.hashes.sha256:",
 		"tracks:",
 		"track 1: MODE1/2352",
 		"delta:",
@@ -294,8 +302,8 @@ func TestCLIInspectJSONOutput(t *testing.T) {
 	if _, ok := top["delta_records"]; !ok {
 		t.Errorf("delta_records missing in JSON output: %v", top)
 	}
-	if _, ok := top["bin_sha256"]; !ok {
-		t.Errorf("bin_sha256 missing in JSON output: %v", top)
+	if _, ok := top["scram"]; !ok {
+		t.Errorf("scram missing in JSON output: %v", top)
 	}
 }
 
@@ -315,10 +323,13 @@ func TestCLIInspectFullFlag(t *testing.T) {
 	}
 }
 
-func TestCLIInspectRejectsV3(t *testing.T) {
+func TestCLIInspectRejectsWrongVersion(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "v3.miniscram")
-	body := []byte("MSCM\x03\x00\x00\x00\x00")
+	path := filepath.Join(dir, "v9.miniscram")
+	// v9 header (wrong version)
+	body := make([]byte, containerHeaderSize)
+	copy(body, "MSCM")
+	body[4] = 0x09
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -327,15 +338,17 @@ func TestCLIInspectRejectsV3(t *testing.T) {
 	if code != exitIO {
 		t.Fatalf("exit %d; want %d (exitIO); stderr=%s", code, exitIO, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "v0.3") {
-		t.Errorf("missing v0.3 migration error in stderr:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "unsupported container version") {
+		t.Errorf("missing version error in stderr:\n%s", stderr.String())
 	}
 }
 
 func TestCLIInspectRejectsBadMagic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "junk.miniscram")
-	if err := os.WriteFile(path, []byte("XXXX\x02\x00\x00\x00\x00"), 0o644); err != nil {
+	body := make([]byte, containerHeaderSize)
+	copy(body, "XXXX") // bad magic
+	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
@@ -408,7 +421,6 @@ func TestCLIInspectFullWithOverrides(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "with-overrides.miniscram")
 	m := sampleManifest()
-	m.BinFirstLBA = 0
 	delta := buildDelta(t, []uint64{2352, 4704, 7056})
 	if err := WriteContainer(path, m, bytes.NewReader(delta)); err != nil {
 		t.Fatal(err)
@@ -432,7 +444,7 @@ func TestCLIInspectFullWithOverrides(t *testing.T) {
 	}
 }
 
-func TestInspectShowsAllSixHashes(t *testing.T) {
+func TestInspectShowsScramHashes(t *testing.T) {
 	path := packSyntheticContainer(t)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"inspect", path}, &stdout, &stderr)
@@ -441,12 +453,9 @@ func TestInspectShowsAllSixHashes(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		"bin_md5:",
-		"bin_sha1:",
-		"bin_sha256:",
-		"scram_md5:",
-		"scram_sha1:",
-		"scram_sha256:",
+		"scram.hashes.md5:",
+		"scram.hashes.sha1:",
+		"scram.hashes.sha256:",
 		// per-track hash lines
 		"    md5:    ",
 		"    sha1:   ",
@@ -458,7 +467,7 @@ func TestInspectShowsAllSixHashes(t *testing.T) {
 	}
 }
 
-func TestInspectJSONIncludesAllSixHashes(t *testing.T) {
+func TestInspectJSONIncludesNestedHashes(t *testing.T) {
 	path := packSyntheticContainer(t)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"inspect", "--json", path}, &stdout, &stderr)
@@ -469,12 +478,25 @@ func TestInspectJSONIncludesAllSixHashes(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &top); err != nil {
 		t.Fatalf("JSON parse: %v", err)
 	}
-	for _, key := range []string{
-		"bin_md5", "bin_sha1", "bin_sha256",
-		"scram_md5", "scram_sha1", "scram_sha256",
-	} {
-		if v, ok := top[key]; !ok || v == "" {
-			t.Errorf("JSON output missing or empty key %q (got %v)", key, v)
+	scram, ok := top["scram"].(map[string]any)
+	if !ok {
+		t.Fatalf("scram is not an object: %T", top["scram"])
+	}
+	hashes, ok := scram["hashes"].(map[string]any)
+	if !ok {
+		t.Fatalf("scram.hashes is not an object: %T", scram["hashes"])
+	}
+	for _, key := range []string{"md5", "sha1", "sha256"} {
+		if v, ok := hashes[key]; !ok || v == "" {
+			t.Errorf("scram.hashes.%s missing or empty (got %v)", key, v)
 		}
 	}
+}
+
+// min is a helper for older Go compat (Go 1.21 has builtin min but earlier does not).
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

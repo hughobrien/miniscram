@@ -19,7 +19,7 @@ import (
 
 // toolVersion is reported in the manifest. Bump in lockstep with
 // container or behaviour changes.
-const toolVersion = "miniscram 0.2.0"
+const toolVersion = "miniscram 1.0.0"
 
 // Sentinel errors so the CLI can map error classes to exit codes
 // without resorting to substring matching on the message.
@@ -114,14 +114,11 @@ func Pack(opts PackOptions, r Reporter) error {
 			return err
 		}
 		f.Close()
-		tracks[i].MD5 = hex.EncodeToString(trackMD5.Sum(nil))
-		tracks[i].SHA1 = hex.EncodeToString(trackSHA1.Sum(nil))
-		tracks[i].SHA256 = hex.EncodeToString(trackSHA256.Sum(nil))
-	}
-	binHashes := FileHashes{
-		MD5:    hex.EncodeToString(rollupMD5.Sum(nil)),
-		SHA1:   hex.EncodeToString(rollupSHA1.Sum(nil)),
-		SHA256: hex.EncodeToString(rollupSHA256.Sum(nil)),
+		tracks[i].Hashes = FileHashes{
+			MD5:    hex.EncodeToString(trackMD5.Sum(nil)),
+			SHA1:   hex.EncodeToString(trackSHA1.Sum(nil)),
+			SHA256: hex.EncodeToString(trackSHA256.Sum(nil)),
+		}
 	}
 	st.Done("%d track(s) hashed", len(tracks))
 
@@ -154,26 +151,15 @@ func Pack(opts PackOptions, r Reporter) error {
 
 	// 7. assemble manifest and write container.
 	m := &Manifest{
-		FormatVersion:        4,
-		ToolVersion:          toolVersion + " (" + runtime.Version() + ")",
-		CreatedUTC:           time.Now().UTC().Format(time.RFC3339),
-		ScramSize:            scramSize,
-		ScramMD5:             scramHashes.MD5,
-		ScramSHA1:            scramHashes.SHA1,
-		ScramSHA256:          scramHashes.SHA256,
-		BinSize:              binSize,
-		BinMD5:               binHashes.MD5,
-		BinSHA1:              binHashes.SHA1,
-		BinSHA256:            binHashes.SHA256,
-		WriteOffsetBytes:     writeOffsetBytes,
-		LeadinLBA:            opts.LeadinLBA,
-		Tracks:               tracks,
-		BinFirstLBA:          tracks[0].FirstLBA,
-		BinSectorCount:       binSectors,
-		ErrorSectors:         errSectors,
-		ErrorSectorCount:     len(errSectors),
-		DeltaSize:            deltaSize,
-		ScramblerTableSHA256: expectedScrambleTableSHA256,
+		ToolVersion:      toolVersion + " (" + runtime.Version() + ")",
+		CreatedUTC:       time.Now().UTC().Format(time.RFC3339),
+		WriteOffsetBytes: writeOffsetBytes,
+		LeadinLBA:        opts.LeadinLBA,
+		Scram: ScramInfo{
+			Size:   scramSize,
+			Hashes: scramHashes,
+		},
+		Tracks: tracks,
 	}
 
 	st = r.Step("writing container")
@@ -205,15 +191,14 @@ func Pack(opts PackOptions, r Reporter) error {
 	return nil
 }
 
-// FileHashes holds the three hashes miniscram records per file.
+// FileHashes is the {md5, sha1, sha256} triple miniscram records per
+// entity. Marshalled as a nested JSON object.
 type FileHashes struct {
-	MD5    string
-	SHA1   string
-	SHA256 string
+	MD5    string `json:"md5"`
+	SHA1   string `json:"sha1"`
+	SHA256 string `json:"sha256"`
 }
 
-// hashFile streams path through MD5, SHA-1, and SHA-256 in a single
-// I/O pass and returns all three as lowercase hex.
 // hashReader streams r through MD5, SHA-1, and SHA-256 in a single
 // pass and returns all three as lowercase hex.
 func hashReader(r io.Reader) (FileHashes, error) {
@@ -586,9 +571,9 @@ func verifyRoundTrip(containerPath string, files []ResolvedFile, want *Manifest)
 	params := BuildParams{
 		LeadinLBA:        want.LeadinLBA,
 		WriteOffsetBytes: want.WriteOffsetBytes,
-		ScramSize:        want.ScramSize,
-		BinFirstLBA:      want.BinFirstLBA,
-		BinSectorCount:   want.BinSectorCount,
+		ScramSize:        want.Scram.Size,
+		BinFirstLBA:      want.BinFirstLBA(),
+		BinSectorCount:   want.BinSectorCount(),
 		Tracks:           want.Tracks,
 	}
 	if _, err := BuildEpsilonHat(hatFile, params, binReader, nil); err != nil {
@@ -604,7 +589,7 @@ func verifyRoundTrip(containerPath string, files []ResolvedFile, want *Manifest)
 	hatFile.Close()
 
 	// Apply delta from the container.
-	_, deltaBytes, err := ReadContainer(containerPath)
+	_, _, deltaBytes, err := ReadContainer(containerPath)
 	if err != nil {
 		return err
 	}
@@ -627,7 +612,7 @@ func verifyRoundTrip(containerPath string, files []ResolvedFile, want *Manifest)
 	if err != nil {
 		return err
 	}
-	wantHashes := FileHashes{MD5: want.ScramMD5, SHA1: want.ScramSHA1, SHA256: want.ScramSHA256}
+	wantHashes := want.Scram.Hashes
 	if err := compareHashes(got, wantHashes); err != nil {
 		return fmt.Errorf("%w: round-trip hash mismatch: %v", errVerifyMismatch, err)
 	}

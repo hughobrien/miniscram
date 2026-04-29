@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,36 +12,28 @@ import (
 )
 
 // formatHumanInspect produces the default `miniscram inspect` text
-// output. magic and version come from the raw container header (not
-// the manifest's redundant format_version). delta is the full delta
-// payload as returned by ReadContainer. If full is true and there is
-// at least one override record, an `overrides:` block is appended.
+// output. magic, version, and scramblerHash come from the raw container
+// header. delta is the full delta payload as returned by ReadContainer.
+// If full is true and there is at least one override record, an
+// `overrides:` block is appended.
 //
 // On a framing error walking the delta, partial output before the
-// failure is returned as the string and the iterator error is
-// returned as the error. The caller is responsible for routing the
-// error to stderr and producing the I/O exit code (per spec §Errors).
-func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, full bool) (string, error) {
+// failure is returned as the string and the iterator error is returned
+// as the error. The caller is responsible for routing the error to
+// stderr and producing the I/O exit code (per spec §Errors).
+func formatHumanInspect(m *Manifest, magic string, version byte, scramblerHash [32]byte, delta []byte, full bool) (string, error) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "container:  %s v%d\n", magic, version)
+	fmt.Fprintf(&b, "container:  %s v%d (scrambler %s…)\n",
+		magic, version, hex.EncodeToString(scramblerHash[:6]))
 	b.WriteString("manifest:\n")
 	fmt.Fprintf(&b, "  tool_version:           %s\n", m.ToolVersion)
 	fmt.Fprintf(&b, "  created_utc:            %s\n", m.CreatedUTC)
-	fmt.Fprintf(&b, "  bin_size:               %d\n", m.BinSize)
-	fmt.Fprintf(&b, "  bin_md5:                %s\n", m.BinMD5)
-	fmt.Fprintf(&b, "  bin_sha1:               %s\n", m.BinSHA1)
-	fmt.Fprintf(&b, "  bin_sha256:             %s\n", m.BinSHA256)
-	fmt.Fprintf(&b, "  scram_size:             %d\n", m.ScramSize)
-	fmt.Fprintf(&b, "  scram_md5:              %s\n", m.ScramMD5)
-	fmt.Fprintf(&b, "  scram_sha1:             %s\n", m.ScramSHA1)
-	fmt.Fprintf(&b, "  scram_sha256:           %s\n", m.ScramSHA256)
 	fmt.Fprintf(&b, "  write_offset_bytes:     %d\n", m.WriteOffsetBytes)
 	fmt.Fprintf(&b, "  leadin_lba:             %d\n", m.LeadinLBA)
-	fmt.Fprintf(&b, "  bin_first_lba:          %d\n", m.BinFirstLBA)
-	fmt.Fprintf(&b, "  bin_sector_count:       %d\n", m.BinSectorCount)
-	fmt.Fprintf(&b, "  delta_size:             %d\n", m.DeltaSize)
-	fmt.Fprintf(&b, "  error_sector_count:     %d\n", m.ErrorSectorCount)
-	fmt.Fprintf(&b, "  scrambler_table_sha256: %s\n", m.ScramblerTableSHA256)
+	fmt.Fprintf(&b, "  scram.size:             %d\n", m.Scram.Size)
+	fmt.Fprintf(&b, "  scram.hashes.md5:       %s\n", m.Scram.Hashes.MD5)
+	fmt.Fprintf(&b, "  scram.hashes.sha1:      %s\n", m.Scram.Hashes.SHA1)
+	fmt.Fprintf(&b, "  scram.hashes.sha256:    %s\n", m.Scram.Hashes.SHA256)
 
 	b.WriteString("tracks:\n")
 	maxMode := 0
@@ -52,9 +45,9 @@ func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, f
 	for _, t := range m.Tracks {
 		fmt.Fprintf(&b, "  track %d: %-*s  first_lba=%d  size=%d  filename=%s\n",
 			t.Number, maxMode, t.Mode, t.FirstLBA, t.Size, t.Filename)
-		fmt.Fprintf(&b, "    md5:    %s\n", t.MD5)
-		fmt.Fprintf(&b, "    sha1:   %s\n", t.SHA1)
-		fmt.Fprintf(&b, "    sha256: %s\n", t.SHA256)
+		fmt.Fprintf(&b, "    md5:    %s\n", t.Hashes.MD5)
+		fmt.Fprintf(&b, "    sha1:   %s\n", t.Hashes.SHA1)
+		fmt.Fprintf(&b, "    sha256: %s\n", t.Hashes.SHA256)
 	}
 
 	type rec struct {
@@ -69,35 +62,21 @@ func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, f
 	b.WriteString("delta:\n")
 	fmt.Fprintf(&b, "  override_records:       %d\n", count)
 	if full && len(records) > 0 {
-		// Sort by offset for deterministic output (records are emitted in
-		// position order by EncodeDelta, but sorting makes the contract
-		// explicit and stable against future encoder reorderings).
+		// Sort by offset for deterministic output.
 		sort.Slice(records, func(i, j int) bool { return records[i].off < records[j].off })
 		b.WriteString("overrides:\n")
 		for _, r := range records {
-			lba := int64(r.off)/int64(SectorSize) + int64(m.BinFirstLBA)
+			lba := int64(r.off)/int64(SectorSize) + int64(m.BinFirstLBA())
 			fmt.Fprintf(&b, "  byte_offset=%-12d length=%-5d lba=%d\n", r.off, r.length, lba)
 		}
 	}
 	return b.String(), iterErr
 }
 
-// formatJSONInspect emits the manifest JSON verbatim plus a top-level
-// `delta_records` array of {byte_offset, length, lba} objects. Always
-// includes all records (no cap).
+// formatJSONInspect emits the manifest JSON plus a top-level
+// `delta_records` array of {byte_offset, length, lba} objects.
+// Always includes all records (no cap).
 func formatJSONInspect(m *Manifest, delta []byte) ([]byte, error) {
-	manifestBody, err := m.Marshal()
-	if err != nil {
-		return nil, err
-	}
-	// Re-decode into a generic map so we can splice delta_records as a
-	// top-level field while preserving Marshal()'s field ordering and
-	// any future fields we don't have to know about here.
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(manifestBody, &top); err != nil {
-		return nil, fmt.Errorf("re-decoding manifest: %w", err)
-	}
-
 	type recordOut struct {
 		ByteOffset uint64 `json:"byte_offset"`
 		Length     uint32 `json:"length"`
@@ -105,65 +84,20 @@ func formatJSONInspect(m *Manifest, delta []byte) ([]byte, error) {
 	}
 	var records []recordOut
 	if _, err := IterateDeltaRecords(delta, func(off uint64, length uint32) error {
-		lba := int64(off)/int64(SectorSize) + int64(m.BinFirstLBA)
+		lba := int64(off)/int64(SectorSize) + int64(m.BinFirstLBA())
 		records = append(records, recordOut{ByteOffset: off, Length: length, LBA: lba})
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	if records == nil {
-		records = []recordOut{} // emit `[]`, not `null`
+		records = []recordOut{}
 	}
-	recordsBody, err := json.Marshal(records)
-	if err != nil {
-		return nil, err
+	type out struct {
+		*Manifest
+		DeltaRecords []recordOut `json:"delta_records"`
 	}
-	top["delta_records"] = recordsBody
-
-	// Re-marshal in a stable order: manifest fields in their original
-	// order, then delta_records last.
-	keys := stableInspectFieldOrder(manifestBody)
-	keys = append(keys, "delta_records")
-	var out strings.Builder
-	out.WriteByte('{')
-	for i, k := range keys {
-		if i > 0 {
-			out.WriteByte(',')
-		}
-		kb, _ := json.Marshal(k)
-		out.Write(kb)
-		out.WriteByte(':')
-		out.Write(top[k])
-	}
-	out.WriteByte('}')
-	return []byte(out.String()), nil
-}
-
-// stableInspectFieldOrder returns the top-level JSON keys of body in
-// the order they appear in body. Used to keep formatJSONInspect's
-// output ordering matched to Manifest's struct declaration order.
-func stableInspectFieldOrder(body []byte) []string {
-	dec := json.NewDecoder(strings.NewReader(string(body)))
-	if _, err := dec.Token(); err != nil {
-		return nil
-	}
-	var keys []string
-	for dec.More() {
-		tok, err := dec.Token()
-		if err != nil {
-			return keys
-		}
-		k, ok := tok.(string)
-		if !ok {
-			return keys
-		}
-		keys = append(keys, k)
-		var skip json.RawMessage
-		if err := dec.Decode(&skip); err != nil {
-			return keys
-		}
-	}
-	return keys
+	return json.Marshal(out{Manifest: m, DeltaRecords: records})
 }
 
 // runInspect is the CLI entry point for `miniscram inspect`. Reads the
@@ -189,7 +123,7 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	path := fs.Arg(0)
-	m, delta, err := ReadContainer(path)
+	m, scramblerHash, delta, err := ReadContainer(path)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitIO
@@ -203,7 +137,7 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, string(body))
 		return exitOK
 	}
-	human, ferr := formatHumanInspect(m, containerMagic, containerVersion, delta, *full)
+	human, ferr := formatHumanInspect(m, containerMagic, containerVersion, scramblerHash, delta, *full)
 	fmt.Fprint(stdout, human)
 	if ferr != nil {
 		fmt.Fprintln(stderr, ferr)
