@@ -31,10 +31,6 @@ var (
 // (Verify on, LeadinLBA = LBALeadinStart). Fields without a comment
 // match the obvious thing.
 type PackOptions struct {
-	// BinPath is unused as of v0.4; the cue sheet is the authoritative
-	// source for bin file locations. Retained for source compatibility
-	// until Task 5 rewrites callers.
-	BinPath    string // deprecated: ignored; cue resolves bin paths
 	CuePath    string
 	ScramPath  string
 	OutputPath string

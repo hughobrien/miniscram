@@ -58,16 +58,16 @@ EXIT CODES:
 `
 
 const packHelpText = `USAGE:
-    miniscram pack [<bin> <cue> <scram>] [-o <out.miniscram>] [options]
+    miniscram pack <cue> [-o <out.miniscram>] [options]
 
-ARGUMENTS (optional — discovered from cwd if omitted):
-    <bin>      path to the unscrambled CD image (Redumper *.bin)
-    <cue>      path to the cue sheet (Redumper *.cue)
-    <scram>    path to the scrambled intermediate dump (Redumper *.scram)
+ARGUMENTS:
+    <cue>    path to the cuesheet (Redumper *.cue). The .scram file
+             is derived from the cue's stem (<stem>.scram in the
+             same directory).
 
 OPTIONS:
     -o, --output <path>    where to write the .miniscram container.
-                           default: <bin-stem>.miniscram next to <bin>.
+                           default: <cue-stem>.miniscram next to <cue>.
     -f, --force            overwrite existing output.
     --keep-source          do not remove <scram> after verified pack.
     --no-verify            skip inline round-trip verification.
@@ -79,11 +79,12 @@ OPTIONS:
 `
 
 const unpackHelpText = `USAGE:
-    miniscram unpack [<bin> <in.miniscram>] [-o <out.scram>] [options]
+    miniscram unpack <in.miniscram> [-o <out.scram>] [options]
 
-ARGUMENTS (optional — discovered from cwd if omitted):
-    <bin>             path to the unscrambled CD image (Redumper *.bin)
-    <in.miniscram>    .miniscram container produced by 'miniscram pack'
+ARGUMENTS:
+    <in.miniscram>    .miniscram container produced by 'miniscram pack'.
+                      The track .bin files referenced by the manifest
+                      must exist in the same directory as the container.
 
 OPTIONS:
     -o, --output <path>    where to write the reconstructed .scram.
@@ -96,11 +97,11 @@ OPTIONS:
 `
 
 const verifyHelpText = `USAGE:
-    miniscram verify [<bin> <in.miniscram>] [options]
+    miniscram verify <in.miniscram> [options]
 
-ARGUMENTS (optional — discovered from cwd if omitted):
-    <bin>             path to the unscrambled CD image (Redumper *.bin)
-    <in.miniscram>    .miniscram container produced by 'miniscram pack'
+ARGUMENTS:
+    <in.miniscram>    .miniscram container produced by 'miniscram pack'.
+                      Track .bin files must exist in the same directory.
 
 OPTIONS:
     -q, --quiet       suppress progress output.

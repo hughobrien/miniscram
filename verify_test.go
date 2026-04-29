@@ -113,30 +113,8 @@ func TestCLIVerifyExitCodes(t *testing.T) {
 	}
 }
 
-func TestCLIVerifyDiscovery(t *testing.T) {
-	containerPath, dir, _ := packForVerify(t)
-
-	t.Run("zero-arg-cwd", func(t *testing.T) {
-		cwd, _ := os.Getwd()
-		t.Cleanup(func() { os.Chdir(cwd) })
-		if err := os.Chdir(dir); err != nil {
-			t.Fatal(err)
-		}
-		var stderr bytes.Buffer
-		code := run([]string{"verify"}, io.Discard, &stderr)
-		if code != exitOK {
-			t.Fatalf("exit %d; stderr=%s", code, stderr.String())
-		}
-	})
-
-	t.Run("one-arg-stem", func(t *testing.T) {
-		stem := strings.TrimSuffix(containerPath, ".miniscram")
-		var stderr bytes.Buffer
-		code := run([]string{"verify", stem}, io.Discard, &stderr)
-		if code != exitOK {
-			t.Fatalf("exit %d; stderr=%s", code, stderr.String())
-		}
-	})
+func TestCLIVerifyOnePositional(t *testing.T) {
+	containerPath, _, _ := packForVerify(t)
 
 	t.Run("one-arg-container", func(t *testing.T) {
 		var stderr bytes.Buffer
@@ -204,7 +182,7 @@ func TestVerifyDetectsTruncatedContainer(t *testing.T) {
 }
 
 func TestCLIVerifyUsageErrors(t *testing.T) {
-	// 3 positionals
+	// 3 positionals → usage error
 	var stderr bytes.Buffer
 	code := run([]string{"verify", "a", "b", "c"}, io.Discard, &stderr)
 	if code != exitUsage {
@@ -216,20 +194,11 @@ func TestCLIVerifyUsageErrors(t *testing.T) {
 	if code != exitUsage {
 		t.Fatalf("bad flag exit %d, want %d", code, exitUsage)
 	}
-	// missing input files (caught at resolveUnpackInputs)
+	// missing input file → I/O error (single positional, file doesn't exist)
 	stderr.Reset()
-	code = run([]string{"verify", "/no/such/bin", "/no/such/container.miniscram"}, io.Discard, &stderr)
-	// 2 positionals don't trigger discovery, so the resolver returns
-	// the explicit pair without checking existence; the I/O failure
-	// surfaces from ReadContainer/Unpack and routes to exitIO.
+	code = run([]string{"verify", "/no/such/container.miniscram"}, io.Discard, &stderr)
 	if code != exitIO {
-		t.Fatalf("missing files exit %d, want %d (exitIO)", code, exitIO)
-	}
-	// missing input via stem (DiscoverUnpackFromArg checks existence)
-	stderr.Reset()
-	code = run([]string{"verify", "/no/such/stem"}, io.Discard, &stderr)
-	if code != exitUsage {
-		t.Fatalf("missing-stem exit %d, want %d", code, exitUsage)
+		t.Fatalf("missing file exit %d, want %d (exitIO)", code, exitIO)
 	}
 }
 

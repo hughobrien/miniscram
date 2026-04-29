@@ -4,47 +4,51 @@ package main
 import (
 	"bytes"
 	"io"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
-func TestCLIPackDiscovers(t *testing.T) {
-	dir := t.TempDir()
-	binPath, _, scramPath, _ := writeSynthDiscFiles(t, 100, 0, 10)
-	// move the synth files into a clean dir so cwd discovery is unambiguous
-	mv := func(src, dst string) {
-		data, err := os.ReadFile(src)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(dst, data, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	mv(binPath, filepath.Join(dir, "g.bin"))
-	mv(scramPath, filepath.Join(dir, "g.scram"))
-	if err := os.WriteFile(filepath.Join(dir, "g.cue"),
-		[]byte("FILE \"g.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cwd, _ := os.Getwd()
-	defer os.Chdir(cwd)
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
+func TestCLIPackRequiresOnePositional(t *testing.T) {
 	var stderr bytes.Buffer
-	// We need to patch LeadinLBA for synthetic data. The CLI uses
-	// LBALeadinStart by default — synth disc uses LBAPregapStart. So
-	// the CLI test cannot use the synthetic dataset; we test the
-	// real discovery+ flag handling here, and rely on Pack-level tests
-	// for synthetic verification.
-	code := run([]string{"pack", "--help"}, io.Discard, &stderr)
-	if code != exitOK {
-		t.Fatalf("pack --help exit %d, stderr=%s", code, stderr.String())
+	// Zero positionals.
+	code := run([]string{"pack"}, io.Discard, &stderr)
+	if code != exitUsage {
+		t.Fatalf("zero positionals exit %d, want %d", code, exitUsage)
 	}
-	if !bytes.Contains(stderr.Bytes(), []byte("USAGE:")) {
-		t.Fatalf("expected USAGE in help output")
+	// Two positionals.
+	stderr.Reset()
+	code = run([]string{"pack", "a.cue", "b.scram"}, io.Discard, &stderr)
+	if code != exitUsage {
+		t.Fatalf("two positionals exit %d, want %d", code, exitUsage)
+	}
+}
+
+func TestCLIUnpackRequiresOnePositional(t *testing.T) {
+	var stderr bytes.Buffer
+	// Zero positionals.
+	code := run([]string{"unpack"}, io.Discard, &stderr)
+	if code != exitUsage {
+		t.Fatalf("zero positionals exit %d, want %d", code, exitUsage)
+	}
+	// Two positionals.
+	stderr.Reset()
+	code = run([]string{"unpack", "a.miniscram", "b.extra"}, io.Discard, &stderr)
+	if code != exitUsage {
+		t.Fatalf("two positionals exit %d, want %d", code, exitUsage)
+	}
+}
+
+func TestCLIVerifyRequiresOnePositional(t *testing.T) {
+	var stderr bytes.Buffer
+	// Zero positionals.
+	code := run([]string{"verify"}, io.Discard, &stderr)
+	if code != exitUsage {
+		t.Fatalf("zero positionals exit %d, want %d", code, exitUsage)
+	}
+	// Two positionals.
+	stderr.Reset()
+	code = run([]string{"verify", "a.miniscram", "b.extra"}, io.Discard, &stderr)
+	if code != exitUsage {
+		t.Fatalf("two positionals exit %d, want %d", code, exitUsage)
 	}
 }
 
