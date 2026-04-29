@@ -18,7 +18,36 @@ approach. Specialised for Redumper output.
 
 ## Install
 
-    go install ./...    # produces ./miniscram
+### Pre-built binary
+
+Download a release binary from
+[Releases](https://github.com/hughobrien/miniscram/releases). Linux,
+macOS, and Windows on amd64 are published; checksums are in
+`SHA256SUMS`.
+
+### `go install`
+
+    go install github.com/hughobrien/miniscram@latest
+
+### Nix flake
+
+Run without installing:
+
+    nix run github:hughobrien/miniscram -- pack disc.cue
+
+Install into a profile:
+
+    nix profile install github:hughobrien/miniscram
+
+Development shell (Go + tools):
+
+    nix develop github:hughobrien/miniscram
+
+### From source
+
+    git clone https://github.com/hughobrien/miniscram
+    cd miniscram
+    go build -o miniscram ./...
 
 ## CLI
 
