@@ -78,7 +78,10 @@ when the builder code is edited.
 
 ## Workflow conventions
 
-- **Direct-to-main commits** — no feature branches.
+- **PR workflow.** `main` is protected on GitHub: require PR, require
+  `build + test` CI, require linear history, no force-push, no branch
+  deletion. Work on a feature branch, push, open a PR. PRs may be left
+  open until a release window.
 - **Stage files explicitly** — `git add path/to/file.go`. Avoid
   `git add -A` because it sweeps multi-GB fixture data (e.g.,
   `half-life/`) into the index.
