@@ -122,7 +122,9 @@ Field semantics:
 
 ### Delta payload (binary)
 
-Big-endian. Begins immediately after the manifest body.
+Begins immediately after the manifest body, as a `compress/zlib`
+`BestCompression` stream. Decompressed, the layout is the big-endian
+record sequence below.
 
 | Field | Type | Notes |
 |---|---|---|
