@@ -2,6 +2,10 @@
 package main
 
 import (
+	"bytes"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -211,5 +215,132 @@ func TestParseCue_SingleFileStillWorks(t *testing.T) {
 	}
 	if tracks[0].Filename != "x.bin" {
 		t.Errorf("Filename = %q; want %q", tracks[0].Filename, "x.bin")
+	}
+}
+
+func TestResolveCue_ComputesAbsoluteLBAs(t *testing.T) {
+	dir := t.TempDir()
+	// Three files of known sizes (in sectors): 100, 50, 25.
+	makeFile := func(name string, sectors int) {
+		path := filepath.Join(dir, name)
+		buf := make([]byte, sectors*SectorSize)
+		if err := os.WriteFile(path, buf, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	makeFile("a.bin", 100)
+	makeFile("b.bin", 50)
+	makeFile("c.bin", 25)
+
+	cue := `FILE "a.bin" BINARY
+  TRACK 01 MODE1/2352
+    INDEX 01 00:00:00
+FILE "b.bin" BINARY
+  TRACK 02 AUDIO
+    INDEX 01 00:00:00
+FILE "c.bin" BINARY
+  TRACK 03 AUDIO
+    INDEX 01 00:00:00
+`
+	cuePath := filepath.Join(dir, "x.cue")
+	if err := os.WriteFile(cuePath, []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := ResolveCue(cuePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.Tracks) != 3 {
+		t.Fatalf("got %d tracks, want 3", len(resolved.Tracks))
+	}
+	wants := []struct {
+		first int32
+		size  int64
+	}{
+		{0, 100 * SectorSize},
+		{100, 50 * SectorSize},
+		{150, 25 * SectorSize},
+	}
+	for i, w := range wants {
+		if resolved.Tracks[i].FirstLBA != w.first {
+			t.Errorf("Tracks[%d].FirstLBA = %d; want %d", i, resolved.Tracks[i].FirstLBA, w.first)
+		}
+		if resolved.Tracks[i].Size != w.size {
+			t.Errorf("Tracks[%d].Size = %d; want %d", i, resolved.Tracks[i].Size, w.size)
+		}
+	}
+	if len(resolved.Files) != 3 {
+		t.Fatalf("got %d files, want 3", len(resolved.Files))
+	}
+}
+
+func TestResolveCue_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+	cue := `FILE "missing.bin" BINARY
+  TRACK 01 MODE1/2352
+    INDEX 01 00:00:00
+`
+	cuePath := filepath.Join(dir, "x.cue")
+	if err := os.WriteFile(cuePath, []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ResolveCue(cuePath)
+	if err == nil {
+		t.Fatal("expected error when referenced file is missing")
+	}
+}
+
+func TestOpenBinStream_ReadsConcatenated(t *testing.T) {
+	dir := t.TempDir()
+	type fileSpec struct {
+		name    string
+		content []byte
+	}
+	specs := []fileSpec{
+		{"a.bin", []byte("aaa")},
+		{"b.bin", []byte("bb")},
+		{"c.bin", []byte("c")},
+	}
+	var files []ResolvedFile
+	for _, s := range specs {
+		path := filepath.Join(dir, s.name)
+		if err := os.WriteFile(path, s.content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, ResolvedFile{Path: path, Size: int64(len(s.content))})
+	}
+	r, closer, err := OpenBinStream(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "aaabbc" {
+		t.Errorf("got %q, want %q", string(got), "aaabbc")
+	}
+	if err := closer(); err != nil {
+		t.Errorf("closer returned %v", err)
+	}
+}
+
+func TestHashReader_MatchesHashFile(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "data")
+	content := []byte("hello multi-FILE world")
+	if err := os.WriteFile(tmp, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	viaFile, err := hashFile(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaReader, err := hashReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if viaFile != viaReader {
+		t.Errorf("hashFile=%v, hashReader=%v", viaFile, viaReader)
 	}
 }
