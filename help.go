@@ -6,24 +6,8 @@ import (
 	"io"
 )
 
-func printTopHelp(w io.Writer) {
-	fmt.Fprint(w, topHelpText)
-}
-
-func printPackHelp(w io.Writer) {
-	fmt.Fprint(w, packHelpText)
-}
-
-func printUnpackHelp(w io.Writer) {
-	fmt.Fprint(w, unpackHelpText)
-}
-
-func printVerifyHelp(w io.Writer) {
-	fmt.Fprint(w, verifyHelpText)
-}
-
-func printInspectHelp(w io.Writer) {
-	fmt.Fprint(w, inspectHelpText)
+func printHelp(w io.Writer, text string) {
+	fmt.Fprint(w, text)
 }
 
 const topHelpText = `miniscram — compactly preserve scrambled CD-ROM dumps alongside .bin images.

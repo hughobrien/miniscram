@@ -104,31 +104,24 @@ func formatJSONInspect(m *Manifest, delta []byte) ([]byte, error) {
 // container, formats per --json/--full flags, writes to stdout. Errors
 // go to stderr and produce exit code 4 (I/O); usage errors produce 1.
 func runInspect(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	full := fs.Bool("full", false, "list every override record (no cap)")
-	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	help := fs.Bool("help", false, "show help for inspect")
-	helpShort := fs.Bool("h", false, "show help for inspect")
-	if err := fs.Parse(args); err != nil {
+	var full, asJSON bool
+	positional, _, exit, ok := parseSubcommand("inspect", inspectHelpText, args, stderr, func(fs *flag.FlagSet) {
+		fs.BoolVar(&full, "full", false, "list every override record")
+		fs.BoolVar(&asJSON, "json", false, "machine-readable JSON")
+	})
+	if !ok {
+		return exit
+	}
+	if !requireOnePositional(stderr, inspectHelpText, positional, "container path") {
 		return exitUsage
 	}
-	if *help || *helpShort {
-		printInspectHelp(stderr)
-		return exitOK
-	}
-	if fs.NArg() != 1 {
-		fmt.Fprintf(stderr, "expected exactly one container path; got %d\n", fs.NArg())
-		printInspectHelp(stderr)
-		return exitUsage
-	}
-	path := fs.Arg(0)
+	path := positional[0]
 	m, scramblerHash, delta, err := ReadContainer(path)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitIO
 	}
-	if *asJSON {
+	if asJSON {
 		body, err := formatJSONInspect(m, delta)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
@@ -137,7 +130,7 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, string(body))
 		return exitOK
 	}
-	human, ferr := formatHumanInspect(m, containerMagic, containerVersion, scramblerHash, delta, *full)
+	human, ferr := formatHumanInspect(m, containerMagic, containerVersion, scramblerHash, delta, full)
 	fmt.Fprint(stdout, human)
 	if ferr != nil {
 		fmt.Fprintln(stderr, ferr)
