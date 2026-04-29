@@ -81,31 +81,35 @@ Each is picked for what it stresses, not because of the game.
   data track is).
 
 ```
-$ miniscram pack -f --keep-source HALFLIFE.cue
-[02:25:31] running scramble-table self-test ... OK ok
-[02:25:31] resolving cue HALFLIFE.cue ... OK 28 track(s), 695747472 bytes total
-[02:25:31] detecting write offset ... OK -48 bytes
-[02:25:31] checking constant offset ... OK ok
-[02:25:31] hashing tracks ... OK 28 track(s) hashed
-[02:25:34] hashing scram ... OK 78f21058c2c7
-[02:25:37] building scram prediction + delta ... OK 2150 override(s), delta 5483541 bytes
-[02:25:40] writing container ... OK HALFLIFE.miniscram
-[02:25:40] reading manifest ... OK ok
-[02:25:41] running scramble-table self-test ... OK ok
-[02:25:41] reading container HALFLIFE.miniscram ... OK delta 5483541 bytes
-[02:25:41] verifying bin hashes ... OK all tracks match
-[02:25:43] building scram prediction ... OK ok
-[02:25:45] applying delta ... OK 5483541 byte(s) of delta applied
-[02:25:45] verifying scram hashes ... OK all three match
-
-$ ls -lh HALFLIFE.scram HALFLIFE.miniscram
+$ ls -lh HALFLIFE.scram
 -rwxr--r-- 1 hugh hugh 766M HALFLIFE.scram
+
+$ miniscram pack HALFLIFE.cue
+[02:27:02] running scramble-table self-test ... OK ok
+[02:27:02] resolving cue HALFLIFE.cue ... OK 28 track(s), 695747472 bytes total
+[02:27:02] detecting write offset ... OK -48 bytes
+[02:27:02] checking constant offset ... OK ok
+[02:27:02] hashing tracks ... OK 28 track(s) hashed
+[02:27:05] hashing scram ... OK 78f21058c2c7
+[02:27:08] building scram prediction + delta ... OK 2150 override(s), delta 5483541 bytes
+[02:27:12] writing container ... OK HALFLIFE.miniscram
+[02:27:12] reading manifest ... OK ok
+[02:27:12] running scramble-table self-test ... OK ok
+[02:27:12] reading container HALFLIFE.miniscram ... OK delta 5483541 bytes
+[02:27:12] verifying bin hashes ... OK all tracks match
+[02:27:15] building scram prediction ... OK ok
+[02:27:17] applying delta ... OK 5483541 byte(s) of delta applied
+[02:27:17] verifying scram hashes ... OK all three match
+[02:27:20] removed source HALFLIFE.scram
+
+$ ls -lh HALFLIFE.miniscram
 -rw-rw-r-- 1 hugh hugh 337K HALFLIFE.miniscram
 ```
 
-The original `.scram` is 766 MB. With the bins you already have,
-miniscram preserves it as a 337 KB sidecar — about 2300× smaller —
-and round-trips byte-equal in 18 seconds on a laptop.
+The 766 MB `.scram` is consumed and replaced by a 337 KB sidecar —
+about 2300× smaller — in 18 seconds on a laptop. The round-trip
+verification runs during pack so the `.scram` is only removed once
+unpack has been proven byte-equal against the original.
 
 ### Freelancer — SafeDisc 2.70.030
 
