@@ -16,9 +16,14 @@ import (
 	"time"
 )
 
-// toolVersion is reported in the manifest. Bump in lockstep with
-// container or behaviour changes.
-const toolVersion = "miniscram 1.0.0"
+// version is the build version, overridable at link time via
+// -ldflags="-X main.version=vX.Y.Z" (the release workflow does this).
+// Default "dev" for local builds.
+var version = "dev"
+
+// toolVersion is what gets printed and recorded in the manifest.
+// Computed once at package init so it picks up the linker-set version.
+var toolVersion = "miniscram " + version
 
 // Sentinel errors so the CLI can map error classes to exit codes
 // without resorting to substring matching on the message.
