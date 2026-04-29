@@ -6,9 +6,12 @@ structured delta against the unscrambled `.bin`, so you keep the
 original byte-for-byte but only pay for the parts that can't be
 recomputed from the cuesheet and bins.
 
-Implements the method from Hauenstein, *"Compact Preservation of
-Scrambled CD-ROM Data"* (IJCSIT, August 2022), specialised for Redumper
-output.
+Inspired by [Hauenstein, *"Compact Preservation of Scrambled CD-ROM
+Data"*](https://doi.org/10.5121/ijcsit.2022.14401) (IJCSIT, August
+2022) — same core idea (delta against an unscrambled-bin prediction),
+but with miniscram's own container format and override-record delta
+encoding rather than the paper's xdelta3-over-DiscImageCreator
+approach. Specialised for Redumper output.
 
 ## Install
 
