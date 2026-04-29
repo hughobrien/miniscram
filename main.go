@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -89,18 +90,20 @@ func runPack(args []string, stderr io.Writer) int {
 		printPackHelp(stderr)
 		return exitOK
 	}
+	if fs.NArg() != 1 {
+		fmt.Fprintf(stderr, "expected exactly one positional argument (cue path); got %d\n", fs.NArg())
+		printPackHelp(stderr)
+		return exitUsage
+	}
+	cuePath := fs.Arg(0)
+	scramPath := strings.TrimSuffix(cuePath, filepath.Ext(cuePath)) + ".scram"
 	out := pickFirst(*output, *outputLong)
+	if out == "" {
+		out = DefaultPackOutput(cuePath)
+	}
 	beQuiet := *quiet || *quietLong
 	beForce := *force || *forceLong
 
-	in, err := resolvePackInputs(fs.Args())
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return exitUsage
-	}
-	if out == "" {
-		out = DefaultPackOutput(in.Bin)
-	}
 	if !beForce {
 		if _, err := os.Stat(out); err == nil {
 			fmt.Fprintf(stderr, "output %s already exists (pass -f / --force to overwrite)\n", out)
@@ -115,18 +118,19 @@ func runPack(args []string, stderr io.Writer) int {
 	if noVerifyImpliesKeep {
 		rep.Info("--no-verify implies --keep-source; original .scram will be kept")
 	}
-	err = Pack(PackOptions{
-		CuePath: in.Cue, ScramPath: in.Scram,
-		OutputPath: out, Verify: !*noVerify,
+	err := Pack(PackOptions{
+		CuePath: cuePath, ScramPath: scramPath, OutputPath: out,
+		LeadinLBA: LBALeadinStart,
+		Verify:    !*noVerify,
 	}, rep)
 	if err != nil {
 		return packErrorToExit(err)
 	}
 	if !*keepSource {
-		if removed, removeErr := maybeRemoveSource(in.Scram, out, *allowCrossFS, rep); removeErr != nil {
+		if removed, removeErr := maybeRemoveSource(scramPath, out, *allowCrossFS, rep); removeErr != nil {
 			rep.Warn("source removal skipped: %v", removeErr)
 		} else if removed {
-			rep.Info("removed source %s", in.Scram)
+			rep.Info("removed source %s", scramPath)
 		}
 	}
 	return exitOK
@@ -151,28 +155,23 @@ func runUnpack(args []string, stderr io.Writer) int {
 		printUnpackHelp(stderr)
 		return exitOK
 	}
+	if fs.NArg() != 1 {
+		fmt.Fprintf(stderr, "expected exactly one positional argument (container path); got %d\n", fs.NArg())
+		printUnpackHelp(stderr)
+		return exitUsage
+	}
+	containerPath := fs.Arg(0)
 	out := pickFirst(*output, *outputLong)
+	if out == "" {
+		out = DefaultUnpackOutput(containerPath)
+	}
 	beQuiet := *quiet || *quietLong
 	beForce := *force || *forceLong
 
-	in, err := resolveUnpackInputs(fs.Args())
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return exitUsage
-	}
-	if out == "" {
-		out = DefaultUnpackOutput(in.Container)
-	}
-	if !beForce {
-		if _, err := os.Stat(out); err == nil {
-			fmt.Fprintf(stderr, "output %s already exists (pass -f / --force to overwrite)\n", out)
-			return exitUsage
-		}
-	}
 	rep := NewReporter(stderr, beQuiet)
-	err = Unpack(UnpackOptions{
-		ContainerPath: in.Container,
-		OutputPath:    out, Verify: !*noVerify, Force: beForce,
+	err := Unpack(UnpackOptions{
+		ContainerPath: containerPath, OutputPath: out,
+		Verify: !*noVerify, Force: beForce,
 	}, rep)
 	if err != nil {
 		return unpackErrorToExit(err)
@@ -194,54 +193,18 @@ func runVerify(args []string, stderr io.Writer) int {
 		printVerifyHelp(stderr)
 		return exitOK
 	}
-	beQuiet := *quiet || *quietLong
-
-	in, err := resolveUnpackInputs(fs.Args())
-	if err != nil {
-		fmt.Fprintln(stderr, err)
+	if fs.NArg() != 1 {
+		fmt.Fprintf(stderr, "expected exactly one positional argument (container path); got %d\n", fs.NArg())
+		printVerifyHelp(stderr)
 		return exitUsage
 	}
+	containerPath := fs.Arg(0)
+	beQuiet := *quiet || *quietLong
 	rep := NewReporter(stderr, beQuiet)
-	if err := Verify(VerifyOptions{
-		ContainerPath: in.Container,
-	}, rep); err != nil {
+	if err := Verify(VerifyOptions{ContainerPath: containerPath}, rep); err != nil {
 		return verifyErrorToExit(err)
 	}
 	return exitOK
-}
-
-func resolvePackInputs(positional []string) (PackInputs, error) {
-	switch len(positional) {
-	case 0:
-		cwd, err := os.Getwd()
-		if err != nil {
-			return PackInputs{}, err
-		}
-		return DiscoverPack(cwd)
-	case 1:
-		return DiscoverPackFromArg(positional[0])
-	case 3:
-		return PackInputs{Bin: positional[0], Cue: positional[1], Scram: positional[2]}, nil
-	default:
-		return PackInputs{}, fmt.Errorf("expected 0, 1, or 3 positional arguments to pack; got %d", len(positional))
-	}
-}
-
-func resolveUnpackInputs(positional []string) (UnpackInputs, error) {
-	switch len(positional) {
-	case 0:
-		cwd, err := os.Getwd()
-		if err != nil {
-			return UnpackInputs{}, err
-		}
-		return DiscoverUnpack(cwd)
-	case 1:
-		return DiscoverUnpackFromArg(positional[0])
-	case 2:
-		return UnpackInputs{Bin: positional[0], Container: positional[1]}, nil
-	default:
-		return UnpackInputs{}, fmt.Errorf("expected 0, 1, or 2 positional arguments to unpack; got %d", len(positional))
-	}
 }
 
 func maybeRemoveSource(scramPath, outPath string, allowCrossFS bool, r Reporter) (bool, error) {
@@ -281,6 +244,14 @@ func pickFirst(a, b string) string {
 		return a
 	}
 	return b
+}
+
+func DefaultPackOutput(cuePath string) string {
+	return strings.TrimSuffix(cuePath, filepath.Ext(cuePath)) + ".miniscram"
+}
+
+func DefaultUnpackOutput(containerPath string) string {
+	return strings.TrimSuffix(containerPath, filepath.Ext(containerPath)) + ".scram"
 }
 
 func packErrorToExit(err error) int {

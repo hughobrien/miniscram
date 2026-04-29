@@ -50,7 +50,11 @@ func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, f
 		}
 	}
 	for _, t := range m.Tracks {
-		fmt.Fprintf(&b, "  track %d: %-*s  first_lba=%d\n", t.Number, maxMode, t.Mode, t.FirstLBA)
+		fmt.Fprintf(&b, "  track %d: %-*s  first_lba=%d  size=%d  filename=%s\n",
+			t.Number, maxMode, t.Mode, t.FirstLBA, t.Size, t.Filename)
+		fmt.Fprintf(&b, "    md5:    %s\n", t.MD5)
+		fmt.Fprintf(&b, "    sha1:   %s\n", t.SHA1)
+		fmt.Fprintf(&b, "    sha256: %s\n", t.SHA256)
 	}
 
 	type rec struct {

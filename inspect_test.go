@@ -14,20 +14,29 @@ import (
 
 func sampleManifest() *Manifest {
 	return &Manifest{
-		FormatVersion:        4,
-		ToolVersion:          "miniscram 0.2.0 (go1.22)",
-		CreatedUTC:           "2026-04-28T14:30:21Z",
-		ScramSize:            739729728,
-		ScramMD5:             strings.Repeat("1", 32),
-		ScramSHA1:            strings.Repeat("2", 40),
-		ScramSHA256:          strings.Repeat("c", 64),
-		BinSize:              739729728,
-		BinMD5:               strings.Repeat("3", 32),
-		BinSHA1:              strings.Repeat("4", 40),
-		BinSHA256:            strings.Repeat("a", 64),
-		WriteOffsetBytes:     -52,
-		LeadinLBA:            -150,
-		Tracks:               []Track{{Number: 1, Mode: "MODE1/2352", FirstLBA: 0}},
+		FormatVersion:    4,
+		ToolVersion:      "miniscram 0.2.0 (go1.22)",
+		CreatedUTC:       "2026-04-28T14:30:21Z",
+		ScramSize:        739729728,
+		ScramMD5:         strings.Repeat("1", 32),
+		ScramSHA1:        strings.Repeat("2", 40),
+		ScramSHA256:      strings.Repeat("c", 64),
+		BinSize:          739729728,
+		BinMD5:           strings.Repeat("3", 32),
+		BinSHA1:          strings.Repeat("4", 40),
+		BinSHA256:        strings.Repeat("a", 64),
+		WriteOffsetBytes: -52,
+		LeadinLBA:        -150,
+		Tracks: []Track{{
+			Number:   1,
+			Mode:     "MODE1/2352",
+			FirstLBA: 0,
+			Size:     235200,
+			Filename: "x.bin",
+			MD5:      strings.Repeat("a", 32),
+			SHA1:     strings.Repeat("b", 40),
+			SHA256:   strings.Repeat("d", 64),
+		}},
 		BinFirstLBA:          0,
 		BinSectorCount:       314546,
 		ErrorSectorCount:     0,
@@ -72,7 +81,10 @@ func TestInspectFormatHumanCleanDelta(t *testing.T) {
 		"  bin_first_lba:          0",
 		"  delta_size:             312",
 		"  error_sector_count:     0",
-		"  track 1: MODE1/2352  first_lba=0",
+		"  track 1: MODE1/2352  first_lba=0  size=235200  filename=x.bin",
+		"    md5:    " + strings.Repeat("a", 32),
+		"    sha1:   " + strings.Repeat("b", 40),
+		"    sha256: " + strings.Repeat("d", 64),
 		"  override_records:       0",
 	}
 	for _, line := range wantLines {
@@ -211,17 +223,17 @@ func TestInspectFormatJSONReturnsErrorOnBadDelta(t *testing.T) {
 func TestInspectFormatHumanTrackPadding(t *testing.T) {
 	m := sampleManifest()
 	m.Tracks = []Track{
-		{Number: 1, Mode: "MODE1/2352", FirstLBA: 0},
-		{Number: 2, Mode: "AUDIO", FirstLBA: 12345},
+		{Number: 1, Mode: "MODE1/2352", FirstLBA: 0, Size: 235200, Filename: "x.bin"},
+		{Number: 2, Mode: "AUDIO", FirstLBA: 12345, Size: 47040, Filename: "y.bin"},
 	}
 	out, err := formatHumanInspect(m, "MSCM", 0x03, []byte{0, 0, 0, 0}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "track 1: MODE1/2352  first_lba=0") {
+	if !strings.Contains(out, "track 1: MODE1/2352  first_lba=0  size=235200  filename=x.bin") {
 		t.Errorf("expected non-padded track 1 line:\n%s", out)
 	}
-	if !strings.Contains(out, "track 2: AUDIO       first_lba=12345") {
+	if !strings.Contains(out, "track 2: AUDIO       first_lba=12345  size=47040  filename=y.bin") {
 		t.Errorf("expected padded AUDIO line:\n%s", out)
 	}
 }
@@ -435,6 +447,10 @@ func TestInspectShowsAllSixHashes(t *testing.T) {
 		"scram_md5:",
 		"scram_sha1:",
 		"scram_sha256:",
+		// per-track hash lines
+		"    md5:    ",
+		"    sha1:   ",
+		"    sha256: ",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in inspect output", want)
