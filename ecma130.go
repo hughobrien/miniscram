@@ -102,10 +102,10 @@ func init() {
 // =====================================================================
 //
 // Clause 14.3 says: "The EDC field shall consist of 4 bytes recorded in
-// positions 2 064 to 2 067. The error detection code shall be a 32-bit
+// positions 2 064 to 2 067. The error detection code shall be a 32bit
 // CRC applied on bytes 0 to 2 063. The least significant bit of a data
 // byte is used first. The EDC codeword must be divisible by the check
-// polynomial: P(x) = (x^16 + x^15 + x^2 + 1)·(x^16 + x^2 + x + 1). The
+// polynomial: P(x) = (x^16 + x^15 + x^2 + 1).(x^16 + x^2 + x + 1). The
 // least significant parity bit (x^0) is stored in the most significant
 // bit position of byte 2 067." We implement this with a standard
 // reflected (LSB-first) byte-table CRC.
