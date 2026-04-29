@@ -13,11 +13,11 @@ import (
 // filesystem metadata at pack time.
 type Track struct {
 	Number   int    `json:"number"`
-	Mode     string `json:"mode"`        // "MODE1/2352", "MODE2/2352", or "AUDIO"
-	FirstLBA int32  `json:"first_lba"`   // absolute LBA where this track's FILE begins (set by ResolveCue)
-	Size     int64  `json:"size"`        // bytes in this track's .bin file (set by ResolveCue)
-	Filename string `json:"filename"`    // basename of source .bin (set by ParseCue)
-	MD5      string `json:"md5"`         // lowercase hex (set at pack time)
+	Mode     string `json:"mode"`      // "MODE1/2352", "MODE2/2352", or "AUDIO"
+	FirstLBA int32  `json:"first_lba"` // absolute LBA where this track's FILE begins (set by ResolveCue)
+	Size     int64  `json:"size"`      // bytes in this track's .bin file (set by ResolveCue)
+	Filename string `json:"filename"`  // basename of source .bin (set by ParseCue)
+	MD5      string `json:"md5"`       // lowercase hex (set at pack time)
 	SHA1     string `json:"sha1"`
 	SHA256   string `json:"sha256"`
 }
@@ -47,8 +47,8 @@ func ParseCue(r io.Reader) ([]Track, error) {
 	var tracks []Track
 	var cur *Track
 	var hasIndex01 bool
-	var currentFile string  // basename of the most recent FILE line
-	var fileTrackCount int  // number of TRACKs seen in currentFile (must end at 0 or 1)
+	var currentFile string // basename of the most recent FILE line
+	var fileTrackCount int // number of TRACKs seen in currentFile (must end at 0 or 1)
 	flushTrack := func() error {
 		if cur == nil {
 			return nil
