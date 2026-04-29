@@ -11,10 +11,7 @@ import (
 )
 
 // TestUnpackRoundTripMode2SynthDisc covers TASKS.md item B4: end-to-end
-// pack → unpack round-trip on a synthetic Mode 2 disc. The predictor
-// is mode-agnostic for non-AUDIO tracks, so this primarily confirms
-// the cue parser accepts MODE2/2352 and the container/manifest round-
-// trip preserves it.
+// pack → unpack round-trip on a synthetic Mode 2 disc.
 func TestUnpackRoundTripMode2SynthDisc(t *testing.T) {
 	binPath, cuePath, scramPath, dir := writeSynthDiscFilesWithMode(t, 100, -48, 10, 0x02, "MODE2/2352")
 	_ = binPath
@@ -26,7 +23,7 @@ func TestUnpackRoundTripMode2SynthDisc(t *testing.T) {
 	}, rep); err != nil {
 		t.Fatal(err)
 	}
-	m, _, err := ReadContainer(containerPath)
+	m, _, _, err := ReadContainer(containerPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,11 +135,10 @@ func TestUnpackRejectsTrackFileSizeMismatch(t *testing.T) {
 	}
 }
 
-// TestUnpackVerifiesAllThreeBinHashes confirms the strict any-of-three
-// policy: tampering ANY single recorded bin hash in the container's
-// manifest causes Unpack to fail with errBinHashMismatch.
-func TestUnpackVerifiesAllThreeBinHashes(t *testing.T) {
-	for _, hashName := range []string{"bin_md5", "bin_sha1", "bin_sha256"} {
+// TestUnpackVerifiesPerTrackHashes confirms that tampering ANY single
+// per-track hash in the container's manifest causes Unpack to fail.
+func TestUnpackVerifiesPerTrackHashes(t *testing.T) {
+	for _, hashName := range []string{"track_md5", "track_sha1", "track_sha256"} {
 		t.Run(hashName, func(t *testing.T) {
 			_, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
 			containerPath := filepath.Join(dir, "x.miniscram")
@@ -152,18 +148,18 @@ func TestUnpackVerifiesAllThreeBinHashes(t *testing.T) {
 			}, NewReporter(io.Discard, true)); err != nil {
 				t.Fatal(err)
 			}
-			m, _, err := ReadContainer(containerPath)
+			m, _, _, err := ReadContainer(containerPath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var target string
 			switch hashName {
-			case "bin_md5":
-				target = m.BinMD5
-			case "bin_sha1":
-				target = m.BinSHA1
-			case "bin_sha256":
-				target = m.BinSHA256
+			case "track_md5":
+				target = m.Tracks[0].Hashes.MD5
+			case "track_sha1":
+				target = m.Tracks[0].Hashes.SHA1
+			case "track_sha256":
+				target = m.Tracks[0].Hashes.SHA256
 			}
 			data, err := os.ReadFile(containerPath)
 			if err != nil {
@@ -190,9 +186,8 @@ func TestUnpackVerifiesAllThreeBinHashes(t *testing.T) {
 	}
 }
 
-// TestUnpackVerifiesAllThreeOutputHashes confirms the strict any-of-three
-// policy: tampering ANY single recorded scram hash in the container's
-// manifest causes Unpack to fail with errOutputHashMismatch.
+// TestUnpackVerifiesAllThreeOutputHashes confirms that tampering ANY
+// single recorded scram hash causes Unpack to fail.
 func TestUnpackVerifiesAllThreeOutputHashes(t *testing.T) {
 	for _, hashName := range []string{"scram_md5", "scram_sha1", "scram_sha256"} {
 		t.Run(hashName, func(t *testing.T) {
@@ -204,18 +199,18 @@ func TestUnpackVerifiesAllThreeOutputHashes(t *testing.T) {
 			}, NewReporter(io.Discard, true)); err != nil {
 				t.Fatal(err)
 			}
-			m, _, err := ReadContainer(containerPath)
+			m, _, _, err := ReadContainer(containerPath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var target string
 			switch hashName {
 			case "scram_md5":
-				target = m.ScramMD5
+				target = m.Scram.Hashes.MD5
 			case "scram_sha1":
-				target = m.ScramSHA1
+				target = m.Scram.Hashes.SHA1
 			case "scram_sha256":
-				target = m.ScramSHA256
+				target = m.Scram.Hashes.SHA256
 			}
 			data, err := os.ReadFile(containerPath)
 			if err != nil {
@@ -223,7 +218,7 @@ func TestUnpackVerifiesAllThreeOutputHashes(t *testing.T) {
 			}
 			idx := bytes.Index(data, []byte(target))
 			if idx < 0 {
-				t.Fatalf("hash %q not in container", hashName)
+				t.Fatalf("hash %q (%s) not found in container", hashName, target)
 			}
 			data[idx] ^= 1
 			if err := os.WriteFile(containerPath, data, 0o644); err != nil {

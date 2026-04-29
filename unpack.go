@@ -49,12 +49,12 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	}
 
 	st = r.Step("reading container " + opts.ContainerPath)
-	m, delta, err := ReadContainer(opts.ContainerPath)
+	m, _, delta, err := ReadContainer(opts.ContainerPath)
 	if err != nil {
 		st.Fail(err)
 		return err
 	}
-	st.Done("manifest %d bytes, delta %d bytes", deltaJSONSize(m), len(delta))
+	st.Done("delta %d bytes", len(delta))
 
 	// Resolve track files relative to the container's directory.
 	containerDir := filepath.Dir(opts.ContainerPath)
@@ -95,25 +95,19 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 			SHA1:   hex.EncodeToString(trackSHA1.Sum(nil)),
 			SHA256: hex.EncodeToString(trackSHA256.Sum(nil)),
 		}
-		want := FileHashes{MD5: m.Tracks[i].MD5, SHA1: m.Tracks[i].SHA1, SHA256: m.Tracks[i].SHA256}
+		want := m.Tracks[i].Hashes
 		if cmpErr := compareHashes(got, want); cmpErr != nil {
 			err := fmt.Errorf("%w: track %d (%s): %v", errBinHashMismatch, m.Tracks[i].Number, m.Tracks[i].Filename, cmpErr)
 			st.Fail(err)
 			return err
 		}
 	}
-	gotRoll := FileHashes{
-		MD5:    hex.EncodeToString(rollupMD5.Sum(nil)),
-		SHA1:   hex.EncodeToString(rollupSHA1.Sum(nil)),
-		SHA256: hex.EncodeToString(rollupSHA256.Sum(nil)),
-	}
-	wantRoll := FileHashes{MD5: m.BinMD5, SHA1: m.BinSHA1, SHA256: m.BinSHA256}
-	if cmpErr := compareHashes(gotRoll, wantRoll); cmpErr != nil {
-		err := fmt.Errorf("%w: roll-up: %v", errBinHashMismatch, cmpErr)
-		st.Fail(err)
-		return err
-	}
-	st.Done("all tracks + roll-up match")
+	// Consume rollup hashers (rollup computed but not stored in v1 manifest;
+	// per-track equality is sufficient).
+	_ = rollupMD5.Sum(nil)
+	_ = rollupSHA1.Sum(nil)
+	_ = rollupSHA256.Sum(nil)
+	st.Done("all tracks match")
 
 	// Build ε̂ to a tempfile next to the output path.
 	st = r.Step("building ε̂")
@@ -133,9 +127,9 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	params := BuildParams{
 		LeadinLBA:        m.LeadinLBA,
 		WriteOffsetBytes: m.WriteOffsetBytes,
-		ScramSize:        m.ScramSize,
-		BinFirstLBA:      m.BinFirstLBA,
-		BinSectorCount:   m.BinSectorCount,
+		ScramSize:        m.Scram.Size,
+		BinFirstLBA:      m.BinFirstLBA(),
+		BinSectorCount:   m.BinSectorCount(),
 		Tracks:           m.Tracks,
 	}
 	if _, err := BuildEpsilonHat(hatFile, params, binReader, nil); err != nil {
@@ -206,7 +200,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		st.Fail(err)
 		return err
 	}
-	wantOut := FileHashes{MD5: m.ScramMD5, SHA1: m.ScramSHA1, SHA256: m.ScramSHA256}
+	wantOut := m.Scram.Hashes
 	if cmpErr := compareHashes(outHashes, wantOut); cmpErr != nil {
 		_ = os.Remove(opts.OutputPath)
 		err := fmt.Errorf("%w: %v", errOutputHashMismatch, cmpErr)
@@ -215,14 +209,4 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	}
 	st.Done("all three match")
 	return nil
-}
-
-// deltaJSONSize returns the marshalled length of the manifest. Used
-// only for the reporter line.
-func deltaJSONSize(m *Manifest) int {
-	body, err := m.Marshal()
-	if err != nil {
-		return 0
-	}
-	return len(body)
 }

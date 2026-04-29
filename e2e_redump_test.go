@@ -20,7 +20,7 @@ type realDiscFixture struct {
 	Dir                     string  // absolute path to the dataset directory
 	Stem                    string  // filename stem (no extension)
 	ExpectedDataTrackErrors int32   // data-track ECC/EDC error count — the Redumper "errors count" metric. Stable signature for protection class.
-	MaxDeltaBytes           int64   // assert manifest.DeltaSize < this
+	MaxDeltaBytes           int64   // assert len(delta payload) < this
 	MaxContainerBytes       int64   // assert os.Stat(container).Size() < this
 	EDCSampleLBAs           []int64 // LBAs to sample in TestE2EEDCAndECCRealDiscs (must be Mode 1, unprotected)
 }
@@ -120,7 +120,7 @@ func TestE2ERoundTripRealDiscs(t *testing.T) {
 				t.Fatalf("Pack: %v", err)
 			}
 
-			m, _, err := ReadContainer(containerPath)
+			m, _, delta, err := ReadContainer(containerPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -134,11 +134,11 @@ func TestE2ERoundTripRealDiscs(t *testing.T) {
 				t.Errorf("data-track error count = %d; expected %d (Redumper-style metric)",
 					gotDataErrs, f.ExpectedDataTrackErrors)
 			}
-			// Note: m.ErrorSectorCount (the delta-override count) varies
+			// Note: delta size (the delta-override byte count) varies
 			// per dump because it includes lead-in noise; do not assert
 			// on it here. Byte-equal round-trip below covers preservation.
-			if m.DeltaSize >= f.MaxDeltaBytes {
-				t.Errorf("delta is %d bytes; expected < %d", m.DeltaSize, f.MaxDeltaBytes)
+			if int64(len(delta)) >= f.MaxDeltaBytes {
+				t.Errorf("delta is %d bytes; expected < %d", len(delta), f.MaxDeltaBytes)
 			}
 			containerInfo, err := os.Stat(containerPath)
 			if err != nil {
@@ -271,7 +271,7 @@ func filesEqual(t *testing.T, a, b string) bool {
 // (e.g., SafeDisc 2.70 typically yields ~588 deliberately corrupted
 // sectors). For clean discs it's 0.
 //
-// Distinct from manifest.ErrorSectorCount, which counts every sector
+// Distinct from the delta payload size, which reflects every sector
 // requiring a delta override (data-track errors plus lead-in noise
 // plus boundary sectors). That count varies per dump; this one
 // doesn't.

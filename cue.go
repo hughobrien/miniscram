@@ -14,14 +14,12 @@ import (
 // Track is a single track entry in a cuesheet, augmented with
 // filesystem metadata at pack time.
 type Track struct {
-	Number   int    `json:"number"`
-	Mode     string `json:"mode"`      // "MODE1/2352", "MODE2/2352", or "AUDIO"
-	FirstLBA int32  `json:"first_lba"` // absolute LBA where this track's FILE begins (set by ResolveCue)
-	Size     int64  `json:"size"`      // bytes in this track's .bin file (set by ResolveCue)
-	Filename string `json:"filename"`  // basename of source .bin (set by ParseCue)
-	MD5      string `json:"md5"`       // lowercase hex (set at pack time)
-	SHA1     string `json:"sha1"`
-	SHA256   string `json:"sha256"`
+	Number   int        `json:"number"`
+	Mode     string     `json:"mode"`
+	FirstLBA int32      `json:"first_lba"`
+	Filename string     `json:"filename"`
+	Size     int64      `json:"size"`
+	Hashes   FileHashes `json:"hashes"`
 }
 
 // IsData reports whether the track's main-channel data is scrambled.

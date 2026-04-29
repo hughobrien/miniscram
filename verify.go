@@ -26,7 +26,7 @@ func Verify(opts VerifyOptions, r Reporter) error {
 	// compare. ReadContainer is called again inside Unpack but the
 	// manifest is small (KiB) and re-parsing is negligible.
 	st := r.Step("reading manifest")
-	m, _, err := ReadContainer(opts.ContainerPath)
+	m, _, _, err := ReadContainer(opts.ContainerPath)
 	if err != nil {
 		st.Fail(err)
 		return err
@@ -64,7 +64,7 @@ func Verify(opts VerifyOptions, r Reporter) error {
 		st.Fail(err)
 		return err
 	}
-	wantHashes := FileHashes{MD5: m.ScramMD5, SHA1: m.ScramSHA1, SHA256: m.ScramSHA256}
+	wantHashes := m.Scram.Hashes
 	if cmpErr := compareHashes(got, wantHashes); cmpErr != nil {
 		err := fmt.Errorf("%w: %v", errOutputHashMismatch, cmpErr)
 		st.Fail(err)

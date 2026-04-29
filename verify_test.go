@@ -23,7 +23,7 @@ func packForVerify(t *testing.T) (containerPath, dir string, m *Manifest) {
 	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatal(err)
 	}
-	mm, _, err := ReadContainer(containerPath)
+	mm, _, _, err := ReadContainer(containerPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,16 +56,14 @@ func TestVerifySynthDiscOK(t *testing.T) {
 func TestVerifyDetectsScramHashMismatch(t *testing.T) {
 	containerPath, dir, m := packForVerify(t)
 
-	// Locate the recorded scram_sha256 string inside the container's
-	// JSON manifest and flip one bit. The recovered scram still hashes
-	// to the original (correct) value, but the manifest now disagrees.
+	// Locate the recorded scram sha256 inside the container JSON and flip one bit.
 	data, err := os.ReadFile(containerPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx := bytes.Index(data, []byte(m.ScramSHA256))
+	idx := bytes.Index(data, []byte(m.Scram.Hashes.SHA256))
 	if idx < 0 {
-		t.Fatal("scram_sha256 string not present in container")
+		t.Fatal("scram sha256 string not present in container")
 	}
 	data[idx] ^= 1
 	if err := os.WriteFile(containerPath, data, 0o644); err != nil {
@@ -93,14 +91,14 @@ func TestCLIVerifyOK(t *testing.T) {
 func TestCLIVerifyExitCodes(t *testing.T) {
 	containerPath, _, m := packForVerify(t)
 
-	// Tampered scram_sha256 → exit 3.
+	// Tampered scram sha256 → exit 3.
 	data, err := os.ReadFile(containerPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx := bytes.Index(data, []byte(m.ScramSHA256))
+	idx := bytes.Index(data, []byte(m.Scram.Hashes.SHA256))
 	if idx < 0 {
-		t.Fatal("scram_sha256 not present in container")
+		t.Fatal("scram sha256 not present in container")
 	}
 	data[idx] ^= 1
 	if err := os.WriteFile(containerPath, data, 0o644); err != nil {
@@ -204,22 +202,20 @@ func TestCLIVerifyUsageErrors(t *testing.T) {
 
 // TestVerifyDetectsScramHashMismatchAllThree confirms the strict
 // any-of-three policy: tampering ANY single recorded scram hash in
-// the container's manifest causes Verify to fail with errOutputHashMismatch,
-// not just sha256 mismatches.
+// the container's manifest causes Verify to fail.
 func TestVerifyDetectsScramHashMismatchAllThree(t *testing.T) {
 	for _, hashName := range []string{"scram_md5", "scram_sha1", "scram_sha256"} {
 		t.Run(hashName, func(t *testing.T) {
 			containerPath, _, m := packForVerify(t)
 
-			// Identify which manifest hex string to tamper.
 			var target string
 			switch hashName {
 			case "scram_md5":
-				target = m.ScramMD5
+				target = m.Scram.Hashes.MD5
 			case "scram_sha1":
-				target = m.ScramSHA1
+				target = m.Scram.Hashes.SHA1
 			case "scram_sha256":
-				target = m.ScramSHA256
+				target = m.Scram.Hashes.SHA256
 			}
 
 			data, err := os.ReadFile(containerPath)

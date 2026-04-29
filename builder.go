@@ -9,6 +9,8 @@ import (
 	"io"
 )
 
+const errorSectorsListCap = 10000
+
 // BuildParams holds everything BuildEpsilonHat needs to know about the
 // disc layout. Note LeadinLBA is parameterised so unit tests can use a
 // truncated layout (no real leadin) while real Redumper input uses

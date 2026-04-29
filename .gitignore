@@ -3,6 +3,8 @@
 
 # Test data / dumps (multi-GB, kept locally)
 /deus-ex/
+/freelancer/
+/half-life/
 
 # Go build artefacts
 /miniscram
