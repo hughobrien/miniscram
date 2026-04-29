@@ -31,12 +31,14 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		r = quietReporter{}
 	}
 
-	st := r.Step("running scramble-table self-test")
-	if err := CheckScrambleTable(); err != nil {
-		st.Fail(err)
+	if err := runStep(r, "running scramble-table self-test", func() (string, error) {
+		if err := CheckScrambleTable(); err != nil {
+			return "", err
+		}
+		return "ok", nil
+	}); err != nil {
 		return err
 	}
-	st.Done("ok")
 
 	if !opts.Force {
 		if _, err := os.Stat(opts.OutputPath); err == nil {
@@ -44,7 +46,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		}
 	}
 
-	st = r.Step("reading container " + opts.ContainerPath)
+	st := r.Step("reading container " + opts.ContainerPath)
 	m, _, delta, err := ReadContainer(opts.ContainerPath)
 	if err != nil {
 		st.Fail(err)
@@ -169,19 +171,16 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		}
 		return nil
 	}
-	st = r.Step("verifying output hashes")
-	outHashes, err := hashFile(opts.OutputPath)
-	if err != nil {
-		st.Fail(err)
-		return err
-	}
 	wantOut := m.Scram.Hashes
-	if cmpErr := compareHashes(outHashes, wantOut); cmpErr != nil {
-		_ = os.Remove(opts.OutputPath)
-		err := fmt.Errorf("%w: %v", errOutputHashMismatch, cmpErr)
-		st.Fail(err)
-		return err
-	}
-	st.Done("all three match")
-	return nil
+	return runStep(r, "verifying output hashes", func() (string, error) {
+		outHashes, err := hashFile(opts.OutputPath)
+		if err != nil {
+			return "", err
+		}
+		if cmpErr := compareHashes(outHashes, wantOut); cmpErr != nil {
+			_ = os.Remove(opts.OutputPath)
+			return "", fmt.Errorf("%w: %v", errOutputHashMismatch, cmpErr)
+		}
+		return "all three match", nil
+	})
 }

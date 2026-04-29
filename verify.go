@@ -58,18 +58,15 @@ func Verify(opts VerifyOptions, r Reporter) error {
 		return err
 	}
 
-	st = r.Step("verifying scram hashes")
-	got, err := hashFile(tmpPath)
-	if err != nil {
-		st.Fail(err)
-		return err
-	}
 	wantHashes := m.Scram.Hashes
-	if cmpErr := compareHashes(got, wantHashes); cmpErr != nil {
-		err := fmt.Errorf("%w: %v", errOutputHashMismatch, cmpErr)
-		st.Fail(err)
-		return err
-	}
-	st.Done("all three match")
-	return nil
+	return runStep(r, "verifying scram hashes", func() (string, error) {
+		got, err := hashFile(tmpPath)
+		if err != nil {
+			return "", err
+		}
+		if cmpErr := compareHashes(got, wantHashes); cmpErr != nil {
+			return "", fmt.Errorf("%w: %v", errOutputHashMismatch, cmpErr)
+		}
+		return "all three match", nil
+	})
 }

@@ -49,15 +49,17 @@ func Pack(opts PackOptions, r Reporter) error {
 		r = quietReporter{}
 	}
 
-	st := r.Step("running scramble-table self-test")
-	if err := CheckScrambleTable(); err != nil {
-		st.Fail(err)
+	if err := runStep(r, "running scramble-table self-test", func() (string, error) {
+		if err := CheckScrambleTable(); err != nil {
+			return "", err
+		}
+		return "ok", nil
+	}); err != nil {
 		return err
 	}
-	st.Done("ok")
 
 	// 1. resolve cue (parse + stat + cumulative LBAs).
-	st = r.Step("resolving cue " + opts.CuePath)
+	st := r.Step("resolving cue " + opts.CuePath)
 	resolved, err := ResolveCue(opts.CuePath)
 	if err != nil {
 		st.Fail(err)
