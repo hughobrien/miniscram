@@ -384,7 +384,9 @@ The result must hash to `scram.hashes`.
 
 ## License
 
-GPL-3.0 — see [LICENSE](./LICENSE).
+Copyright (C) 2026 Hugh O'Brien. Licensed under GPL-3.0 — see
+[LICENSE](./LICENSE) for the full text and [NOTICE](./NOTICE) for
+copyright + third-party attribution.
 
 ## Design history
 
