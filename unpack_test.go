@@ -78,7 +78,7 @@ func TestUnpackVerifiesHashes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			containerPath, dir := packAndUnpackSetup(t)
-			m, _, _, _ := ReadContainer(containerPath)
+			m, _, _ := ReadContainer(containerPath)
 			tamperContainerHash(t, containerPath, tc.getHash(m))
 			err := Unpack(UnpackOptions{
 				ContainerPath: containerPath,

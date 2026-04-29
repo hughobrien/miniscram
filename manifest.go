@@ -1,12 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"compress/zlib"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,16 +11,10 @@ import (
 
 const (
 	containerMagic   = "MSCM"
-	containerVersion = byte(0x00) // v0 sentinel — see TASKS.md / spec
-	// Header layout: 4 magic + 1 version + 32 scrambler_hash + 4 manifest_len.
-	containerHeaderSize = 4 + 1 + 32 + 4
+	containerVersion = byte(0x02) // v2
+	// Header layout: 4 magic + 1 version + 4 manifest_len.
+	containerHeaderSize = 4 + 1 + 4
 )
-
-// errScramblerHashMismatch indicates the container's recorded scrambler-
-// table SHA-256 doesn't match the one this build computes — i.e., the
-// scrambler implementation has drifted from the version that wrote the
-// container.
-var errScramblerHashMismatch = errors.New("scrambler table hash mismatch")
 
 // ScramInfo holds size + hashes for the .scram file.
 type ScramInfo struct {
@@ -70,19 +61,12 @@ func (m *Manifest) BinSectorCount() int32 {
 }
 
 // WriteContainer writes a .miniscram file at path: magic + version +
-// scrambler_hash (32 bytes) + big-endian uint32 manifest length +
-// manifest JSON + remainder of deltaSrc (read to EOF).
+// big-endian uint32 manifest length + manifest JSON + remainder of
+// deltaSrc (read to EOF).
 func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
 	body, err := m.Marshal()
 	if err != nil {
 		return err
-	}
-	tableHash, err := hex.DecodeString(expectedScrambleTableSHA256)
-	if err != nil {
-		return fmt.Errorf("decoding expected scrambler hash: %w", err)
-	}
-	if len(tableHash) != 32 {
-		return fmt.Errorf("scrambler hash must be 32 bytes, got %d", len(tableHash))
 	}
 	tmp := path + ".tmp"
 	f, err := os.Create(tmp)
@@ -100,9 +84,6 @@ func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
 		return err
 	}
 	if _, err := f.Write([]byte{containerVersion}); err != nil {
-		return err
-	}
-	if _, err := f.Write(tableHash); err != nil {
 		return err
 	}
 	if err := binary.Write(f, binary.BigEndian, uint32(len(body))); err != nil {
@@ -133,55 +114,45 @@ func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
 	return os.Rename(tmp, path)
 }
 
-// ReadContainer parses a .miniscram file and returns its manifest, the
-// recorded scrambler-table hash (32 bytes), and the raw delta bytes.
-func ReadContainer(path string) (*Manifest, [32]byte, []byte, error) {
+// ReadContainer parses a .miniscram file and returns its manifest and
+// the raw delta bytes.
+func ReadContainer(path string) (*Manifest, []byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, [32]byte{}, nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 	header := make([]byte, containerHeaderSize)
 	if _, err := io.ReadFull(f, header); err != nil {
-		return nil, [32]byte{}, nil, fmt.Errorf("reading container header: %w", err)
+		return nil, nil, fmt.Errorf("reading container header: %w", err)
 	}
 	if string(header[:4]) != containerMagic {
-		return nil, [32]byte{}, nil, fmt.Errorf("not a miniscram container (bad magic %q)", header[:4])
+		return nil, nil, fmt.Errorf("not a miniscram container (bad magic %q)", header[:4])
 	}
 	if header[4] != containerVersion {
-		return nil, [32]byte{}, nil, fmt.Errorf("unsupported container version 0x%02x (this build expects 0x%02x); the prediction-rule change in feat/preserve-fail-sectors broke wire compatibility — re-pack from .bin",
+		return nil, nil, fmt.Errorf("unsupported container version 0x%02x (this build expects 0x%02x)",
 			header[4], containerVersion)
 	}
-	expectedHash, err := hex.DecodeString(expectedScrambleTableSHA256)
-	if err != nil {
-		return nil, [32]byte{}, nil, fmt.Errorf("decoding expected scrambler hash: %w", err)
-	}
-	if !bytes.Equal(header[5:37], expectedHash) {
-		return nil, [32]byte{}, nil, fmt.Errorf("%w: container records %x, this build computes %x",
-			errScramblerHashMismatch, header[5:37], expectedHash)
-	}
-	var scramblerHash [32]byte
-	copy(scramblerHash[:], header[5:37])
-	mlen := binary.BigEndian.Uint32(header[37:41])
+	mlen := binary.BigEndian.Uint32(header[5:9])
 	if mlen == 0 || mlen > 16<<20 {
-		return nil, [32]byte{}, nil, fmt.Errorf("implausible manifest length %d", mlen)
+		return nil, nil, fmt.Errorf("implausible manifest length %d", mlen)
 	}
 	body := make([]byte, mlen)
 	if _, err := io.ReadFull(f, body); err != nil {
-		return nil, [32]byte{}, nil, fmt.Errorf("reading manifest: %w", err)
+		return nil, nil, fmt.Errorf("reading manifest: %w", err)
 	}
 	var m Manifest
 	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, [32]byte{}, nil, fmt.Errorf("parsing manifest JSON: %w", err)
+		return nil, nil, fmt.Errorf("parsing manifest JSON: %w", err)
 	}
 	zr, err := zlib.NewReader(f)
 	if err != nil {
-		return nil, [32]byte{}, nil, fmt.Errorf("decompressing delta payload: %w", err)
+		return nil, nil, fmt.Errorf("decompressing delta payload: %w", err)
 	}
 	defer zr.Close()
 	delta, err := io.ReadAll(zr)
 	if err != nil {
-		return nil, [32]byte{}, nil, fmt.Errorf("decompressing delta payload: %w", err)
+		return nil, nil, fmt.Errorf("decompressing delta payload: %w", err)
 	}
-	return &m, scramblerHash, delta, nil
+	return &m, delta, nil
 }

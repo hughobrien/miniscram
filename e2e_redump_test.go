@@ -120,7 +120,7 @@ func TestE2ERoundTripRealDiscs(t *testing.T) {
 				t.Fatalf("Pack: %v", err)
 			}
 
-			m, _, delta, err := ReadContainer(containerPath)
+			m, delta, err := ReadContainer(containerPath)
 			if err != nil {
 				t.Fatal(err)
 			}

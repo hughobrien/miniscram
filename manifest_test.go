@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,7 +30,7 @@ func TestContainerRoundtrip(t *testing.T) {
 	if err := WriteContainer(path, m, bytes.NewReader(delta)); err != nil {
 		t.Fatal(err)
 	}
-	gotM, _, gotDelta, err := ReadContainer(path)
+	gotM, gotDelta, err := ReadContainer(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,20 +54,9 @@ func TestContainerRejectsInvalid(t *testing.T) {
 	} {
 		path := filepath.Join(t.TempDir(), "bad.miniscram")
 		os.WriteFile(path, body, 0o644)
-		if _, _, _, err := ReadContainer(path); err == nil {
+		if _, _, err := ReadContainer(path); err == nil {
 			t.Errorf("expected error for header %x...", body[:5])
 		}
-	}
-
-	// scrambler-hash-mismatch: expect specific sentinel.
-	var buf bytes.Buffer
-	buf.WriteString("MSCM")
-	buf.WriteByte(0x00)
-	buf.Write(make([]byte, 36)) // 32 bytes all-zero hash + 4 bytes zero length
-	path := filepath.Join(t.TempDir(), "bad-hash.miniscram")
-	os.WriteFile(path, buf.Bytes(), 0o644)
-	if _, _, _, err := ReadContainer(path); !errors.Is(err, errScramblerHashMismatch) {
-		t.Fatalf("expected errScramblerHashMismatch, got: %v", err)
 	}
 }
 
@@ -106,10 +93,6 @@ func TestContainerDeltaIsZlibFramed(t *testing.T) {
 }
 
 func TestContainerRejectsPlaintextDelta(t *testing.T) {
-	tableHash, err := hex.DecodeString(expectedScrambleTableSHA256)
-	if err != nil {
-		t.Fatal(err)
-	}
 	manifest := []byte(`{"tool_version":"x","created_utc":"x","write_offset_bytes":0,"leadin_lba":0,` +
 		`"scram":{"size":0,"hashes":{"md5":"0","sha1":"0","sha256":"0"}},` +
 		`"tracks":[{"number":1,"mode":"MODE1/2352","first_lba":0,"filename":"t.bin","size":0,` +
@@ -117,7 +100,6 @@ func TestContainerRejectsPlaintextDelta(t *testing.T) {
 	var buf bytes.Buffer
 	buf.WriteString(containerMagic)
 	buf.WriteByte(containerVersion)
-	buf.Write(tableHash)
 	binary.Write(&buf, binary.BigEndian, uint32(len(manifest)))
 	buf.Write(manifest)
 	buf.Write([]byte{0, 0, 0, 0}) // any non-zlib bytes; zlib.NewReader fails on the magic
@@ -125,9 +107,9 @@ func TestContainerRejectsPlaintextDelta(t *testing.T) {
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err = ReadContainer(path)
+	_, _, err := ReadContainer(path)
 	if err == nil {
-		t.Fatalf("expected error reading plaintext-delta v1 file")
+		t.Fatalf("expected error reading plaintext-delta file")
 	}
 	if !strings.Contains(err.Error(), "decompressing delta payload") {
 		t.Fatalf("expected error to mention 'decompressing delta payload', got: %v", err)

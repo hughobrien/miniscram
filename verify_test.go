@@ -24,7 +24,7 @@ func packForVerify(t *testing.T) (containerPath, dir string, m *Manifest) {
 	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatal(err)
 	}
-	mm, _, _, err := ReadContainer(containerPath)
+	mm, _, err := ReadContainer(containerPath)
 	if err != nil {
 		t.Fatal(err)
 	}
