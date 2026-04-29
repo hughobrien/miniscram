@@ -19,7 +19,7 @@ import (
 // SynthOpts configures synthDisc.
 type SynthOpts struct {
 	MainSectors    int
-	WriteOffset    int    // bytes
+	WriteOffset    int // bytes
 	LeadoutSectors int32
 	Mode           string // default "MODE1/2352"
 	ModeByte       byte   // default 0x01

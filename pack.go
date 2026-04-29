@@ -544,4 +544,3 @@ func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, sc
 	}
 	return hatPath, deltaPath, errs, deltaInfo.Size(), nil
 }
-

@@ -28,7 +28,11 @@ func TestLBAMSFRoundTrip(t *testing.T) {
 }
 
 func TestScramOffset(t *testing.T) {
-	for _, c := range []struct{ lba int32; offset int; want int64 }{
+	for _, c := range []struct {
+		lba    int32
+		offset int
+		want   int64
+	}{
 		{-150, -48, 105839952},
 		{0, 0, 106192800},
 		{0, 48, 106192848},

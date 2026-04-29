@@ -41,11 +41,11 @@ func runE2E(t *testing.T, opts SynthOpts) {
 
 	// Pack (Pack itself does not delete .scram; that's runPack's job).
 	if err := Pack(PackOptions{
-		CuePath:   cuePath,
-		ScramPath: scramPath,
+		CuePath:    cuePath,
+		ScramPath:  scramPath,
 		OutputPath: outPath,
-		LeadinLBA: LBAPregapStart,
-		Verify:    true,
+		LeadinLBA:  LBAPregapStart,
+		Verify:     true,
 	}, rep); err != nil {
 		t.Fatalf("Pack: %v", err)
 	}

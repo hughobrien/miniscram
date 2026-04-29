@@ -131,10 +131,10 @@ func TestIterateDeltaRecords(t *testing.T) {
 
 	t.Run("bad-input", func(t *testing.T) {
 		for _, bad := range [][]byte{
-			{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0},                              // truncated header
+			{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0},                             // truncated header
 			{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 1, 2, 3, 4, 5}, // truncated payload
-			{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},                  // zero length
-			{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0x40, 0x00, 0x00, 0x01},      // length too large
+			{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},                 // zero length
+			{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0x40, 0x00, 0x00, 0x01},     // length too large
 		} {
 			if _, err := IterateDeltaRecords(bad, func(uint64, uint32) error { return nil }); err == nil {
 				t.Fatalf("expected error for %x", bad)
