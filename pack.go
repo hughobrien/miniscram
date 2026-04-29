@@ -259,6 +259,48 @@ func compareHashes(got, want FileHashes) error {
 	return errors.New(strings.Join(diffs, "; "))
 }
 
+// validateSyncCandidate reads the 3-byte MSF header at syncOff+SyncLen
+// and returns the implied write offset if all checks pass:
+//   - BCD-valid header bytes (each nibble ≤ 9 after descrambling)
+//   - decoded LBA in [leadinLBA, 500_000]
+//   - implied write offset sample-aligned (multiple of 4)
+//   - implied write offset within ±2 sectors
+//
+// Used by both detectWriteOffset (first valid candidate wins) and
+// checkConstantOffset (samples N candidates and asserts equality).
+//
+// Returns ok=false on any failure (bad read, BCD mismatch, etc.).
+func validateSyncCandidate(f io.ReaderAt, syncOff int64, leadinLBA int32, scramSize int64) (int, bool) {
+	if syncOff+int64(SyncLen)+3 > scramSize {
+		return 0, false
+	}
+	var header [3]byte
+	if _, err := f.ReadAt(header[:], syncOff+int64(SyncLen)); err != nil {
+		return 0, false
+	}
+	for i := 0; i < 3; i++ {
+		header[i] ^= scrambleTable[SyncLen+i]
+	}
+	isBCD := func(b byte) bool { return (b>>4) <= 9 && (b&0x0F) <= 9 }
+	if !isBCD(header[0]) || !isBCD(header[1]) || !isBCD(header[2]) {
+		return 0, false
+	}
+	decodedLBA := BCDMSFToLBA(header)
+	if decodedLBA < leadinLBA || decodedLBA > 500_000 {
+		return 0, false
+	}
+	expectedAt := int64(decodedLBA-leadinLBA) * int64(SectorSize)
+	writeOffset := int(syncOff - expectedAt)
+	if writeOffset%4 != 0 {
+		return 0, false
+	}
+	const writeOffsetLimit = 2 * SectorSize
+	if writeOffset > writeOffsetLimit || writeOffset < -writeOffsetLimit {
+		return 0, false
+	}
+	return writeOffset, true
+}
+
 // detectWriteOffset scans the scram file for sync-field candidates,
 // descrambles each candidate's MSF header, and returns the implied
 // write offset of the first candidate whose header is valid BCD and
@@ -284,48 +326,12 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 		return 0, err
 	}
 	const (
-		chunkSize        = 128 * 1024
-		maxScan          = 200 * 1024 * 1024
-		writeOffsetLimit = 2 * SectorSize
+		chunkSize = 128 * 1024
+		maxScan   = 200 * 1024 * 1024
 	)
 	limit := info.Size()
 	if limit > maxScan {
 		limit = maxScan
-	}
-
-	isBCD := func(b byte) bool { return (b>>4) <= 9 && (b&0x0F) <= 9 }
-
-	// tryCandidate validates a sync candidate and returns the implied
-	// write offset on success. Returns ok=false if the candidate is a
-	// false positive (header not BCD, LBA implausible, offset not
-	// sample-aligned, or offset out of range).
-	tryCandidate := func(syncOffset int64) (int, bool) {
-		var header [3]byte
-		if syncOffset+int64(SyncLen)+3 > info.Size() {
-			return 0, false
-		}
-		if _, err := f.ReadAt(header[:], syncOffset+SyncLen); err != nil {
-			return 0, false
-		}
-		for i := 0; i < 3; i++ {
-			header[i] ^= scrambleTable[SyncLen+i]
-		}
-		if !isBCD(header[0]) || !isBCD(header[1]) || !isBCD(header[2]) {
-			return 0, false
-		}
-		decodedLBA := BCDMSFToLBA(header)
-		if decodedLBA < leadinLBA || decodedLBA > 500_000 {
-			return 0, false
-		}
-		expectedAt := int64(decodedLBA-leadinLBA) * SectorSize
-		writeOffset := int(syncOffset - expectedAt)
-		if writeOffset%4 != 0 {
-			return 0, false
-		}
-		if writeOffset > writeOffsetLimit || writeOffset < -writeOffsetLimit {
-			return 0, false
-		}
-		return writeOffset, true
 	}
 
 	chunk := make([]byte, chunkSize)
@@ -363,7 +369,7 @@ func detectWriteOffset(scramPath string, leadinLBA int32) (int, error) {
 			}
 			idx += searchPos
 			syncOffset := pos - carryLen + int64(idx)
-			if wo, ok := tryCandidate(syncOffset); ok {
+			if wo, ok := validateSyncCandidate(f, syncOffset, leadinLBA, info.Size()); ok {
 				return wo, nil
 			}
 			searchPos = idx + 1
@@ -403,40 +409,8 @@ func checkConstantOffset(scramPath string, scramSize int64, leadinLBA int32) err
 	}
 	defer f.Close()
 
-	isBCD := func(b byte) bool { return (b>>4) <= 9 && (b&0x0F) <= 9 }
-
-	// validateCandidate returns the implied write offset for a sync at
-	// syncOff if it passes BCD + LBA + offset-bound checks; otherwise
-	// returns ok=false.
-	validateCandidate := func(syncOff int64) (int, bool) {
-		if syncOff+int64(SyncLen)+3 > scramSize {
-			return 0, false
-		}
-		var header [3]byte
-		if _, err := f.ReadAt(header[:], syncOff+int64(SyncLen)); err != nil {
-			return 0, false
-		}
-		for i := 0; i < 3; i++ {
-			header[i] ^= scrambleTable[SyncLen+i]
-		}
-		if !isBCD(header[0]) || !isBCD(header[1]) || !isBCD(header[2]) {
-			return 0, false
-		}
-		decodedLBA := BCDMSFToLBA(header)
-		if decodedLBA < leadinLBA || decodedLBA > 500_000 {
-			return 0, false
-		}
-		expectedAt := int64(decodedLBA-leadinLBA) * SectorSize
-		impliedOffset := int(syncOff - expectedAt)
-		const writeOffsetLimit = 2 * SectorSize
-		if impliedOffset > writeOffsetLimit || impliedOffset < -writeOffsetLimit {
-			return 0, false
-		}
-		return impliedOffset, true
-	}
-
 	// findValidSyncFrom searches forward from startAt for the first
-	// sync that passes validateCandidate. Returns (-1, nil) if none.
+	// sync that passes validateSyncCandidate. Returns (-1, nil) if none.
 	findValidSyncFrom := func(startAt int64) (int, bool, error) {
 		const chunkSize = 128 * 1024
 		pos := startAt
@@ -457,7 +431,7 @@ func checkConstantOffset(scramPath string, scramSize int64, leadinLBA int32) err
 				}
 				idx += searchPos
 				syncOff := pos + int64(idx)
-				if off, ok := validateCandidate(syncOff); ok {
+				if off, ok := validateSyncCandidate(f, syncOff, leadinLBA, scramSize); ok {
 					return off, true, nil
 				}
 				searchPos = idx + 1
