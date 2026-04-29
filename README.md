@@ -3,7 +3,7 @@
 Compactly preserve scrambled CD-ROM dumps. miniscram stores a
 [Redumper](https://github.com/superg/redumper) `.scram` file as a small
 structured delta against the unscrambled `.bin`, so you keep the
-original byte-for-byte but only pay for the parts that can't be
+original byte-for-byte but only store the parts that can't be
 recomputed from the cuesheet and bins.
 
 Inspired by [Hauenstein, *"Compact Preservation of Scrambled CD-ROM
