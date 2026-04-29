@@ -27,9 +27,10 @@ ABOUT:
     miniscram stores the bytes of a .scram (Redumper's scrambled
     intermediate CD-ROM dump) as a small structured delta against the
     unscrambled .bin final dump. With this tool and the .bin, you
-    can reproduce the original .scram byte-for-byte. Implements the
-    method from Hauenstein, "Compact Preservation of Scrambled CD-ROM
-    Data" (IJCSIT, August 2022), specialised for Redumper output.
+    can reproduce the original .scram byte-for-byte. Inspired by
+    Hauenstein, "Compact Preservation of Scrambled CD-ROM Data"
+    (IJCSIT, August 2022; doi:10.5121/ijcsit.2022.14401),
+    specialised for Redumper output.
 
 EXIT CODES:
     0    success
