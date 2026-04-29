@@ -138,33 +138,36 @@ aligned offset.
 
 ---
 
-### B3. Multi-track + audio fixture
+### B3. Multi-track + audio fixture *(shipped 2026-04-28; HL1 e2e)*
 
 **Goal:** v0.2's synth disc and the Deus Ex e2e are both single-track
 Mode 1. The audio-track code path (`trackModeAt(...) == "AUDIO"`
 skipping the scrambler) is untested end-to-end.
 
 **Acceptance:**
-- [ ] New synthetic test fixture in `builder_test.go`: a 3-track disc
-      (data + audio + data) with verifiable round-trip.
-- [ ] If a real multi-track Redumper dump can be sourced, add a
-      build-tagged e2e test for it.
+- [~] Synthetic 3-track (data + audio + data) fixture: waived in
+      favor of the real-world HL1 e2e, which exercises the same code
+      path with a 28-track multi-FILE cue (1 Mode 1 + 27 audio).
+- [x] Real multi-track Redumper dump tested e2e: HL1 fixture row in
+      `realDiscFixtures` (commit `09c19ab`). Round-trip byte-equal
+      in ~33s.
 
-**Files:** `builder_test.go`; possibly `e2e_redump_test.go`.
+**Outcome:** Closed by combining with B1.5 (multi-FILE .cue support).
+Surfaced and fixed `checkConstantOffset`'s audio-coincidence bug
+(same shape as B1's `detectWriteOffset` bug — coincidental sync
+sequences in PCM passing the BCD-validity check; fix is the full
+LBA+offset-bound validation).
 
-**Effort:** ~150 LOC for the synthetic fixture. Real e2e depends on
-data availability.
-
-**Depends on:** nothing for the synthetic case.
-
-**Open questions:** What `BinFirstLBA` looks like for an audio-track
-disc relative to the cue's first INDEX 01 — there are convention
-differences between "data starts at LBA 0" and "audio starts at
-LBA 0".
+**Decision (open question resolved):** `BinFirstLBA` is the LBA where
+the data track's FILE begins on the disc. Audio track FirstLBA values
+are computed by ResolveCue as the cumulative sum of prior file sizes
+in sectors (file_start_LBA, not INDEX 01 within-file). Pregap
+silence at the start of an audio track's file inherits the audio
+track's mode via `trackModeAt`, which is what the predictor needs.
 
 ---
 
-### B4. Mode 2 (XA) test fixture
+### B4. Mode 2 (XA) test fixture *(shipped 2026-04-28)*
 
 **Goal:** Mode 2 sectors have different EDC/ECC layouts (or none, in
 Form 1/2 distinction) but the scrambling itself is mode-agnostic.
@@ -172,16 +175,19 @@ Currently no test exercises the Mode 2 path even though `cue.go`
 accepts `MODE2/2352`.
 
 **Acceptance:**
-- [ ] Synthetic fixture with a Mode 2 track that round-trips via
-      pack + unpack.
-- [ ] If a real Mode 2 / VCD / PSX-XA dump is available, add a
-      build-tagged e2e test.
+- [x] Synthetic fixture with a Mode 2 track that round-trips via
+      pack + unpack. `synthDiscWithMode` helper parameterized over
+      the mode byte + cue mode string; `TestBuilderCleanRoundTripMode2`
+      and `TestUnpackRoundTripMode2SynthDisc` cover the full Pack →
+      ReadContainer → Unpack → byte-equal cycle.
+- [~] Real Mode 2 / VCD / PSX-XA e2e: skipped (no dataset).
 
-**Files:** `builder_test.go`; possibly `e2e_redump_test.go`.
-
-**Effort:** ~100 LOC for the synthetic case.
-
-**Depends on:** B3 — the multi-track fixture work is similar.
+**Outcome:** Mode 2 path confirmed working. The predictor is mode-
+agnostic for non-AUDIO tracks (both Mode 1 and Mode 2 go through the
+ECMA-130 scrambler unchanged); the test exists as a regression sentinel
+for cue parsing + manifest preservation of `MODE2/2352`. Real-world
+EDC/ECC layout differences (Form 1 vs Form 2) are irrelevant because
+miniscram doesn't compute EDC/ECC at pack time.
 
 ---
 
