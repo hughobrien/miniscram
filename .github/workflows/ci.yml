@@ -19,7 +19,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          # No third-party deps, so no go.sum and nothing to cache.
+          cache: false
 
       - name: Verify go.mod is tidy
         run: |
