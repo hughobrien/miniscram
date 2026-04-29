@@ -206,15 +206,12 @@ type FileHashes struct {
 
 // hashFile streams path through MD5, SHA-1, and SHA-256 in a single
 // I/O pass and returns all three as lowercase hex.
-func hashFile(path string) (FileHashes, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return FileHashes{}, err
-	}
-	defer f.Close()
+// hashReader streams r through MD5, SHA-1, and SHA-256 in a single
+// pass and returns all three as lowercase hex.
+func hashReader(r io.Reader) (FileHashes, error) {
 	m, s1, s256 := md5.New(), sha1.New(), sha256.New()
 	w := io.MultiWriter(m, s1, s256)
-	if _, err := io.Copy(w, f); err != nil {
+	if _, err := io.Copy(w, r); err != nil {
 		return FileHashes{}, err
 	}
 	return FileHashes{
@@ -222,6 +219,16 @@ func hashFile(path string) (FileHashes, error) {
 		SHA1:   hex.EncodeToString(s1.Sum(nil)),
 		SHA256: hex.EncodeToString(s256.Sum(nil)),
 	}, nil
+}
+
+// hashFile is a thin wrapper around hashReader that opens path.
+func hashFile(path string) (FileHashes, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return FileHashes{}, err
+	}
+	defer f.Close()
+	return hashReader(f)
 }
 
 // compareHashes returns nil iff all three hashes match. Otherwise it

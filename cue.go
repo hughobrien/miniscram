@@ -5,6 +5,8 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -173,4 +175,91 @@ func parseMSF(s string) (int32, error) {
 		return 0, err
 	}
 	return int32(m*60*MSFFramesPerSecond + sec*MSFFramesPerSecond + f), nil
+}
+
+// CueResolved holds the result of ResolveCue: tracks with their
+// absolute FirstLBA, Size, and Filename populated, plus an ordered
+// list of files for streaming.
+type CueResolved struct {
+	Tracks []Track
+	Files  []ResolvedFile
+}
+
+// ResolvedFile is one .bin file resolved to an absolute path.
+type ResolvedFile struct {
+	Path string
+	Size int64
+}
+
+// ResolveCue parses cuePath, resolves each FILE entry's path relative
+// to cuePath's directory, stats the file for its size, and computes
+// each Track's absolute FirstLBA as the cumulative sum of prior
+// files' sectors. Each Track also gets its Size populated from
+// os.Stat.
+//
+// Each Track is associated with exactly one File (one TRACK per FILE
+// is enforced by ParseCue).
+func ResolveCue(cuePath string) (CueResolved, error) {
+	f, err := os.Open(cuePath)
+	if err != nil {
+		return CueResolved{}, err
+	}
+	defer f.Close()
+	tracks, err := ParseCue(f)
+	if err != nil {
+		return CueResolved{}, err
+	}
+	cueDir := filepath.Dir(cuePath)
+	var cumulativeLBA int32
+	var files []ResolvedFile
+	for i := range tracks {
+		path := filepath.Join(cueDir, tracks[i].Filename)
+		info, err := os.Stat(path)
+		if err != nil {
+			return CueResolved{}, fmt.Errorf("track %d (%s): %w", tracks[i].Number, tracks[i].Filename, err)
+		}
+		size := info.Size()
+		if size%int64(SectorSize) != 0 {
+			return CueResolved{}, fmt.Errorf("track %d (%s) size %d is not a multiple of sector size %d",
+				tracks[i].Number, tracks[i].Filename, size, SectorSize)
+		}
+		tracks[i].FirstLBA = cumulativeLBA
+		tracks[i].Size = size
+		files = append(files, ResolvedFile{Path: path, Size: size})
+		cumulativeLBA += int32(size / int64(SectorSize))
+	}
+	return CueResolved{Tracks: tracks, Files: files}, nil
+}
+
+// OpenBinStream opens every file in cue order and returns an io.Reader
+// that yields the concatenated content, plus a closer that closes
+// every underlying file. The caller MUST call the closer.
+//
+// On error during opening, any files already opened are closed before
+// returning.
+func OpenBinStream(files []ResolvedFile) (io.Reader, func() error, error) {
+	if len(files) == 0 {
+		return nil, nil, fmt.Errorf("OpenBinStream: empty file list")
+	}
+	opened := make([]*os.File, 0, len(files))
+	closeAll := func() error {
+		var firstErr error
+		for _, f := range opened {
+			if err := f.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		return firstErr
+	}
+	readers := make([]io.Reader, 0, len(files))
+	for _, rf := range files {
+		f, err := os.Open(rf.Path)
+		if err != nil {
+			_ = closeAll()
+			return nil, nil, err
+		}
+		opened = append(opened, f)
+		readers = append(readers, f)
+	}
+	return io.MultiReader(readers...), closeAll, nil
 }
