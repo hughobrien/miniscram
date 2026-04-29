@@ -3,10 +3,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/md5"
-	"crypto/sha1"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -72,29 +68,13 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		files[i] = ResolvedFile{Path: path, Size: tr.Size}
 	}
 
-	// Single hashing pass: per-track + disc-level roll-up.
 	st = r.Step("verifying bin hashes")
-	rollupMD5, rollupSHA1, rollupSHA256 := md5.New(), sha1.New(), sha256.New()
-	rollupWriter := io.MultiWriter(rollupMD5, rollupSHA1, rollupSHA256)
-	for i, rf := range files {
-		f, err := os.Open(rf.Path)
-		if err != nil {
-			st.Fail(err)
-			return err
-		}
-		trackMD5, trackSHA1, trackSHA256 := md5.New(), sha1.New(), sha256.New()
-		w := io.MultiWriter(trackMD5, trackSHA1, trackSHA256, rollupWriter)
-		if _, err := io.Copy(w, f); err != nil {
-			f.Close()
-			st.Fail(err)
-			return err
-		}
-		f.Close()
-		got := FileHashes{
-			MD5:    hex.EncodeToString(trackMD5.Sum(nil)),
-			SHA1:   hex.EncodeToString(trackSHA1.Sum(nil)),
-			SHA256: hex.EncodeToString(trackSHA256.Sum(nil)),
-		}
+	perTrack, err := hashTrackFiles(files)
+	if err != nil {
+		st.Fail(err)
+		return err
+	}
+	for i, got := range perTrack {
 		want := m.Tracks[i].Hashes
 		if cmpErr := compareHashes(got, want); cmpErr != nil {
 			err := fmt.Errorf("%w: track %d (%s): %v", errBinHashMismatch, m.Tracks[i].Number, m.Tracks[i].Filename, cmpErr)
@@ -102,11 +82,6 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 			return err
 		}
 	}
-	// Consume rollup hashers (rollup computed but not stored in v1 manifest;
-	// per-track equality is sufficient).
-	_ = rollupMD5.Sum(nil)
-	_ = rollupSHA1.Sum(nil)
-	_ = rollupSHA256.Sum(nil)
 	st.Done("all tracks match")
 
 	// Build ε̂ to a tempfile next to the output path.
