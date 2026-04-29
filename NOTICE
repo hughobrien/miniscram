@@ -1,0 +1,25 @@
+miniscram — Compact preservation of scrambled CD-ROM data
+Copyright (C) 2026 Hugh O'Brien
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License, version 3, as
+published by the Free Software Foundation. The full text of the
+licence is in LICENSE.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+General Public License for more details.
+
+================================================================================
+
+Third-party material:
+
+  redumper (https://github.com/superg/redumper)
+  Copyright (C) the redumper contributors.
+  Licensed under GPL-3.0.
+
+  Portions of miniscram are derived from redumper. The scrambler
+  implementation in ecma130.go (buildScrambleTable + Scramble) is a
+  near-verbatim Go port of redumper's Scrambler::_TABLE lambda from
+  cd/cd_scrambler.ixx. Per-lift attribution is in the source.
