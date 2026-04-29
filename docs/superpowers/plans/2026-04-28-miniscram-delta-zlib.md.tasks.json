@@ -1,0 +1,19 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-28-miniscram-delta-zlib.md",
+  "tasks": [
+    {
+      "id": 22,
+      "subject": "Task 1: zlib-compress delta payload at container boundary",
+      "status": "pending",
+      "description": "**Goal:** WriteContainer emits a zlib stream after the manifest; ReadContainer decompresses it; tests confirm round-trip and plaintext-v1 rejection.\n\n**Files:**\n- Modify: manifest.go (WriteContainer + ReadContainer)\n- Modify: manifest_test.go (add TestContainerDeltaIsZlibFramed and TestContainerRejectsPlaintextDelta)\n\n**Verify:** `just check && just test-sanitizers`\n\n```json:metadata\n{\"files\": [\"manifest.go\", \"manifest_test.go\"], \"verifyCommand\": \"just check && just test-sanitizers\", \"acceptanceCriteria\": [\"zlib wrap in WriteContainer\", \"zlib unwrap in ReadContainer\", \"decompressing delta payload error prefix\", \"TestContainerDeltaIsZlibFramed passes\", \"TestContainerRejectsPlaintextDelta passes\", \"just check passes\", \"just test-sanitizers passes\"]}\n```"
+    },
+    {
+      "id": 23,
+      "subject": "Task 2: README delta-payload note + size verification",
+      "status": "pending",
+      "blockedBy": [22],
+      "description": "**Goal:** Document the wire-format change and confirm the size win on the Half-Life real-disc fixture.\n\n**Files:**\n- Modify: README.md (Delta payload (binary) section)\n\n**Verify:** build + pack half-life; size ≤ 1 MB; verify round-trips.\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"go build -o /tmp/miniscram-zlib . && /tmp/miniscram-zlib pack -o /tmp/HALFLIFE-zlib.miniscram --keep-source -f -q half-life/HALFLIFE.cue && /tmp/miniscram-zlib verify /tmp/HALFLIFE-zlib.miniscram\", \"acceptanceCriteria\": [\"README documents zlib framing\", \"HALFLIFE.miniscram <= 1MB\", \"verify passes\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-28T23:45:00Z"
+}
