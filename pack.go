@@ -117,8 +117,9 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	st.Done("%s", scramHashes.SHA256[:12])
 
-	// 6. build ε̂ + delta in one pass over the multi-bin stream.
-	st = r.Step("building ε̂ + delta")
+	// 6. build the scram prediction (ε̂ in Hauenstein's notation) plus
+	// delta in one pass over the multi-bin stream.
+	st = r.Step("building scram prediction + delta")
 	hatPath, deltaPath, errSectors, deltaSize, err := buildHatAndDelta(opts, resolved.Files, tracks, scramSize, writeOffsetBytes, binSectors)
 	if err != nil {
 		st.Fail(err)
