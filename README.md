@@ -114,13 +114,46 @@ unpack has been proven byte-equal against the original.
 ### Freelancer — SafeDisc 2.70.030
 
 - **Copy protection:** SafeDisc 2.70.030 + Macrovision Security
-  Driver. 588 deliberately corrupted sectors per the protection
-  scheme.
+  Driver per the
+  [redump verification](http://forum.redump.org/post/122822/).
+  Thousands of sectors are deliberately corrupted as part of the
+  protection scheme.
 - **Why this disc:** demonstrates that miniscram captures intentional
-  ECC errors as delta overrides. The protection's bytes flow through
-  the container so `unpack` reproduces the protected disc verbatim.
+  ECC errors as delta overrides — the protection's exact bytes flow
+  through the container so `unpack` reproduces the protected disc
+  verbatim.
 
-*(Transcript pending.)*
+```
+$ ls -lh FL_v1.scram
+-rwxr--r-- 1 hugh hugh 798M FL_v1.scram
+
+$ miniscram pack FL_v1.cue
+[02:38:39] running scramble-table self-test ... OK ok
+[02:38:39] resolving cue FL_v1.cue ... OK 1 track(s), 729914976 bytes total
+[02:38:39] detecting write offset ... OK -48 bytes
+[02:38:39] checking constant offset ... OK ok
+[02:38:39] hashing tracks ... OK 1 track(s) hashed
+[02:38:42] hashing scram ... OK c98323550138
+[02:38:46] building scram prediction + delta ... OK 2812 override(s), delta 7084781 bytes
+[02:38:50] writing container ... OK FL_v1.miniscram
+[02:38:50] reading manifest ... OK ok
+[02:38:50] running scramble-table self-test ... OK ok
+[02:38:50] reading container FL_v1.miniscram ... OK delta 7084781 bytes
+[02:38:50] verifying bin hashes ... OK all tracks match
+[02:38:53] building scram prediction ... OK ok
+[02:38:55] applying delta ... OK 7084781 byte(s) of delta applied
+[02:38:55] verifying scram hashes ... OK all three match
+[02:38:59] removed source FL_v1.scram
+
+$ ls -lh FL_v1.miniscram
+-rw-rw-r-- 1 hugh hugh 1.5M FL_v1.miniscram
+```
+
+**2812 override records, 7 MB raw delta.** SafeDisc's corrupted
+sectors and non-zero lead-in bytes can't be recomputed from the bin,
+so they ride through the delta. zlib brings the 7 MB payload down to
+~1.5 MB. 798 MB → 1.5 MB is still ~530× — a heavy protection costs
+more than a clean disc but is still a substantial saving.
 
 ### Deus Ex v1002f — clean Mode 1 baseline
 
