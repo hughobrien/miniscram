@@ -3,10 +3,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -68,5 +71,66 @@ func TestContainerRejectsInvalid(t *testing.T) {
 	os.WriteFile(path, buf.Bytes(), 0o644)
 	if _, _, _, err := ReadContainer(path); !errors.Is(err, errScramblerHashMismatch) {
 		t.Fatalf("expected errScramblerHashMismatch, got: %v", err)
+	}
+}
+
+func TestContainerDeltaIsZlibFramed(t *testing.T) {
+	m := &Manifest{
+		ToolVersion: "miniscram-test",
+		CreatedUTC:  "2026-04-28T00:00:00Z",
+		Scram:       ScramInfo{Size: 0, Hashes: FileHashes{MD5: "0", SHA1: "0", SHA256: "0"}},
+		Tracks: []Track{{
+			Number: 1, Mode: "MODE1/2352", FirstLBA: 0, Size: 0, Filename: "t.bin",
+			Hashes: FileHashes{MD5: "0", SHA1: "0", SHA256: "0"},
+		}},
+	}
+	delta := bytes.Repeat([]byte("ABCDEFGH"), 1024)
+	path := filepath.Join(t.TempDir(), "x.miniscram")
+	if err := WriteContainer(path, m, bytes.NewReader(delta)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mlen := binary.BigEndian.Uint32(raw[37:41])
+	postManifest := raw[41+int(mlen):]
+	if len(postManifest) < 2 {
+		t.Fatalf("post-manifest too short: %d bytes", len(postManifest))
+	}
+	if postManifest[0] != 0x78 {
+		t.Fatalf("expected zlib magic 0x78 at start of post-manifest, got 0x%02x", postManifest[0])
+	}
+	if len(postManifest) >= len(delta) {
+		t.Fatalf("compression no-op: post-manifest %d bytes vs plaintext %d bytes", len(postManifest), len(delta))
+	}
+}
+
+func TestContainerRejectsPlaintextDelta(t *testing.T) {
+	tableHash, err := hex.DecodeString(expectedScrambleTableSHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := []byte(`{"tool_version":"x","created_utc":"x","write_offset_bytes":0,"leadin_lba":0,` +
+		`"scram":{"size":0,"hashes":{"md5":"0","sha1":"0","sha256":"0"}},` +
+		`"tracks":[{"number":1,"mode":"MODE1/2352","first_lba":0,"filename":"t.bin","size":0,` +
+		`"hashes":{"md5":"0","sha1":"0","sha256":"0"}}]}`)
+	var buf bytes.Buffer
+	buf.WriteString(containerMagic)
+	buf.WriteByte(containerVersion)
+	buf.Write(tableHash)
+	binary.Write(&buf, binary.BigEndian, uint32(len(manifest)))
+	buf.Write(manifest)
+	buf.Write([]byte{0, 0, 0, 0}) // plaintext count = 0
+	path := filepath.Join(t.TempDir(), "plain.miniscram")
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = ReadContainer(path)
+	if err == nil {
+		t.Fatalf("expected error reading plaintext-delta v1 file")
+	}
+	if !strings.Contains(err.Error(), "decompressing delta payload") {
+		t.Fatalf("expected error to mention 'decompressing delta payload', got: %v", err)
 	}
 }
