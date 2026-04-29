@@ -8,21 +8,21 @@ import (
 
 // VerifyOptions holds inputs for Verify.
 type VerifyOptions struct {
-	BinPath       string
 	ContainerPath string
 }
 
 // Verify performs a non-destructive integrity check: rebuild the
 // recovered .scram into a temp file, hash it, compare against
 // manifest scram hashes, then delete the temp file. Returns
-// errBinHashMismatch on wrong bin (via Unpack), errOutputHashMismatch
-// on hash mismatch, or any I/O error encountered along the way.
+// errBinHashMismatch on track hash mismatch (via Unpack),
+// errOutputHashMismatch on scram hash mismatch, or any I/O error
+// encountered along the way.
 func Verify(opts VerifyOptions, r Reporter) error {
 	if r == nil {
 		r = quietReporter{}
 	}
 
-	// Read the manifest up front so we have scram_sha256 for the final
+	// Read the manifest up front so we have scram hashes for the final
 	// compare. ReadContainer is called again inside Unpack but the
 	// manifest is small (KiB) and re-parsing is negligible.
 	st := r.Step("reading manifest")
@@ -44,12 +44,11 @@ func Verify(opts VerifyOptions, r Reporter) error {
 	tmp.Close()
 	defer os.Remove(tmpPath)
 
-	// Reuse the unpack path: scramble-test, ReadContainer, bin sha
+	// Reuse the unpack path: scramble-test, ReadContainer, bin hash
 	// check, BuildEpsilonHat, ApplyDelta. Verify=false skips Unpack's
 	// own final hash; Force=true allows writing into the tempfile we
 	// just created.
 	if err := Unpack(UnpackOptions{
-		BinPath:               opts.BinPath,
 		ContainerPath:         opts.ContainerPath,
 		OutputPath:            tmpPath,
 		Verify:                false,
@@ -66,8 +65,8 @@ func Verify(opts VerifyOptions, r Reporter) error {
 		return err
 	}
 	wantHashes := FileHashes{MD5: m.ScramMD5, SHA1: m.ScramSHA1, SHA256: m.ScramSHA256}
-	if err := compareHashes(got, wantHashes); err != nil {
-		err := fmt.Errorf("%w: %v", errOutputHashMismatch, err)
+	if cmpErr := compareHashes(got, wantHashes); cmpErr != nil {
+		err := fmt.Errorf("%w: %v", errOutputHashMismatch, cmpErr)
 		st.Fail(err)
 		return err
 	}

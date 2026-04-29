@@ -12,18 +12,20 @@ import (
 
 func TestUnpackRoundTripSynthDisc(t *testing.T) {
 	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, -48, 10)
+	_ = binPath
 	containerPath := filepath.Join(dir, "x.miniscram")
 	rep := NewReporter(io.Discard, true)
 	if err := Pack(PackOptions{
-		BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+		CuePath: cuePath, ScramPath: scramPath,
 		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
 	}, rep); err != nil {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(dir, "x.scram.recovered")
 	if err := Unpack(UnpackOptions{
-		BinPath: binPath, ContainerPath: containerPath,
-		OutputPath: outPath, Verify: true, Force: false,
+		ContainerPath: containerPath,
+		OutputPath:    outPath,
+		Verify:        true,
 	}, rep); err != nil {
 		t.Fatal(err)
 	}
@@ -40,34 +42,11 @@ func TestUnpackRoundTripSynthDisc(t *testing.T) {
 	}
 }
 
-func TestUnpackRejectsWrongBin(t *testing.T) {
-	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
-	containerPath := filepath.Join(dir, "x.miniscram")
-	if err := Pack(PackOptions{
-		BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
-		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
-	}, NewReporter(io.Discard, true)); err != nil {
-		t.Fatal(err)
-	}
-	wrongBin := filepath.Join(dir, "wrong.bin")
-	if err := os.WriteFile(wrongBin, []byte("not the right bin"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	outPath := filepath.Join(dir, "x.scram.recovered")
-	err := Unpack(UnpackOptions{
-		BinPath: wrongBin, ContainerPath: containerPath,
-		OutputPath: outPath, Verify: true,
-	}, NewReporter(io.Discard, true))
-	if err == nil {
-		t.Fatal("expected error with wrong bin")
-	}
-}
-
 func TestUnpackRefusesOverwrite(t *testing.T) {
-	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
+	_, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
 	containerPath := filepath.Join(dir, "x.miniscram")
 	if err := Pack(PackOptions{
-		BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+		CuePath: cuePath, ScramPath: scramPath,
 		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
 	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatal(err)
@@ -77,11 +56,41 @@ func TestUnpackRefusesOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := Unpack(UnpackOptions{
-		BinPath: binPath, ContainerPath: containerPath,
-		OutputPath: outPath, Verify: true, Force: false,
+		ContainerPath: containerPath,
+		OutputPath:    outPath,
+		Verify:        true, Force: false,
 	}, NewReporter(io.Discard, true))
 	if err == nil {
 		t.Fatal("expected error refusing to overwrite")
+	}
+}
+
+func TestUnpackRejectsTrackFileSizeMismatch(t *testing.T) {
+	_, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
+	containerPath := filepath.Join(dir, "x.miniscram")
+	if err := Pack(PackOptions{
+		CuePath: cuePath, ScramPath: scramPath,
+		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
+	}, NewReporter(io.Discard, true)); err != nil {
+		t.Fatal(err)
+	}
+	// Truncate the .bin file by one sector.
+	binPathInDir := filepath.Join(dir, "x.bin")
+	info, err := os.Stat(binPathInDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(binPathInDir, info.Size()-int64(SectorSize)); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "x.scram.recovered")
+	err = Unpack(UnpackOptions{
+		ContainerPath: containerPath,
+		OutputPath:    outPath,
+		Verify:        true,
+	}, NewReporter(io.Discard, true))
+	if !errors.Is(err, errBinHashMismatch) {
+		t.Fatalf("expected errBinHashMismatch on truncated track, got %v", err)
 	}
 }
 
@@ -91,10 +100,10 @@ func TestUnpackRefusesOverwrite(t *testing.T) {
 func TestUnpackVerifiesAllThreeBinHashes(t *testing.T) {
 	for _, hashName := range []string{"bin_md5", "bin_sha1", "bin_sha256"} {
 		t.Run(hashName, func(t *testing.T) {
-			binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, -48, 10)
+			_, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
 			containerPath := filepath.Join(dir, "x.miniscram")
 			if err := Pack(PackOptions{
-				BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+				CuePath: cuePath, ScramPath: scramPath,
 				OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
 			}, NewReporter(io.Discard, true)); err != nil {
 				t.Fatal(err)
@@ -103,7 +112,6 @@ func TestUnpackVerifiesAllThreeBinHashes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
 			var target string
 			switch hashName {
 			case "bin_md5":
@@ -113,24 +121,23 @@ func TestUnpackVerifiesAllThreeBinHashes(t *testing.T) {
 			case "bin_sha256":
 				target = m.BinSHA256
 			}
-
 			data, err := os.ReadFile(containerPath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			idx := bytes.Index(data, []byte(target))
 			if idx < 0 {
-				t.Fatalf("hash %q (%s) not found in container", hashName, target)
+				t.Fatalf("hash %q not in container", hashName)
 			}
 			data[idx] ^= 1
 			if err := os.WriteFile(containerPath, data, 0o644); err != nil {
 				t.Fatal(err)
 			}
-
-			outPath := filepath.Join(dir, "x.scram.recovered")
+			outPath := filepath.Join(dir, "out.scram")
 			err = Unpack(UnpackOptions{
-				BinPath: binPath, ContainerPath: containerPath,
-				OutputPath: outPath, Verify: true,
+				ContainerPath: containerPath,
+				OutputPath:    outPath,
+				Verify:        true,
 			}, NewReporter(io.Discard, true))
 			if !errors.Is(err, errBinHashMismatch) {
 				t.Fatalf("expected errBinHashMismatch tampering %s, got %v", hashName, err)
@@ -145,10 +152,10 @@ func TestUnpackVerifiesAllThreeBinHashes(t *testing.T) {
 func TestUnpackVerifiesAllThreeOutputHashes(t *testing.T) {
 	for _, hashName := range []string{"scram_md5", "scram_sha1", "scram_sha256"} {
 		t.Run(hashName, func(t *testing.T) {
-			binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, -48, 10)
+			_, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, 0, 10)
 			containerPath := filepath.Join(dir, "x.miniscram")
 			if err := Pack(PackOptions{
-				BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+				CuePath: cuePath, ScramPath: scramPath,
 				OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
 			}, NewReporter(io.Discard, true)); err != nil {
 				t.Fatal(err)
@@ -157,7 +164,6 @@ func TestUnpackVerifiesAllThreeOutputHashes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
 			var target string
 			switch hashName {
 			case "scram_md5":
@@ -167,24 +173,23 @@ func TestUnpackVerifiesAllThreeOutputHashes(t *testing.T) {
 			case "scram_sha256":
 				target = m.ScramSHA256
 			}
-
 			data, err := os.ReadFile(containerPath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			idx := bytes.Index(data, []byte(target))
 			if idx < 0 {
-				t.Fatalf("hash %q (%s) not found in container", hashName, target)
+				t.Fatalf("hash %q not in container", hashName)
 			}
 			data[idx] ^= 1
 			if err := os.WriteFile(containerPath, data, 0o644); err != nil {
 				t.Fatal(err)
 			}
-
-			outPath := filepath.Join(dir, "x.scram.recovered")
+			outPath := filepath.Join(dir, "out.scram")
 			err = Unpack(UnpackOptions{
-				BinPath: binPath, ContainerPath: containerPath,
-				OutputPath: outPath, Verify: true,
+				ContainerPath: containerPath,
+				OutputPath:    outPath,
+				Verify:        true,
 			}, NewReporter(io.Discard, true))
 			if !errors.Is(err, errOutputHashMismatch) {
 				t.Fatalf("expected errOutputHashMismatch tampering %s, got %v", hashName, err)

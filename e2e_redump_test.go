@@ -95,7 +95,6 @@ func TestE2ERoundTripRealDiscs(t *testing.T) {
 			rep := NewReporter(io.Discard, true)
 
 			if err := Pack(PackOptions{
-				BinPath:    binPath,
 				CuePath:    cuePath,
 				ScramPath:  scramPath,
 				OutputPath: containerPath,
@@ -142,7 +141,6 @@ func TestE2ERoundTripRealDiscs(t *testing.T) {
 
 			outPath := filepath.Join(tmp, f.Stem+".scram.recovered")
 			if err := Unpack(UnpackOptions{
-				BinPath:       binPath,
 				ContainerPath: containerPath,
 				OutputPath:    outPath,
 				Verify:        true,

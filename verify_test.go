@@ -10,25 +10,24 @@ import (
 	"testing"
 )
 
-// packForVerify packs a synthetic disc and returns the bin path,
-// container path, dir, and parsed manifest. Reused by every verify
-// test that needs a known-good baseline container.
-func packForVerify(t *testing.T) (binPath, containerPath, dir string, m *Manifest) {
+// packForVerify packs a synthetic disc and returns the container path,
+// dir, and parsed manifest. Reused by every verify test that needs a
+// known-good baseline container.
+func packForVerify(t *testing.T) (containerPath, dir string, m *Manifest) {
 	t.Helper()
-	binPath, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, -48, 10)
+	_, cuePath, scramPath, dir := writeSynthDiscFiles(t, 100, -48, 10)
 	containerPath = filepath.Join(dir, "x.miniscram")
-	rep := NewReporter(io.Discard, true)
 	if err := Pack(PackOptions{
-		BinPath: binPath, CuePath: cuePath, ScramPath: scramPath,
+		CuePath: cuePath, ScramPath: scramPath,
 		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
-	}, rep); err != nil {
+	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatal(err)
 	}
 	mm, _, err := ReadContainer(containerPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return binPath, containerPath, dir, mm
+	return containerPath, dir, mm
 }
 
 func assertNoVerifyTempfile(t *testing.T, dir string) {
@@ -45,9 +44,9 @@ func assertNoVerifyTempfile(t *testing.T, dir string) {
 }
 
 func TestVerifySynthDiscOK(t *testing.T) {
-	binPath, containerPath, dir, _ := packForVerify(t)
+	containerPath, dir, _ := packForVerify(t)
 	if err := Verify(VerifyOptions{
-		BinPath: binPath, ContainerPath: containerPath,
+		ContainerPath: containerPath,
 	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -55,7 +54,7 @@ func TestVerifySynthDiscOK(t *testing.T) {
 }
 
 func TestVerifyDetectsScramHashMismatch(t *testing.T) {
-	binPath, containerPath, dir, m := packForVerify(t)
+	containerPath, dir, m := packForVerify(t)
 
 	// Locate the recorded scram_sha256 string inside the container's
 	// JSON manifest and flip one bit. The recovered scram still hashes
@@ -74,7 +73,7 @@ func TestVerifyDetectsScramHashMismatch(t *testing.T) {
 	}
 
 	err = Verify(VerifyOptions{
-		BinPath: binPath, ContainerPath: containerPath,
+		ContainerPath: containerPath,
 	}, NewReporter(io.Discard, true))
 	if !errors.Is(err, errOutputHashMismatch) {
 		t.Fatalf("expected errOutputHashMismatch, got %v", err)
@@ -82,43 +81,17 @@ func TestVerifyDetectsScramHashMismatch(t *testing.T) {
 	assertNoVerifyTempfile(t, dir)
 }
 
-func TestVerifyDetectsWrongBin(t *testing.T) {
-	_, containerPath, dir, _ := packForVerify(t)
-	wrongBin := filepath.Join(dir, "wrong.bin")
-	if err := os.WriteFile(wrongBin, []byte("not the right bin"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	err := Verify(VerifyOptions{
-		BinPath: wrongBin, ContainerPath: containerPath,
-	}, NewReporter(io.Discard, true))
-	if !errors.Is(err, errBinHashMismatch) {
-		t.Fatalf("expected errBinHashMismatch, got %v", err)
-	}
-	assertNoVerifyTempfile(t, dir)
-}
-
 func TestCLIVerifyOK(t *testing.T) {
-	binPath, containerPath, _, _ := packForVerify(t)
+	containerPath, _, _ := packForVerify(t)
 	var stderr bytes.Buffer
-	code := run([]string{"verify", binPath, containerPath}, io.Discard, &stderr)
+	code := run([]string{"verify", containerPath}, io.Discard, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit %d; stderr=%s", code, stderr.String())
 	}
 }
 
 func TestCLIVerifyExitCodes(t *testing.T) {
-	binPath, containerPath, dir, m := packForVerify(t)
-
-	// Wrong bin → exit 5.
-	wrongBin := filepath.Join(dir, "wrong.bin")
-	if err := os.WriteFile(wrongBin, []byte("nope"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	code := run([]string{"verify", wrongBin, containerPath}, io.Discard, &stderr)
-	if code != exitWrongBin {
-		t.Fatalf("wrong-bin exit %d, want %d; stderr=%s", code, exitWrongBin, stderr.String())
-	}
+	containerPath, _, m := packForVerify(t)
 
 	// Tampered scram_sha256 → exit 3.
 	data, err := os.ReadFile(containerPath)
@@ -133,15 +106,15 @@ func TestCLIVerifyExitCodes(t *testing.T) {
 	if err := os.WriteFile(containerPath, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stderr.Reset()
-	code = run([]string{"verify", binPath, containerPath}, io.Discard, &stderr)
+	var stderr bytes.Buffer
+	code := run([]string{"verify", containerPath}, io.Discard, &stderr)
 	if code != exitVerifyFail {
 		t.Fatalf("tampered exit %d, want %d; stderr=%s", code, exitVerifyFail, stderr.String())
 	}
 }
 
 func TestCLIVerifyDiscovery(t *testing.T) {
-	binPath, containerPath, dir, _ := packForVerify(t)
+	containerPath, dir, _ := packForVerify(t)
 
 	t.Run("zero-arg-cwd", func(t *testing.T) {
 		cwd, _ := os.Getwd()
@@ -165,9 +138,9 @@ func TestCLIVerifyDiscovery(t *testing.T) {
 		}
 	})
 
-	t.Run("two-arg-explicit", func(t *testing.T) {
+	t.Run("one-arg-container", func(t *testing.T) {
 		var stderr bytes.Buffer
-		code := run([]string{"verify", binPath, containerPath}, io.Discard, &stderr)
+		code := run([]string{"verify", containerPath}, io.Discard, &stderr)
 		if code != exitOK {
 			t.Fatalf("exit %d; stderr=%s", code, stderr.String())
 		}
@@ -207,7 +180,7 @@ func TestCLIVerifyHelp(t *testing.T) {
 }
 
 func TestVerifyDetectsTruncatedContainer(t *testing.T) {
-	_, containerPath, _, _ := packForVerify(t)
+	containerPath, _, _ := packForVerify(t)
 
 	// Truncate the container to 8 bytes — too short to be a valid container.
 	if err := os.WriteFile(containerPath, []byte("TRUNCATE"), 0o644); err != nil {
@@ -217,7 +190,6 @@ func TestVerifyDetectsTruncatedContainer(t *testing.T) {
 	var buf bytes.Buffer
 	rep := NewReporter(&buf, false)
 	err := Verify(VerifyOptions{
-		BinPath:       filepath.Join(filepath.Dir(containerPath), "test.bin"),
 		ContainerPath: containerPath,
 	}, rep)
 	if err == nil {
@@ -268,7 +240,7 @@ func TestCLIVerifyUsageErrors(t *testing.T) {
 func TestVerifyDetectsScramHashMismatchAllThree(t *testing.T) {
 	for _, hashName := range []string{"scram_md5", "scram_sha1", "scram_sha256"} {
 		t.Run(hashName, func(t *testing.T) {
-			binPath, containerPath, _, m := packForVerify(t)
+			containerPath, _, m := packForVerify(t)
 
 			// Identify which manifest hex string to tamper.
 			var target string
@@ -295,7 +267,7 @@ func TestVerifyDetectsScramHashMismatchAllThree(t *testing.T) {
 			}
 
 			err = Verify(VerifyOptions{
-				BinPath: binPath, ContainerPath: containerPath,
+				ContainerPath: containerPath,
 			}, NewReporter(io.Discard, true))
 			if !errors.Is(err, errOutputHashMismatch) {
 				t.Fatalf("expected errOutputHashMismatch tampering %s, got %v", hashName, err)

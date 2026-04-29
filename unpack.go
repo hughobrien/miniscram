@@ -3,6 +3,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +22,6 @@ var (
 
 // UnpackOptions holds inputs for Unpack.
 type UnpackOptions struct {
-	BinPath               string
 	ContainerPath         string
 	OutputPath            string
 	Verify                bool
@@ -26,7 +29,7 @@ type UnpackOptions struct {
 	SuppressVerifyWarning bool // skip the "verification skipped" Warn; for callers that perform their own verification (e.g. Verify)
 }
 
-// Unpack reproduces the original .scram from <bin> + <container>.
+// Unpack reproduces the original .scram from the container's track files + delta.
 func Unpack(opts UnpackOptions, r Reporter) error {
 	if r == nil {
 		r = quietReporter{}
@@ -53,23 +56,66 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	}
 	st.Done("manifest %d bytes, delta %d bytes", deltaJSONSize(m), len(delta))
 
-	// 1. verify bin hashes
-	st = r.Step("verifying bin hashes")
-	binHashes, err := hashFile(opts.BinPath)
-	if err != nil {
-		st.Fail(err)
-		return err
+	// Resolve track files relative to the container's directory.
+	containerDir := filepath.Dir(opts.ContainerPath)
+	files := make([]ResolvedFile, len(m.Tracks))
+	for i, tr := range m.Tracks {
+		path := filepath.Join(containerDir, tr.Filename)
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("track %d (%s): %w", tr.Number, tr.Filename, err)
+		}
+		if info.Size() != tr.Size {
+			return fmt.Errorf("%w: track %d (%s) size on disk %d != manifest %d",
+				errBinHashMismatch, tr.Number, tr.Filename, info.Size(), tr.Size)
+		}
+		files[i] = ResolvedFile{Path: path, Size: tr.Size}
 	}
-	wantBin := FileHashes{MD5: m.BinMD5, SHA1: m.BinSHA1, SHA256: m.BinSHA256}
-	if err := compareHashes(binHashes, wantBin); err != nil {
-		err := fmt.Errorf("%w: %v", errBinHashMismatch, err)
-		st.Fail(err)
-		return err
-	}
-	st.Done("all three match")
 
-	// 2. rebuild ε̂. ε̂ is the same size as the recovered .scram (often
-	// hundreds of MB), so put it next to the output rather than /tmp.
+	// Single hashing pass: per-track + disc-level roll-up.
+	st = r.Step("verifying bin hashes")
+	rollupMD5, rollupSHA1, rollupSHA256 := md5.New(), sha1.New(), sha256.New()
+	rollupWriter := io.MultiWriter(rollupMD5, rollupSHA1, rollupSHA256)
+	for i, rf := range files {
+		f, err := os.Open(rf.Path)
+		if err != nil {
+			st.Fail(err)
+			return err
+		}
+		trackMD5, trackSHA1, trackSHA256 := md5.New(), sha1.New(), sha256.New()
+		w := io.MultiWriter(trackMD5, trackSHA1, trackSHA256, rollupWriter)
+		if _, err := io.Copy(w, f); err != nil {
+			f.Close()
+			st.Fail(err)
+			return err
+		}
+		f.Close()
+		got := FileHashes{
+			MD5:    hex.EncodeToString(trackMD5.Sum(nil)),
+			SHA1:   hex.EncodeToString(trackSHA1.Sum(nil)),
+			SHA256: hex.EncodeToString(trackSHA256.Sum(nil)),
+		}
+		want := FileHashes{MD5: m.Tracks[i].MD5, SHA1: m.Tracks[i].SHA1, SHA256: m.Tracks[i].SHA256}
+		if cmpErr := compareHashes(got, want); cmpErr != nil {
+			err := fmt.Errorf("%w: track %d (%s): %v", errBinHashMismatch, m.Tracks[i].Number, m.Tracks[i].Filename, cmpErr)
+			st.Fail(err)
+			return err
+		}
+	}
+	gotRoll := FileHashes{
+		MD5:    hex.EncodeToString(rollupMD5.Sum(nil)),
+		SHA1:   hex.EncodeToString(rollupSHA1.Sum(nil)),
+		SHA256: hex.EncodeToString(rollupSHA256.Sum(nil)),
+	}
+	wantRoll := FileHashes{MD5: m.BinMD5, SHA1: m.BinSHA1, SHA256: m.BinSHA256}
+	if cmpErr := compareHashes(gotRoll, wantRoll); cmpErr != nil {
+		err := fmt.Errorf("%w: roll-up: %v", errBinHashMismatch, cmpErr)
+		st.Fail(err)
+		return err
+	}
+	st.Done("all tracks + roll-up match")
+
+	// Build ε̂ to a tempfile next to the output path.
 	st = r.Step("building ε̂")
 	hatFile, err := os.CreateTemp(filepath.Dir(opts.OutputPath), "miniscram-unpack-hat-*")
 	if err != nil {
@@ -78,7 +124,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	}
 	hatPath := hatFile.Name()
 	defer os.Remove(hatPath)
-	binFile, err := os.Open(opts.BinPath)
+	binReader, closeBin, err := OpenBinStream(files)
 	if err != nil {
 		hatFile.Close()
 		st.Fail(err)
@@ -92,13 +138,13 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		BinSectorCount:   m.BinSectorCount,
 		Tracks:           m.Tracks,
 	}
-	if _, err := BuildEpsilonHat(hatFile, params, binFile, nil); err != nil {
-		binFile.Close()
+	if _, err := BuildEpsilonHat(hatFile, params, binReader, nil); err != nil {
+		closeBin()
 		hatFile.Close()
 		st.Fail(err)
 		return err
 	}
-	binFile.Close()
+	closeBin()
 	if err := hatFile.Sync(); err != nil {
 		hatFile.Close()
 		st.Fail(err)
@@ -107,17 +153,15 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	hatFile.Close()
 	st.Done("ok")
 
-	// 3. ε̂ is now at hatPath. Rename to opts.OutputPath (or copy on cross-fs failure).
+	// Move ε̂ into place at OutputPath.
 	if err := os.Rename(hatPath, opts.OutputPath); err != nil {
 		hatF, oerr := os.Open(hatPath)
 		if oerr != nil {
-			st.Fail(oerr)
 			return oerr
 		}
 		outF, oerr := os.Create(opts.OutputPath)
 		if oerr != nil {
 			hatF.Close()
-			st.Fail(oerr)
 			return oerr
 		}
 		_, cerr := io.Copy(outF, hatF)
@@ -125,10 +169,11 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		outF.Close()
 		os.Remove(hatPath)
 		if cerr != nil {
-			st.Fail(cerr)
 			return cerr
 		}
 	}
+
+	// Apply delta in-place.
 	st = r.Step("applying delta")
 	outFile, err := os.OpenFile(opts.OutputPath, os.O_RDWR, 0)
 	if err != nil {
@@ -148,7 +193,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	outFile.Close()
 	st.Done("%d byte(s) of delta applied", len(delta))
 
-	// 4. verify output hashes
+	// Verify recovered scram hashes (unless skipped).
 	if !opts.Verify {
 		if !opts.SuppressVerifyWarning {
 			r.Warn("verification skipped (--no-verify)")
@@ -162,9 +207,9 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		return err
 	}
 	wantOut := FileHashes{MD5: m.ScramMD5, SHA1: m.ScramSHA1, SHA256: m.ScramSHA256}
-	if err := compareHashes(outHashes, wantOut); err != nil {
+	if cmpErr := compareHashes(outHashes, wantOut); cmpErr != nil {
 		_ = os.Remove(opts.OutputPath)
-		err := fmt.Errorf("%w: %v", errOutputHashMismatch, err)
+		err := fmt.Errorf("%w: %v", errOutputHashMismatch, cmpErr)
 		st.Fail(err)
 		return err
 	}
