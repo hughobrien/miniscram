@@ -43,6 +43,11 @@ flagged in the B1 cycle, not yet a TASKS entry) and unblocks **B3**
   the per-track .bin files contain. Pregap silence in audio tracks
   is recorded as part of the track's file (Redumper convention).
   No special handling needed.
+- **Multi-track-per-FILE cues.** Cues where a single FILE contains
+  multiple TRACKs (with INDEX 01 markers identifying internal
+  boundaries) are rejected as unsupported. Redumper always produces
+  one TRACK per FILE for multi-track discs; the multi-track-per-FILE
+  shape is a non-Redumper convention we don't need to support.
 - **Renaming track files at unpack.** Unpack reads from the recorded
   filename and writes a single .scram. The original per-track .bin
   files are not reconstructed — that's the user's archive bundle's
@@ -54,7 +59,7 @@ flagged in the B1 cycle, not yet a TASKS entry) and unblocks **B3**
 type Track struct {
     Number   int    `json:"number"`
     Mode     string `json:"mode"`        // "MODE1/2352", "MODE2/2352", "AUDIO"
-    FirstLBA int32  `json:"first_lba"`   // absolute, computed from prior FILE sizes + INDEX 01 offset
+    FirstLBA int32  `json:"first_lba"`   // absolute LBA where the track's FILE begins (not where INDEX 01 begins)
     Size     int64  `json:"size"`        // bytes in this track's .bin file
     Filename string `json:"filename"`    // basename of source .bin (no path)
     MD5      string `json:"md5"`         // lowercase hex, computed at pack
@@ -79,29 +84,31 @@ re-pack from the original .bin
 
 ## Cue parsing
 
-`ParseCue(r io.Reader)` stays a pure parser (no filesystem I/O). Track
-struct gains `Filename` and a within-file `IndexByteOffset int64`
-(internal to parsing; computed from INDEX 01's MSF). Returns:
+`ParseCue(r io.Reader)` stays a pure parser (no filesystem I/O). The
+parser:
+
+- Captures each `FILE` line and attaches its filename to the `TRACK`
+  entries that follow until the next `FILE`.
+- **Rejects** cues where a single `FILE` contains more than one
+  `TRACK`. This is the multi-track-per-FILE shape miniscram doesn't
+  support; Redumper output never produces it.
+- **Rejects** non-`BINARY` FILE types and filenames containing path
+  separators or `..`.
+- **Discards** INDEX 01's MSF value. The within-file INDEX 01 offset
+  is not needed: with one TRACK per FILE, the track's file is its
+  data unit, and pregap (e.g., 150 sectors of audio silence at the
+  start of an audio track's file) is handled implicitly by the file
+  ownership — `trackModeAt(pregap_LBA)` returns the file's track's
+  mode (e.g., AUDIO), which is what the predictor needs.
 
 ```go
-type Track struct { /* as above */ }
-
-type CueFile struct {
-    Filename string  // basename as it appeared in the FILE line
-    Tracks   []int   // track numbers contained in this file (1-based)
-}
-
-func ParseCue(r io.Reader) ([]Track, []CueFile, error)
+func ParseCue(r io.Reader) ([]Track, error)
 ```
 
-The parser captures the FILE→TRACK association. INDEX 01's offset
-within its FILE is stored on the Track temporarily. Absolute
-`FirstLBA` is computed in a separate resolution step.
-
-`FILE` lines must be `BINARY` type; non-BINARY rejects with a clear
-error. Filenames must be plain basenames (no `..`, no `/`). The
-parser is forgiving of single vs double quotes and trailing
-whitespace, matching Redumper's actual output.
+Returns Tracks with `Number`, `Mode`, `Filename` populated. `FirstLBA`
+is left at zero; `ResolveCue` populates it from cumulative file sizes.
+`Size`, `MD5`, `SHA1`, `SHA256` are populated downstream (Resolve and
+Pack respectively).
 
 ## Cue resolution and bin reader
 
@@ -109,8 +116,8 @@ A new helper bridges parsing and filesystem:
 
 ```go
 type CueResolved struct {
-    Tracks []Track       // with absolute FirstLBA, Size, Filename populated
-    Files  []ResolvedFile // ordered list of bin files to stream in pack order
+    Tracks []Track        // with FirstLBA, Size, Filename populated
+    Files  []ResolvedFile // ordered list of bin files to stream in cue order
 }
 
 type ResolvedFile struct {
@@ -120,10 +127,19 @@ type ResolvedFile struct {
 
 // ResolveCue parses cuePath, resolves each FILE entry's absolute path
 // relative to cuePath's directory, stats each file for size, and
-// computes absolute FirstLBAs. Returns ready-to-use Tracks + ordered
-// file list for streaming.
+// computes each Track's absolute FirstLBA as the cumulative sum of
+// prior files' sector counts (Track.FirstLBA = sum of bytes-of-prior-
+// files / SectorSize). Returns ready-to-use Tracks + ordered file
+// list for streaming.
 func ResolveCue(cuePath string) (CueResolved, error)
 ```
+
+For Redumper one-TRACK-per-FILE output, `Track.FirstLBA` is the LBA
+where the track's file begins on the disc — which is also where the
+predictor must start treating that track's mode as authoritative.
+Pregap regions inside a track's file (e.g., 150 sectors of silence
+at the start of an audio track's file) are part of the track's mode
+range, exactly what the file-ownership semantics produce.
 
 For single-FILE cues the result has one entry in `Files` and the
 existing single-bin behavior is preserved. For multi-FILE cues,
