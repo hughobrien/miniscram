@@ -149,22 +149,22 @@ $ ls -lh FL_v1.scram
 -rwxr--r-- 1 hugh hugh 798M FL_v1.scram
 
 $ miniscram pack FL_v1.cue
-[02:38:39] running scramble-table self-test ... OK ok
-[02:38:39] resolving cue FL_v1.cue ... OK 1 track(s), 729914976 bytes total
-[02:38:39] detecting write offset ... OK -48 bytes
-[02:38:39] checking constant offset ... OK ok
-[02:38:39] hashing tracks ... OK 1 track(s) hashed
-[02:38:42] hashing scram ... OK c98323550138
-[02:38:46] building scram prediction + delta ... OK 2812 override(s), delta 7084781 bytes
-[02:38:50] writing container ... OK FL_v1.miniscram
-[02:38:50] reading manifest ... OK ok
-[02:38:50] running scramble-table self-test ... OK ok
-[02:38:50] reading container FL_v1.miniscram ... OK delta 7084781 bytes
-[02:38:50] verifying bin hashes ... OK all tracks match
-[02:38:53] building scram prediction ... OK ok
-[02:38:55] applying delta ... OK 7084781 byte(s) of delta applied
-[02:38:55] verifying scram hashes ... OK all three match
-[02:38:59] removed source FL_v1.scram
+[22:23:55] running scramble-table self-test ... OK ok
+[22:23:55] resolving cue FL_v1.cue ... OK 1 track(s), 729914976 bytes total
+[22:23:55] detecting write offset ... OK -48 bytes
+[22:23:55] checking constant offset ... OK ok
+[22:23:55] hashing tracks ... OK 1 track(s) hashed
+[22:23:58] hashing scram ... OK c98323550138
+[22:24:02] building scram prediction + delta ... OK 2812 override(s), 0 pass-through(s), delta 7084781 bytes
+[22:24:06] writing container ... OK FL_v1.miniscram
+[22:24:06] reading manifest ... OK ok
+[22:24:06] running scramble-table self-test ... OK ok
+[22:24:06] reading container FL_v1.miniscram ... OK delta 7084781 bytes
+[22:24:06] verifying bin hashes ... OK all tracks match
+[22:24:09] building scram prediction ... OK ok
+[22:24:11] applying delta ... OK 7084781 byte(s) of delta applied
+[22:24:11] verifying scram hashes ... OK all three match
+[22:24:14] removed source FL_v1.scram
 
 $ ls -lh FL_v1.miniscram
 -rw-rw-r-- 1 hugh hugh 1.5M FL_v1.miniscram
