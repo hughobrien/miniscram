@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"compress/zlib"
-	"encoding/binary"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,9 +12,10 @@ import (
 const (
 	containerMagic   = "MSCM"
 	containerVersion = byte(0x02) // v2
-	// Header layout: 4 magic + 1 version + 4 manifest_len.
-	containerHeaderSize = 4 + 1 + 4
 )
+
+// fileHeaderSize is magic(4) + version(1).
+const fileHeaderSize = 5
 
 // ScramInfo holds size + hashes for the .scram file.
 type ScramInfo struct {
@@ -22,8 +23,10 @@ type ScramInfo struct {
 	Hashes FileHashes `json:"hashes"`
 }
 
-// Manifest is the metadata embedded in every v2 .miniscram container.
-// (Currently still serialized via JSON; chunk encoding lands in Task 6.)
+// Manifest is the metadata embedded in every v2 .miniscram container,
+// encoded across MFST/TRKS/HASH chunks at write time. JSON tags are
+// retained for the inspect --json output path; the on-disk format is
+// chunk-based and does not use them.
 type Manifest struct {
 	ToolVersion      string    `json:"tool_version"`
 	CreatedUnix      int64     `json:"created_unix"`
@@ -31,11 +34,6 @@ type Manifest struct {
 	LeadinLBA        int32     `json:"leadin_lba"`
 	Scram            ScramInfo `json:"scram"`
 	Tracks           []Track   `json:"tracks"`
-}
-
-// Marshal returns the JSON encoding.
-func (m *Manifest) Marshal() ([]byte, error) {
-	return json.Marshal(m)
 }
 
 // BinSize returns the total .bin size as the sum of per-track sizes.
@@ -61,14 +59,25 @@ func (m *Manifest) BinSectorCount() int32 {
 	return int32(m.BinSize() / int64(SectorSize))
 }
 
-// WriteContainer writes a .miniscram file at path: magic + version +
-// big-endian uint32 manifest length + manifest JSON + remainder of
-// deltaSrc (read to EOF).
+// WriteContainer writes a v2 .miniscram file at path: 5-byte header
+// (magic + version) followed by MFST, TRKS, HASH, DLTA chunks.
+// Atomic: writes to a .tmp file then renames.
 func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
-	body, err := m.Marshal()
+	// Compress the delta into memory first — DLTA's chunk length must
+	// be known up-front, and the delta is small (KiB to low MiB)
+	// relative to scram (hundreds of MiB).
+	var dltaBuf bytes.Buffer
+	zw, err := zlib.NewWriterLevel(&dltaBuf, zlib.BestCompression)
 	if err != nil {
-		return err
+		return fmt.Errorf("creating zlib writer: %w", err)
 	}
+	if _, err := io.Copy(zw, deltaSrc); err != nil {
+		return fmt.Errorf("compressing delta payload: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("flushing zlib writer: %w", err)
+	}
+
 	tmp := path + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
@@ -81,29 +90,24 @@ func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
 			_ = os.Remove(tmp)
 		}
 	}()
+
 	if _, err := f.Write([]byte(containerMagic)); err != nil {
 		return err
 	}
 	if _, err := f.Write([]byte{containerVersion}); err != nil {
 		return err
 	}
-	if err := binary.Write(f, binary.BigEndian, uint32(len(body))); err != nil {
-		return err
+	if err := writeChunk(f, mfstTag, encodeMFSTPayload(m)); err != nil {
+		return fmt.Errorf("writing MFST: %w", err)
 	}
-	if _, err := f.Write(body); err != nil {
-		return err
+	if err := writeChunk(f, trksTag, encodeTRKSPayload(m.Tracks)); err != nil {
+		return fmt.Errorf("writing TRKS: %w", err)
 	}
-	zw, err := zlib.NewWriterLevel(f, zlib.BestCompression)
-	if err != nil {
-		return fmt.Errorf("creating zlib writer: %w", err)
+	if err := writeChunk(f, hashTag, encodeHASHPayload(m)); err != nil {
+		return fmt.Errorf("writing HASH: %w", err)
 	}
-	if _, err := io.Copy(zw, deltaSrc); err != nil {
-		return fmt.Errorf("compressing delta payload: %w", err)
-	}
-	// Close flushes the zlib trailer; must precede f.Sync so the
-	// trailer is on disk by the time fsync returns.
-	if err := zw.Close(); err != nil {
-		return fmt.Errorf("flushing zlib writer: %w", err)
+	if err := writeChunk(f, dltaTag, dltaBuf.Bytes()); err != nil {
+		return fmt.Errorf("writing DLTA: %w", err)
 	}
 	if err := f.Sync(); err != nil {
 		return err
@@ -115,45 +119,104 @@ func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
 	return os.Rename(tmp, path)
 }
 
-// ReadContainer parses a .miniscram file and returns its manifest and
-// the raw delta bytes.
+// ReadContainer parses a v2 .miniscram file and returns its manifest
+// and the (zlib-decoded) raw delta bytes.
 func ReadContainer(path string) (*Manifest, []byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer f.Close()
-	header := make([]byte, containerHeaderSize)
-	if _, err := io.ReadFull(f, header); err != nil {
-		return nil, nil, fmt.Errorf("reading container header: %w", err)
+
+	var head [fileHeaderSize]byte
+	if _, err := io.ReadFull(f, head[:]); err != nil {
+		return nil, nil, fmt.Errorf("reading file header: %w", err)
 	}
-	if string(header[:4]) != containerMagic {
-		return nil, nil, fmt.Errorf("not a miniscram container (bad magic %q)", header[:4])
+	if string(head[:4]) != containerMagic {
+		return nil, nil, fmt.Errorf("not a miniscram container (bad magic %q)", head[:4])
 	}
-	if header[4] != containerVersion {
-		return nil, nil, fmt.Errorf("unsupported container version 0x%02x (this build expects 0x%02x)",
-			header[4], containerVersion)
+	if head[4] != containerVersion {
+		return nil, nil, fmt.Errorf(
+			"container version 0x%02x; this build only reads v2.\nrebuild miniscram from a matching commit:\nhttps://github.com/hughobrien/miniscram",
+			head[4])
 	}
-	mlen := binary.BigEndian.Uint32(header[5:9])
-	if mlen == 0 || mlen > 16<<20 {
-		return nil, nil, fmt.Errorf("implausible manifest length %d", mlen)
+
+	var (
+		m            *Manifest
+		dlta         []byte
+		seen         = map[[4]byte]int{}
+		firstChunk   [4]byte
+		firstChunkOK bool
+	)
+	for {
+		tag, payload, err := readChunk(f)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if !firstChunkOK {
+			firstChunk = tag
+			firstChunkOK = true
+		}
+		seen[tag]++
+		if seen[tag] > 1 && isCritical(tag) {
+			return nil, nil, fmt.Errorf("duplicate chunk %q", tag)
+		}
+		switch tag {
+		case mfstTag:
+			m, err = decodeMFSTPayload(payload)
+			if err != nil {
+				return nil, nil, err
+			}
+		case trksTag:
+			tracks, err := decodeTRKSPayload(payload)
+			if err != nil {
+				return nil, nil, err
+			}
+			if m == nil {
+				m = &Manifest{}
+			}
+			m.Tracks = tracks
+		case hashTag:
+			if m == nil || m.Tracks == nil {
+				return nil, nil, fmt.Errorf("HASH chunk before MFST/TRKS")
+			}
+			if err := decodeHASHPayload(payload, m); err != nil {
+				return nil, nil, err
+			}
+		case dltaTag:
+			zr, err := zlib.NewReader(bytes.NewReader(payload))
+			if err != nil {
+				return nil, nil, fmt.Errorf("decompressing delta payload: %w", err)
+			}
+			dlta, err = io.ReadAll(zr)
+			zr.Close()
+			if err != nil {
+				return nil, nil, fmt.Errorf("decompressing delta payload: %w", err)
+			}
+		default:
+			if isCritical(tag) {
+				return nil, nil, fmt.Errorf("unsupported critical chunk %q", tag)
+			}
+			// Lowercase first letter — ancillary, skip silently.
+		}
 	}
-	body := make([]byte, mlen)
-	if _, err := io.ReadFull(f, body); err != nil {
-		return nil, nil, fmt.Errorf("reading manifest: %w", err)
+	if firstChunkOK && firstChunk != mfstTag {
+		return nil, nil, fmt.Errorf("MFST must be the first chunk")
 	}
-	var m Manifest
-	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, nil, fmt.Errorf("parsing manifest JSON: %w", err)
+	for _, required := range [][4]byte{mfstTag, trksTag, hashTag, dltaTag} {
+		if seen[required] == 0 {
+			return nil, nil, fmt.Errorf("missing required chunk %q", required)
+		}
 	}
-	zr, err := zlib.NewReader(f)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decompressing delta payload: %w", err)
-	}
-	defer zr.Close()
-	delta, err := io.ReadAll(zr)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decompressing delta payload: %w", err)
-	}
-	return &m, delta, nil
+	return m, dlta, nil
+}
+
+// isCritical reports whether a chunk's first byte is uppercase ASCII.
+// Per spec, uppercase = critical (must be understood), lowercase =
+// ancillary (readers may skip).
+func isCritical(tag [4]byte) bool {
+	return tag[0] >= 'A' && tag[0] <= 'Z'
 }

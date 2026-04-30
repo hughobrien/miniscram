@@ -160,7 +160,7 @@ func TestCLIInspect(t *testing.T) {
 
 	t.Run("bad-magic", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "junk.miniscram")
-		body := make([]byte, containerHeaderSize)
+		body := make([]byte, fileHeaderSize)
 		copy(body, "XXXX")
 		os.WriteFile(path, body, 0o644)
 		var stdout, stderr bytes.Buffer

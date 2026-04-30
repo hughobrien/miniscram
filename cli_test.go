@@ -121,13 +121,7 @@ func TestCLIVerifyWrongBin(t *testing.T) {
 // TestCLIVerifyOutputHashMismatch: tamper recorded scram hash → exit 3.
 func TestCLIVerifyOutputHashMismatch(t *testing.T) {
 	containerPath, _, m := packForVerify(t)
-	data, _ := os.ReadFile(containerPath)
-	idx := bytes.Index(data, []byte(m.Scram.Hashes.SHA256))
-	if idx < 0 {
-		t.Fatal("sha256 not in container")
-	}
-	data[idx] ^= 1
-	os.WriteFile(containerPath, data, 0o644)
+	tamperContainerHash(t, containerPath, m.Scram.Hashes.SHA256)
 	var stderr bytes.Buffer
 	if code := run([]string{"verify", containerPath}, io.Discard, &stderr); code != exitVerifyFail {
 		t.Fatalf("got %d want %d, stderr=%s", code, exitVerifyFail, stderr.String())
@@ -138,14 +132,14 @@ func TestCLIVerifyOutputHashMismatch(t *testing.T) {
 func TestCLIInspectVersionMismatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fake.miniscram")
-	body := append([]byte("MSCM\xFF"), make([]byte, containerHeaderSize-5)...)
+	body := []byte("MSCM\xFF")
 	os.WriteFile(path, body, 0o644)
 	var stderr bytes.Buffer
 	code := run([]string{"inspect", path}, io.Discard, &stderr)
 	if code != exitIO {
 		t.Fatalf("got %d want %d", code, exitIO)
 	}
-	if !bytes.Contains(stderr.Bytes(), []byte("unsupported container version")) {
+	if !bytes.Contains(stderr.Bytes(), []byte("container version")) {
 		t.Fatalf("missing version-mismatch message: %s", stderr.String())
 	}
 }
