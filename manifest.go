@@ -22,10 +22,11 @@ type ScramInfo struct {
 	Hashes FileHashes `json:"hashes"`
 }
 
-// Manifest is the JSON metadata embedded in every v1 .miniscram container.
+// Manifest is the metadata embedded in every v2 .miniscram container.
+// (Currently still serialized via JSON; chunk encoding lands in Task 6.)
 type Manifest struct {
 	ToolVersion      string    `json:"tool_version"`
-	CreatedUTC       string    `json:"created_utc"`
+	CreatedUnix      int64     `json:"created_unix"`
 	WriteOffsetBytes int       `json:"write_offset_bytes"`
 	LeadinLBA        int32     `json:"leadin_lba"`
 	Scram            ScramInfo `json:"scram"`

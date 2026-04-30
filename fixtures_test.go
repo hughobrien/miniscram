@@ -151,7 +151,7 @@ func writeFixture(t *testing.T, dir string, disc SynthDisc) (binPath, scramPath,
 // sampleManifest returns a deterministic Manifest for format tests.
 func sampleManifest() *Manifest {
 	return &Manifest{
-		ToolVersion: "miniscram 1.0.0 (go1.22)", CreatedUTC: "2026-04-28T14:30:21Z",
+		ToolVersion: "miniscram 1.0.0", CreatedUnix: 1714435200,
 		WriteOffsetBytes: -52, LeadinLBA: -150,
 		Scram: ScramInfo{Size: 739729728, Hashes: FileHashes{
 			MD5: strings.Repeat("1", 32), SHA1: strings.Repeat("2", 40), SHA256: strings.Repeat("c", 64),
