@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"testing"
+	"testing/quick"
 )
 
 func TestGenerateMode1ZeroSectorLBAZero(t *testing.T) {
@@ -135,6 +137,25 @@ func TestBuildEpsilonHatNoPanicAcrossOffsetRange(t *testing.T) {
 				t.Fatalf("offset %d: ε̂ size %d != scramSize %d", off, hat.Len(), params.ScramSize)
 			}
 		})
+	}
+}
+
+// TestBuildEpsilonHatPropertyOffsetRange complements the deterministic
+// boundary coverage above by drawing random offsets from
+// [-2*SectorSize, +2*SectorSize] — the full range
+// validateSyncCandidate accepts. Property: every offset in that range
+// produces output of size ScramSize without panic.
+func TestBuildEpsilonHatPropertyOffsetRange(t *testing.T) {
+	check := func(seed int64) bool {
+		r := rand.New(rand.NewSource(seed))
+		off := r.Intn(4*SectorSize+1) - 2*SectorSize // [-4704, +4704]
+		bin, scram, params := synthDiscRaw(t, 100, off, 10, 0x01, "MODE1/2352")
+		var hat bytes.Buffer
+		_, _, _, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
+		return err == nil && int64(hat.Len()) == params.ScramSize
+	}
+	if err := quick.Check(check, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
 	}
 }
 
