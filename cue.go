@@ -118,7 +118,7 @@ func ParseCue(r io.Reader) ([]Track, error) {
 			if rawName == "" {
 				return nil, fmt.Errorf("empty FILE name: %q", line)
 			}
-			if strings.ContainsAny(rawName, `/\`) || strings.Contains(rawName, "..") {
+			if strings.ContainsAny(rawName, `/\`) || rawName == "." || rawName == ".." {
 				return nil, fmt.Errorf("FILE references with paths not supported: %q", rawName)
 			}
 			// Flush any in-progress TRACK before changing FILE context.
