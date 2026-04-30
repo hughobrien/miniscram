@@ -7,85 +7,10 @@ Shrink [Redumper](https://github.com/superg/redumper) `.scram` files
 from ~800 MB to between a few hundred bytes and a couple of MB —
 without losing a byte. miniscram stores only the delta between the
 original `.scram` and a scramble predicted from the unscrambled
-`.bin`. Round-trip byte-equality is verified at pack time; the
+`.bin`. Round-trip reproducibility is verified at pack time; the
 source `.scram` is only deleted after `unpack` reproduces it exactly.
 
-## Install
-
-### Pre-built binary
-
-Download a release binary from
-[Releases](https://github.com/hughobrien/miniscram/releases). Linux,
-macOS, and Windows on amd64 are published; checksums are in
-`SHA256SUMS`.
-
-### `go install`
-
-    go install github.com/hughobrien/miniscram@latest
-
-### Nix flake
-
-Run without installing:
-
-    nix run github:hughobrien/miniscram -- pack disc.cue
-
-Install into a profile:
-
-    nix profile install github:hughobrien/miniscram
-
-## CLI
-
-### `pack`
-
-Pack a `.scram` into a `.miniscram` container.
-
-    miniscram pack disc.cue [-o out.miniscram] [-f] [--no-verify] [--keep-source]
-
-Reads `disc.scram` (derived from the cue stem) and the `.bin` files
-referenced by `disc.cue`. Writes `disc.miniscram` and removes
-`disc.scram` after a verified round-trip.
-
-### `unpack`
-
-Reproduce the `.scram` from `.bin` + `.miniscram`.
-
-    miniscram unpack disc.miniscram [-o out.scram] [-f] [--no-verify]
-
-### `verify`
-
-Non-destructive integrity check. Rebuilds the recovered `.scram` in a
-temp file, hashes it, compares against the manifest, deletes the temp.
-
-    miniscram verify disc.miniscram
-
-### `inspect`
-
-Pretty-print a container.
-
-    miniscram inspect disc.miniscram [--full] [--json]
-
-## Exit codes
-
-| Code | Meaning |
-|---|---|
-| 0 | success |
-| 1 | usage / input error |
-| 2 | layout mismatch |
-| 3 | verification failed |
-| 4 | I/O error |
-| 5 | wrong .bin for this .miniscram |
-
-## What miniscram targets
-
-**Redumper-output CD-ROM dumps.** A safety net aborts pack if more
-than 5% of disc sectors disagree with the bin-driven prediction —
-that catches wrong-bin / wrong-cue / wrong-scram pairings and
-malformed inputs.
-
 ## Demonstrations
-
-Four real-disc fixtures exercise different parts of the pipeline.
-Each is picked for what it stresses, not because of the game.
 
 ### Freelancer — SafeDisc 2.70.030
 
@@ -100,7 +25,7 @@ Each is picked for what it stresses, not because of the game.
 
 Full end-to-end demo: `sha256sum` the original, pack (which consumes
 the `.scram`), inspect the container, unpack to restore, then
-`sha256sum` again to prove byte-equality.
+`sha256sum` again to prove reproducibility.
 
 ```
 $ ls FL_*
@@ -179,12 +104,7 @@ c9832355013839c6a539124c1794bf3567410a64002bfabc58a64058e81a9761  FL_v1.scram
 
 798 MB → 1.5 MB (~530×). 2812 disagreeing sectors → 45927 override
 records, 7 MB uncompressed delta; zlib brings that down to ~1.5 MB
-on disk. SafeDisc's corrupted sectors and non-zero lead-in bytes
-can't be recomputed from the `.bin`, so they ride through the
-delta — heavy protection costs more than a clean disc but still a
-substantial saving. The trailing `sha256sum` matches the original;
-miniscram's own pack-time round-trip and unpack-time hashing already
-cover this, the external check just makes byte-equality visible.
+on disk.
 
 ### Max Payne 2: The Fall of Max Payne — SecuROM (main-channel clean)
 
@@ -192,13 +112,11 @@ cover this, the external check just makes byte-equality visible.
   [redump entry](http://redump.org/disc/10508/).
   Unlike SafeDisc, SecuROM/LibCrypt protection lives in the
   *subchannel*, not the main data sectors.
-- **Why this disc:** demonstrates that miniscram *works fine* with
-  SecuROM-protected games — "works fine" meaning *doesn't break
-  them*. miniscram doesn't preserve the SecuROM subchannel itself
-  ([out of scope](#out-of-scope)), but the main-channel `.scram`
-  round-trips byte-equal exactly like any unprotected disc. For
-  end-to-end preservation keep redumper's `_logs.zip` (which
-  contains the subchannel) next to the `.miniscram`.
+- **Why this disc:** demonstrates that subchannel-protected discs
+  round-trip the same as unprotected ones — miniscram only handles
+  the main channel, which SecuROM doesn't touch
+  ([out of scope](#out-of-scope)). Keep redumper's `_logs.zip`
+  (subchannel) next to the `.miniscram` for end-to-end preservation.
 
 ```
 $ ls -lh MP2_Play.scram MP2_Play.miniscram
@@ -207,9 +125,7 @@ $ ls -lh MP2_Play.scram MP2_Play.miniscram
 ```
 
 811 MB → 366 KB (~2270×). Smaller delta than Freelancer because
-SecuROM doesn't corrupt main-channel sectors the way SafeDisc does;
-the protection bytes that matter sit in `MP2_Play_logs.zip`, not in
-the `.scram`.
+SecuROM doesn't corrupt main-channel sectors the way SafeDisc does.
 
 ### Half-Life GOTY — mixed-mode hybrid CD
 
@@ -217,8 +133,7 @@ the `.scram`.
   [redump entry](http://redump.org/disc/25966/)).
 - **Why this disc:** 1 Mode 1 data track + 27 Red Book audio tracks.
   The audio dominates the disc surface and exercises the audio-bypass
-  path of the scrambler (audio sectors are not descrambled — only the
-  data track is).
+  path of the scrambler.
 
 ```
 $ ls -lh HALFLIFE.scram HALFLIFE.miniscram
@@ -245,12 +160,9 @@ $ ls -lh DeusEx_v1002f.scram DeusEx_v1002f.miniscram
 -rwxr--r-- 1 hugh hugh 856M DeusEx_v1002f.scram
 ```
 
-**0 override records.** The 4-byte uncompressed delta is just the
-record count (`u32 = 0`); everything else in the container is the
-5-byte file header plus the four critical chunks (MFST, TRKS,
-HASH, DLTA), with the irreducible cost dominated by the per-track
-hash records. 856 MB → 329 bytes — about 2.7 million×, the
-irreducible cost being the manifest itself.
+**0 override records.** The 4-byte delta is just the record count
+(`u32 = 0`); the rest is the 5-byte file header plus the MFST /
+TRKS / HASH / DLTA chunks. 856 MB → 329 bytes — about 2.7 million×.
 
 ### Things that should work, untested on real-disc fixtures
 
@@ -288,6 +200,71 @@ irreducible cost being the manifest itself.
   protection lives in subchannel and is invisible to miniscram.
   Redumper preserves it in the `*_logs.zip` it produces alongside the
   `.scram`; keep that bundle next to the `.miniscram`.
+
+## CLI
+
+### `pack`
+
+Pack a `.scram` into a `.miniscram` container.
+
+    miniscram pack disc.cue [-o out.miniscram] [-f] [--no-verify] [--keep-source]
+
+Reads `disc.scram` (derived from the cue stem) and the `.bin` files
+referenced by `disc.cue`. Writes `disc.miniscram` and removes
+`disc.scram` after a verified round-trip.
+
+### `unpack`
+
+Reproduce the `.scram` from `.bin` + `.miniscram`.
+
+    miniscram unpack disc.miniscram [-o out.scram] [-f] [--no-verify]
+
+### `verify`
+
+Non-destructive integrity check. Rebuilds the recovered `.scram` in a
+temp file, hashes it, compares against the manifest, deletes the temp.
+
+    miniscram verify disc.miniscram
+
+### `inspect`
+
+Pretty-print a container.
+
+    miniscram inspect disc.miniscram [--full] [--json]
+
+## Install
+
+### Pre-built binary
+
+Download a release binary from
+[Releases](https://github.com/hughobrien/miniscram/releases). Linux,
+macOS, and Windows on amd64 are published; checksums are in
+`SHA256SUMS`.
+
+### `go install`
+
+    go install github.com/hughobrien/miniscram@latest
+
+### Nix flake
+
+Run without installing:
+
+    nix run github:hughobrien/miniscram -- pack disc.cue
+
+Install into a profile:
+
+    nix profile install github:hughobrien/miniscram
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | success |
+| 1 | usage / input error |
+| 2 | layout mismatch |
+| 3 | verification failed |
+| 4 | I/O error |
+| 5 | wrong .bin for this .miniscram |
 
 ## Container format (v2)
 
@@ -437,5 +414,4 @@ copyright + third-party attribution.
 ## Design history
 
 Architecture, design rationale, and per-feature decisions live in
-`docs/superpowers/specs/`. This README is the authoritative reference
-for the wire format and external behaviour.
+`docs/superpowers/specs/`.
