@@ -138,7 +138,14 @@ func Pack(opts PackOptions, r Reporter) error {
 	if err := os.Remove(hatPath); err == nil {
 		hatRemoved = true
 	}
-	st.Done("%d override(s), %d pass-through(s), delta %d bytes", len(errSectors), passThroughs, deltaSize)
+	deltaBytes, err := os.ReadFile(deltaPath)
+	if err != nil {
+		st.Fail(err)
+		return err
+	}
+	overrideRecords, _ := IterateDeltaRecords(deltaBytes, func(off uint64, length uint32) error { return nil })
+	st.Done("%d disagreeing sector(s) → %d override record(s), %d pass-through(s), delta %d bytes",
+		len(errSectors), overrideRecords, passThroughs, deltaSize)
 
 	// 7. assemble manifest and write container.
 	m := &Manifest{
@@ -154,17 +161,10 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 
 	st = r.Step("writing container")
-	deltaF, err := os.Open(deltaPath)
-	if err != nil {
+	if err := WriteContainer(opts.OutputPath, m, bytes.NewReader(deltaBytes)); err != nil {
 		st.Fail(err)
 		return err
 	}
-	if err := WriteContainer(opts.OutputPath, m, deltaF); err != nil {
-		deltaF.Close()
-		st.Fail(err)
-		return err
-	}
-	deltaF.Close()
 	st.Done("%s", opts.OutputPath)
 
 	// 8. verify by round-tripping (unless --no-verify).

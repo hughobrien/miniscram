@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 )
 
 // Reporter writes human-readable progress to a writer. Implementations
@@ -38,16 +37,16 @@ type textReporter struct {
 }
 
 func (r *textReporter) Step(label string) StepHandle {
-	fmt.Fprintf(r.w, "[%s] %s", time.Now().Format("15:04:05"), label)
+	fmt.Fprintf(r.w, "%s", label)
 	return &textStep{r: r}
 }
 
 func (r *textReporter) Info(format string, args ...any) {
-	fmt.Fprintf(r.w, "[%s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+	fmt.Fprintf(r.w, "%s\n", fmt.Sprintf(format, args...))
 }
 
 func (r *textReporter) Warn(format string, args ...any) {
-	fmt.Fprintf(r.w, "[%s] warning: %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+	fmt.Fprintf(r.w, "warning: %s\n", fmt.Sprintf(format, args...))
 }
 
 type textStep struct {

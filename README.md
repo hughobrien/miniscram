@@ -97,78 +97,122 @@ Each is picked for what it stresses, not because of the game.
   data track is).
 
 ```
-$ ls -lh HALFLIFE.scram
--rwxr--r-- 1 hugh hugh 766M HALFLIFE.scram
-
-$ miniscram pack HALFLIFE.cue
-[22:19:12] running scramble-table self-test ... OK ok
-[22:19:12] resolving cue HALFLIFE.cue ... OK 28 track(s), 695747472 bytes total
-[22:19:12] detecting write offset ... OK -48 bytes
-[22:19:12] checking constant offset ... OK ok
-[22:19:12] hashing tracks ... OK 28 track(s) hashed
-[22:19:15] hashing scram ... OK 78f21058c2c7
-[22:19:19] building scram prediction + delta ... OK 2150 override(s), 0 pass-through(s), delta 5483541 bytes
-[22:19:22] writing container ... OK HALFLIFE.miniscram
-[22:19:22] reading manifest ... OK ok
-[22:19:22] running scramble-table self-test ... OK ok
-[22:19:22] reading container HALFLIFE.miniscram ... OK delta 5483541 bytes
-[22:19:22] verifying bin hashes ... OK all tracks match
-[22:19:25] building scram prediction ... OK ok
-[22:19:27] applying delta ... OK 5483541 byte(s) of delta applied
-[22:19:27] verifying scram hashes ... OK all three match
-[22:19:30] removed source HALFLIFE.scram
-
-$ ls -lh HALFLIFE.miniscram
--rw-rw-r-- 1 hugh hugh 332K HALFLIFE.miniscram
+$ ls -lh HALFLIFE.scram HALFLIFE.miniscram
+-rw-rw-r-- 1 hugh hugh  332K HALFLIFE.miniscram
+-rwxr--r-- 1 hugh hugh  766M HALFLIFE.scram
 ```
 
-The 766 MB `.scram` is consumed and replaced by a 332 KB sidecar —
-about 2400× smaller — in 15 seconds on a laptop. The round-trip
-verification runs during pack so the `.scram` is only removed once
-unpack has been proven byte-equal against the original.
+766 MB → 332 KB (~2400×). Lead-in noise and per-track boundary
+sectors account for most of the delta; audio sectors themselves
+bypass the scrambler and don't contribute overrides.
 
 ### Freelancer — SafeDisc 2.70.030
 
 - **Copy protection:** SafeDisc 2.70.030 + Macrovision Security
   Driver per the [redump entry](http://redump.org/disc/42536/).
-  Thousands of sectors are deliberately corrupted as part of the
-  protection scheme.
+  588 sectors are deliberately corrupted as part of the protection
+  scheme.
 - **Why this disc:** demonstrates that miniscram captures intentional
   ECC errors as delta overrides — the protection's exact bytes flow
   through the container so `unpack` reproduces the protected disc
   verbatim.
 
+Full end-to-end demo: `sha256sum` the original, pack (which consumes
+the `.scram`), inspect the container, verify it rebuilds, unpack to
+restore, then `sha256sum` again to prove byte-equality.
+
 ```
-$ ls -lh FL_v1.scram
--rwxr--r-- 1 hugh hugh 798M FL_v1.scram
+$ ls FL_*
+FL_v1 (Track 0).bin
+FL_v1.bin
+FL_v1.cue
+FL_v1.scram
+FL_v1_logs.zip
+
+$ sha256sum FL_v1.scram
+c9832355013839c6a539124c1794bf3567410a64002bfabc58a64058e81a9761  FL_v1.scram
 
 $ miniscram pack FL_v1.cue
-[22:23:55] running scramble-table self-test ... OK ok
-[22:23:55] resolving cue FL_v1.cue ... OK 1 track(s), 729914976 bytes total
-[22:23:55] detecting write offset ... OK -48 bytes
-[22:23:55] checking constant offset ... OK ok
-[22:23:55] hashing tracks ... OK 1 track(s) hashed
-[22:23:58] hashing scram ... OK c98323550138
-[22:24:02] building scram prediction + delta ... OK 2812 override(s), 0 pass-through(s), delta 7084781 bytes
-[22:24:06] writing container ... OK FL_v1.miniscram
-[22:24:06] reading manifest ... OK ok
-[22:24:06] running scramble-table self-test ... OK ok
-[22:24:06] reading container FL_v1.miniscram ... OK delta 7084781 bytes
-[22:24:06] verifying bin hashes ... OK all tracks match
-[22:24:09] building scram prediction ... OK ok
-[22:24:11] applying delta ... OK 7084781 byte(s) of delta applied
-[22:24:11] verifying scram hashes ... OK all three match
-[22:24:14] removed source FL_v1.scram
+running scramble-table self-test ... OK ok
+resolving cue FL_v1.cue ... OK 1 track(s), 729914976 bytes total
+detecting write offset ... OK -48 bytes
+checking constant offset ... OK ok
+hashing tracks ... OK 1 track(s) hashed
+hashing scram ... OK c98323550138
+building scram prediction + delta ... OK 2812 disagreeing sector(s) → 45927 override record(s), 0 pass-through(s), delta 7084781 bytes
+writing container ... OK FL_v1.miniscram
+reading manifest ... OK ok
+running scramble-table self-test ... OK ok
+reading container FL_v1.miniscram ... OK delta 7084781 bytes
+verifying bin hashes ... OK all tracks match
+building scram prediction ... OK ok
+applying delta ... OK 7084781 byte(s) of delta applied
+verifying scram hashes ... OK all three match
+removed source FL_v1.scram
 
-$ ls -lh FL_v1.miniscram
--rw-rw-r-- 1 hugh hugh 1.5M FL_v1.miniscram
+$ ls FL_*
+FL_v1 (Track 0).bin
+FL_v1.bin
+FL_v1.cue
+FL_v1.miniscram
+FL_v1_logs.zip
+
+$ miniscram inspect FL_v1.miniscram
+container:  MSCM v2
+manifest:
+  tool_version:           miniscram 1.1.0
+  created_utc:            2026-04-30T05:50:34Z
+  write_offset_bytes:     -48
+  leadin_lba:             -45150
+  scram.size:             836338152
+  scram.hashes.md5:       0a8b730494451efe0a034d398d17c7cf
+  scram.hashes.sha1:      6ffe07dff23723aafe1914d0d482ff653fdd0399
+  scram.hashes.sha256:    c9832355013839c6a539124c1794bf3567410a64002bfabc58a64058e81a9761
+tracks:
+  track 1: MODE1/2352  first_lba=0  size=729914976  filename=FL_v1.bin
+    md5:    3afa320a456fd9c254576188dd3610d8
+    sha1:   7ee7f17ed6dcd3655262514b83526aa6886d83d2
+    sha256: 36d874732bb13918ce3ed91a42bb1efae58b943138089105d23c1f7908bd521c
+delta:
+  override_records:       45927
+
+$ miniscram verify FL_v1.miniscram
+reading manifest ... OK ok
+running scramble-table self-test ... OK ok
+reading container FL_v1.miniscram ... OK delta 7084781 bytes
+verifying bin hashes ... OK all tracks match
+building scram prediction ... OK ok
+applying delta ... OK 7084781 byte(s) of delta applied
+verifying scram hashes ... OK all three match
+
+$ miniscram unpack FL_v1.miniscram
+running scramble-table self-test ... OK ok
+reading container FL_v1.miniscram ... OK delta 7084781 bytes
+verifying bin hashes ... OK all tracks match
+building scram prediction ... OK ok
+applying delta ... OK 7084781 byte(s) of delta applied
+verifying output hashes ... OK all three match
+
+$ ls FL_*
+FL_v1 (Track 0).bin
+FL_v1.bin
+FL_v1.cue
+FL_v1.miniscram
+FL_v1.scram
+FL_v1_logs.zip
+
+$ sha256sum FL_v1.scram
+c9832355013839c6a539124c1794bf3567410a64002bfabc58a64058e81a9761  FL_v1.scram
 ```
 
-**2812 override records, 7 MB raw delta.** SafeDisc's corrupted
-sectors and non-zero lead-in bytes can't be recomputed from the bin,
-so they ride through the delta. zlib brings the 7 MB payload down to
-~1.5 MB. 798 MB → 1.5 MB is still ~530× — a heavy protection costs
-more than a clean disc but is still a substantial saving.
+798 MB → 1.5 MB (~530×). 2812 disagreeing sectors → 45927 override
+records, 7 MB uncompressed delta; zlib brings that down to ~1.5 MB
+on disk. SafeDisc's corrupted sectors and non-zero lead-in bytes
+can't be recomputed from the `.bin`, so they ride through the
+delta — heavy protection costs more than a clean disc but still a
+substantial saving. The trailing `sha256sum` matches the original;
+miniscram's own pack-time round-trip and unpack-time hashing already
+cover this, the external check just makes byte-equality visible.
 
 ### Max Payne 2: The Fall of Max Payne — SecuROM (main-channel clean)
 
@@ -185,29 +229,9 @@ more than a clean disc but is still a substantial saving.
   contains the subchannel) next to the `.miniscram`.
 
 ```
-$ ls -lh MP2_Play.scram
--rwxr--r-- 1 hugh hugh 811M MP2_Play.scram
-
-$ miniscram pack MP2_Play.cue
-[22:19:35] running scramble-table self-test ... OK ok
-[22:19:35] resolving cue MP2_Play.cue ... OK 1 track(s), 743253168 bytes total
-[22:19:35] detecting write offset ... OK -48 bytes
-[22:19:35] checking constant offset ... OK ok
-[22:19:35] hashing tracks ... OK 1 track(s) hashed
-[22:19:39] hashing scram ... OK 1424e03e4afd
-[22:19:43] building scram prediction + delta ... OK 2390 override(s), 0 pass-through(s), delta 5864494 bytes
-[22:19:47] writing container ... OK MP2_Play.miniscram
-[22:19:47] reading manifest ... OK ok
-[22:19:47] running scramble-table self-test ... OK ok
-[22:19:47] reading container MP2_Play.miniscram ... OK delta 5864494 bytes
-[22:19:47] verifying bin hashes ... OK all tracks match
-[22:19:50] building scram prediction ... OK ok
-[22:19:52] applying delta ... OK 5864494 byte(s) of delta applied
-[22:19:53] verifying scram hashes ... OK all three match
-[22:19:56] removed source MP2_Play.scram
-
-$ ls -lh MP2_Play.miniscram
--rw-rw-r-- 1 hugh hugh 366K MP2_Play.miniscram
+$ ls -lh MP2_Play.scram MP2_Play.miniscram
+-rw-rw-r-- 1 hugh hugh  366K MP2_Play.miniscram
+-rwxr--r-- 1 hugh hugh  811M MP2_Play.scram
 ```
 
 811 MB → 366 KB (~2270×). Smaller delta than Freelancer because
@@ -225,29 +249,9 @@ the `.scram`.
   scram and the delta is empty.
 
 ```
-$ ls -lh DeusEx_v1002f.scram
+$ ls -lh DeusEx_v1002f.scram DeusEx_v1002f.miniscram
+-rw-rw-r-- 1 hugh hugh  329 DeusEx_v1002f.miniscram
 -rwxr--r-- 1 hugh hugh 856M DeusEx_v1002f.scram
-
-$ miniscram pack DeusEx_v1002f.cue
-[22:18:46] running scramble-table self-test ... OK ok
-[22:18:46] resolving cue DeusEx_v1002f.cue ... OK 1 track(s), 791104608 bytes total
-[22:18:46] detecting write offset ... OK -48 bytes
-[22:18:46] checking constant offset ... OK ok
-[22:18:46] hashing tracks ... OK 1 track(s) hashed
-[22:18:49] hashing scram ... OK 318c8497c2ca
-[22:18:53] building scram prediction + delta ... OK 0 override(s), 0 pass-through(s), delta 4 bytes
-[22:18:57] writing container ... OK DeusEx_v1002f.miniscram
-[22:18:57] reading manifest ... OK ok
-[22:18:57] running scramble-table self-test ... OK ok
-[22:18:57] reading container DeusEx_v1002f.miniscram ... OK delta 4 bytes
-[22:18:57] verifying bin hashes ... OK all tracks match
-[22:19:01] building scram prediction ... OK ok
-[22:19:03] applying delta ... OK 4 byte(s) of delta applied
-[22:19:03] verifying scram hashes ... OK all three match
-[22:19:06] removed source DeusEx_v1002f.scram
-
-$ ls -lh DeusEx_v1002f.miniscram
--rw-rw-r-- 1 hugh hugh 329 DeusEx_v1002f.miniscram
 ```
 
 **0 override records.** The 4-byte uncompressed delta is just the
@@ -257,10 +261,11 @@ HASH, DLTA), with the irreducible cost dominated by the per-track
 hash records. 856 MB → 329 bytes — about 2.7 million×, the
 irreducible cost being the manifest itself.
 
-### Things that should work, untested
+### Things that should work, untested on real-disc fixtures
 
 - **Mode 2/2352 data tracks** (CD-i, VCD, PSX-XA Form 2). The
-  scrambler treats Mode 1 and Mode 2 identically.
+  scrambler treats Mode 1 and Mode 2 identically; covered by
+  synthetic round-trip tests but no real-disc dataset yet.
 - **Audio-only discs.** The disc round-trips, but ~150 pregap
   sectors get baked into the delta as overrides (~350 KiB extra
   noise) because pregap is synthesised as Mode 1 zero sectors.
@@ -349,7 +354,7 @@ Reader behaviour:
 | Field | Type | Notes |
 |---|---|---|
 | `tool_version_len`     | u16 BE | Length of `tool_version` in bytes |
-| `tool_version`         | bytes  | UTF-8, e.g. `"miniscram 1.0.0"` (no NUL terminator) |
+| `tool_version`         | bytes  | UTF-8, e.g. `"miniscram 1.1.0"` (no NUL terminator) |
 | `created_unix`         | i64 BE | UTC seconds since the Unix epoch |
 | `write_offset_bytes`   | i32 BE | Sync offset between bin and scram, signed |
 | `leadin_lba`           | i32 BE | LBA where lead-in starts on disc, signed |
