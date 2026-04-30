@@ -143,7 +143,8 @@ func validV2Container(t *testing.T) []byte {
 }
 
 // chunkRange locates the [start, end) byte range of the named chunk
-// inside a container blob (post-header). Returns (-1, -1) if not found.
+// inside a container blob (post-header). Fails the test fatally if the
+// chunk isn't present.
 func chunkRange(t *testing.T, raw []byte, want [4]byte) (int, int) {
 	t.Helper()
 	off := fileHeaderSize
@@ -157,7 +158,8 @@ func chunkRange(t *testing.T, raw []byte, want [4]byte) (int, int) {
 		}
 		off = end
 	}
-	return -1, -1
+	t.Fatalf("chunkRange: chunk %q not found in container", want)
+	return 0, 0 // unreachable
 }
 
 // writeRaw writes raw bytes to a tempfile and returns the path.
@@ -281,16 +283,46 @@ func TestContainerRejectsCorruption(t *testing.T) {
 		})
 	}
 
-	t.Run("duplicate-mfst", func(t *testing.T) {
+	for _, dup := range []struct {
+		name string
+		tag  [4]byte
+	}{
+		{"duplicate-mfst", mfstTag},
+		{"duplicate-trks", trksTag},
+		{"duplicate-hash", hashTag},
+		{"duplicate-dlta", dltaTag},
+	} {
+		t.Run(dup.name, func(t *testing.T) {
+			raw := validV2Container(t)
+			start, end := chunkRange(t, raw, dup.tag)
+			chunkBytes := append([]byte{}, raw[start:end]...)
+			// Insert a second copy of the chunk right after the first.
+			corrupt := append(append([]byte{}, raw[:end]...), chunkBytes...)
+			corrupt = append(corrupt, raw[end:]...)
+			_, _, err := ReadContainer(writeRaw(t, corrupt))
+			if err == nil || !strings.Contains(err.Error(), "duplicate chunk") {
+				t.Fatalf("expected duplicate-chunk error, got %v", err)
+			}
+		})
+	}
+
+	t.Run("hash-after-dlta-accepted", func(t *testing.T) {
 		raw := validV2Container(t)
-		mfstStart, mfstEnd := chunkRange(t, raw, mfstTag)
-		mfstChunk := append([]byte{}, raw[mfstStart:mfstEnd]...)
-		// Insert a second copy of MFST right after the first.
-		corrupt := append(append([]byte{}, raw[:mfstEnd]...), mfstChunk...)
-		corrupt = append(corrupt, raw[mfstEnd:]...)
-		_, _, err := ReadContainer(writeRaw(t, corrupt))
-		if err == nil || !strings.Contains(err.Error(), "duplicate chunk") {
-			t.Fatalf("expected duplicate-chunk error, got %v", err)
+		hashStart, hashEnd := chunkRange(t, raw, hashTag)
+		dltaStart, dltaEnd := chunkRange(t, raw, dltaTag)
+		// Verify the test fixture's order is HASH-then-DLTA before swap.
+		if hashEnd > dltaStart {
+			t.Fatalf("test fixture order changed; expected HASH < DLTA")
+		}
+		hash := append([]byte{}, raw[hashStart:hashEnd]...)
+		dlta := append([]byte{}, raw[dltaStart:dltaEnd]...)
+		// Reassemble: prefix (header + MFST + TRKS) || DLTA || HASH || any tail.
+		corrupt := append([]byte{}, raw[:hashStart]...)
+		corrupt = append(corrupt, dlta...)
+		corrupt = append(corrupt, hash...)
+		corrupt = append(corrupt, raw[dltaEnd:]...)
+		if _, _, err := ReadContainer(writeRaw(t, corrupt)); err != nil {
+			t.Fatalf("HASH-after-DLTA should be accepted (chunks may appear in any order after MFST), got %v", err)
 		}
 	})
 
