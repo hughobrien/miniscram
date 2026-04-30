@@ -167,17 +167,12 @@ func ReadContainer(path string) (*Manifest, []byte, error) {
 		}
 		switch tag {
 		case mfstTag:
+			// Always first per the post-loop check; reassign unconditionally.
 			decoded, err := decodeMFSTPayload(payload)
 			if err != nil {
 				return nil, nil, err
 			}
-			if m == nil {
-				m = decoded
-			} else {
-				// TRKS may have run first and seeded m.Tracks. Preserve.
-				decoded.Tracks = m.Tracks
-				m = decoded
-			}
+			m = decoded
 		case trksTag:
 			tracks, err := decodeTRKSPayload(payload)
 			if err != nil {
