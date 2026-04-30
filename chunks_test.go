@@ -175,3 +175,70 @@ func TestTRKSRejectsTruncated(t *testing.T) {
 		}
 	}
 }
+
+func TestHASHRoundTrip(t *testing.T) {
+	in := &Manifest{
+		Scram: ScramInfo{Hashes: FileHashes{
+			MD5:    "0123456789abcdef0123456789abcdef",
+			SHA1:   "0123456789abcdef0123456789abcdef01234567",
+			SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}},
+		Tracks: []Track{
+			{Number: 1, Hashes: FileHashes{
+				MD5:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				SHA1:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			}},
+		},
+	}
+	payload := encodeHASHPayload(in)
+	out := &Manifest{Tracks: []Track{{Number: 1}}}
+	if err := decodeHASHPayload(payload, out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Scram.Hashes != in.Scram.Hashes {
+		t.Errorf("scram hashes mismatch:\ngot:  %+v\nwant: %+v", out.Scram.Hashes, in.Scram.Hashes)
+	}
+	if out.Tracks[0].Hashes != in.Tracks[0].Hashes {
+		t.Errorf("track[0] hashes mismatch")
+	}
+}
+
+func TestHASHRejectsUnknownAlgo(t *testing.T) {
+	var b []byte
+	b = binary.BigEndian.AppendUint16(b, 1)
+	b = append(b, 0)                  // target=0
+	b = append(b, 'X', 'X', 'X', 'X') // bogus algo
+	b = append(b, 16)                 // claims 16-byte digest
+	b = append(b, make([]byte, 16)...)
+	err := decodeHASHPayload(b, &Manifest{})
+	if err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("expected unknown-algo error, got %v", err)
+	}
+}
+
+func TestHASHRejectsBadDigestLen(t *testing.T) {
+	var b []byte
+	b = binary.BigEndian.AppendUint16(b, 1)
+	b = append(b, 0)
+	b = append(b, 'M', 'D', '5', ' ')
+	b = append(b, 99) // wrong length for MD5 (16)
+	b = append(b, make([]byte, 99)...)
+	err := decodeHASHPayload(b, &Manifest{})
+	if err == nil || !strings.Contains(err.Error(), "digest length") {
+		t.Fatalf("expected digest-length error, got %v", err)
+	}
+}
+
+func TestHASHRejectsBadTarget(t *testing.T) {
+	var b []byte
+	b = binary.BigEndian.AppendUint16(b, 1)
+	b = append(b, 5) // target=5 with 0 tracks
+	b = append(b, 'M', 'D', '5', ' ')
+	b = append(b, 16)
+	b = append(b, make([]byte, 16)...)
+	err := decodeHASHPayload(b, &Manifest{})
+	if err == nil || !strings.Contains(err.Error(), "target") {
+		t.Fatalf("expected target out-of-range error, got %v", err)
+	}
+}
