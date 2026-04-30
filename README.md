@@ -90,7 +90,7 @@ malformed inputs.
 
 ## Demonstrations
 
-Three real-disc fixtures exercise different parts of the pipeline.
+Four real-disc fixtures exercise different parts of the pipeline.
 Each is picked for what it stresses, not because of the game.
 
 ### Half-Life GOTY — mixed-mode hybrid CD
@@ -107,29 +107,29 @@ $ ls -lh HALFLIFE.scram
 -rwxr--r-- 1 hugh hugh 766M HALFLIFE.scram
 
 $ miniscram pack HALFLIFE.cue
-[02:27:02] running scramble-table self-test ... OK ok
-[02:27:02] resolving cue HALFLIFE.cue ... OK 28 track(s), 695747472 bytes total
-[02:27:02] detecting write offset ... OK -48 bytes
-[02:27:02] checking constant offset ... OK ok
-[02:27:02] hashing tracks ... OK 28 track(s) hashed
-[02:27:05] hashing scram ... OK 78f21058c2c7
-[02:27:08] building scram prediction + delta ... OK 2150 override(s), delta 5483541 bytes
-[02:27:12] writing container ... OK HALFLIFE.miniscram
-[02:27:12] reading manifest ... OK ok
-[02:27:12] running scramble-table self-test ... OK ok
-[02:27:12] reading container HALFLIFE.miniscram ... OK delta 5483541 bytes
-[02:27:12] verifying bin hashes ... OK all tracks match
-[02:27:15] building scram prediction ... OK ok
-[02:27:17] applying delta ... OK 5483541 byte(s) of delta applied
-[02:27:17] verifying scram hashes ... OK all three match
-[02:27:20] removed source HALFLIFE.scram
+[22:19:12] running scramble-table self-test ... OK ok
+[22:19:12] resolving cue HALFLIFE.cue ... OK 28 track(s), 695747472 bytes total
+[22:19:12] detecting write offset ... OK -48 bytes
+[22:19:12] checking constant offset ... OK ok
+[22:19:12] hashing tracks ... OK 28 track(s) hashed
+[22:19:15] hashing scram ... OK 78f21058c2c7
+[22:19:19] building scram prediction + delta ... OK 2150 override(s), 0 pass-through(s), delta 5483541 bytes
+[22:19:22] writing container ... OK HALFLIFE.miniscram
+[22:19:22] reading manifest ... OK ok
+[22:19:22] running scramble-table self-test ... OK ok
+[22:19:22] reading container HALFLIFE.miniscram ... OK delta 5483541 bytes
+[22:19:22] verifying bin hashes ... OK all tracks match
+[22:19:25] building scram prediction ... OK ok
+[22:19:27] applying delta ... OK 5483541 byte(s) of delta applied
+[22:19:27] verifying scram hashes ... OK all three match
+[22:19:30] removed source HALFLIFE.scram
 
 $ ls -lh HALFLIFE.miniscram
--rw-rw-r-- 1 hugh hugh 337K HALFLIFE.miniscram
+-rw-rw-r-- 1 hugh hugh 332K HALFLIFE.miniscram
 ```
 
-The 766 MB `.scram` is consumed and replaced by a 337 KB sidecar —
-about 2300× smaller — in 18 seconds on a laptop. The round-trip
+The 766 MB `.scram` is consumed and replaced by a 332 KB sidecar —
+about 2400× smaller — in 15 seconds on a laptop. The round-trip
 verification runs during pack so the `.scram` is only removed once
 unpack has been proven byte-equal against the original.
 
@@ -195,28 +195,28 @@ $ ls -lh MP2_Play.scram
 -rwxr--r-- 1 hugh hugh 811M MP2_Play.scram
 
 $ miniscram pack MP2_Play.cue
-[02:47:09] running scramble-table self-test ... OK ok
-[02:47:09] resolving cue MP2_Play.cue ... OK 1 track(s), 743253168 bytes total
-[02:47:09] detecting write offset ... OK -48 bytes
-[02:47:09] checking constant offset ... OK ok
-[02:47:09] hashing tracks ... OK 1 track(s) hashed
-[02:47:12] hashing scram ... OK 1424e03e4afd
-[02:47:16] building scram prediction + delta ... OK 2390 override(s), delta 5864494 bytes
-[02:47:20] writing container ... OK MP2_Play.miniscram
-[02:47:20] reading manifest ... OK ok
-[02:47:20] running scramble-table self-test ... OK ok
-[02:47:20] reading container MP2_Play.miniscram ... OK delta 5864494 bytes
-[02:47:20] verifying bin hashes ... OK all tracks match
-[02:47:23] building scram prediction ... OK ok
-[02:47:25] applying delta ... OK 5864494 byte(s) of delta applied
-[02:47:25] verifying scram hashes ... OK all three match
-[02:47:29] removed source MP2_Play.scram
+[22:19:35] running scramble-table self-test ... OK ok
+[22:19:35] resolving cue MP2_Play.cue ... OK 1 track(s), 743253168 bytes total
+[22:19:35] detecting write offset ... OK -48 bytes
+[22:19:35] checking constant offset ... OK ok
+[22:19:35] hashing tracks ... OK 1 track(s) hashed
+[22:19:39] hashing scram ... OK 1424e03e4afd
+[22:19:43] building scram prediction + delta ... OK 2390 override(s), 0 pass-through(s), delta 5864494 bytes
+[22:19:47] writing container ... OK MP2_Play.miniscram
+[22:19:47] reading manifest ... OK ok
+[22:19:47] running scramble-table self-test ... OK ok
+[22:19:47] reading container MP2_Play.miniscram ... OK delta 5864494 bytes
+[22:19:47] verifying bin hashes ... OK all tracks match
+[22:19:50] building scram prediction ... OK ok
+[22:19:52] applying delta ... OK 5864494 byte(s) of delta applied
+[22:19:53] verifying scram hashes ... OK all three match
+[22:19:56] removed source MP2_Play.scram
 
 $ ls -lh MP2_Play.miniscram
--rw-rw-r-- 1 hugh hugh 367K MP2_Play.miniscram
+-rw-rw-r-- 1 hugh hugh 366K MP2_Play.miniscram
 ```
 
-811 MB → 367 KB (~2200×). Smaller delta than Freelancer because
+811 MB → 366 KB (~2270×). Smaller delta than Freelancer because
 SecuROM doesn't corrupt main-channel sectors the way SafeDisc does;
 the protection bytes that matter sit in `MP2_Play_logs.zip`, not in
 the `.scram`.
@@ -235,32 +235,32 @@ $ ls -lh DeusEx_v1002f.scram
 -rwxr--r-- 1 hugh hugh 856M DeusEx_v1002f.scram
 
 $ miniscram pack DeusEx_v1002f.cue
-[02:30:13] running scramble-table self-test ... OK ok
-[02:30:13] resolving cue DeusEx_v1002f.cue ... OK 1 track(s), 791104608 bytes total
-[02:30:13] detecting write offset ... OK -48 bytes
-[02:30:13] checking constant offset ... OK ok
-[02:30:13] hashing tracks ... OK 1 track(s) hashed
-[02:30:17] hashing scram ... OK 318c8497c2ca
-[02:30:21] building scram prediction + delta ... OK 0 override(s), delta 4 bytes
-[02:30:24] writing container ... OK DeusEx_v1002f.miniscram
-[02:30:24] reading manifest ... OK ok
-[02:30:24] running scramble-table self-test ... OK ok
-[02:30:24] reading container DeusEx_v1002f.miniscram ... OK delta 4 bytes
-[02:30:24] verifying bin hashes ... OK all tracks match
-[02:30:28] building scram prediction ... OK ok
-[02:30:30] applying delta ... OK 4 byte(s) of delta applied
-[02:30:30] verifying scram hashes ... OK all three match
-[02:30:34] removed source DeusEx_v1002f.scram
+[22:18:46] running scramble-table self-test ... OK ok
+[22:18:46] resolving cue DeusEx_v1002f.cue ... OK 1 track(s), 791104608 bytes total
+[22:18:46] detecting write offset ... OK -48 bytes
+[22:18:46] checking constant offset ... OK ok
+[22:18:46] hashing tracks ... OK 1 track(s) hashed
+[22:18:49] hashing scram ... OK 318c8497c2ca
+[22:18:53] building scram prediction + delta ... OK 0 override(s), 0 pass-through(s), delta 4 bytes
+[22:18:57] writing container ... OK DeusEx_v1002f.miniscram
+[22:18:57] reading manifest ... OK ok
+[22:18:57] running scramble-table self-test ... OK ok
+[22:18:57] reading container DeusEx_v1002f.miniscram ... OK delta 4 bytes
+[22:18:57] verifying bin hashes ... OK all tracks match
+[22:19:01] building scram prediction ... OK ok
+[22:19:03] applying delta ... OK 4 byte(s) of delta applied
+[22:19:03] verifying scram hashes ... OK all three match
+[22:19:06] removed source DeusEx_v1002f.scram
 
 $ ls -lh DeusEx_v1002f.miniscram
--rw-rw-r-- 1 hugh hugh 673 DeusEx_v1002f.miniscram
+-rw-rw-r-- 1 hugh hugh 329 DeusEx_v1002f.miniscram
 ```
 
 **0 override records.** The 4-byte uncompressed delta is just the
 record count (`u32 = 0`); everything else in the container is the
 5-byte file header plus the four critical chunks (MFST, TRKS,
 HASH, DLTA), with the irreducible cost dominated by the per-track
-hash records. 856 MB → 673 bytes — about 1.3 million×, the
+hash records. 856 MB → 329 bytes — about 2.7 million×, the
 irreducible cost being the manifest itself.
 
 ### Things that should work, untested
