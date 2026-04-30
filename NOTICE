@@ -23,3 +23,15 @@ Third-party material:
   implementation in ecma130.go (buildScrambleTable + Scramble) is a
   near-verbatim Go port of redumper's Scrambler::_TABLE lambda from
   cd/cd_scrambler.ixx. Per-lift attribution is in the source.
+
+================================================================================
+
+Acknowledgements:
+
+  Thanks to Deterous (Korea) on the VGPC — Video Game Preservation
+  Collective — Discord, who flagged that bin sectors corresponding
+  to redumper's "fail" descramble cases (see redumper's
+  tests/unscramble/ fixture set) were being needlessly re-scrambled
+  by miniscram, bloating the override delta. The classifier in
+  ecma130.go's classifyBinSector mirrors redumper's descramble
+  decision so those sectors pass through unchanged.
