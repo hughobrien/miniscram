@@ -34,14 +34,26 @@ func TestReporterInfoAndWarn(t *testing.T) {
 	}
 }
 
-func TestReporterQuietProducesNoOutput(t *testing.T) {
+func TestQuietReporterEmitsFailures(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(&buf, true)
+	r.Step("resolving cue").Fail(errors.New("does not look like a cuesheet"))
+	out := buf.String()
+	if !strings.Contains(out, "resolving cue") {
+		t.Fatalf("missing label in %q", out)
+	}
+	if !strings.Contains(out, "does not look like a cuesheet") {
+		t.Fatalf("missing error text in %q", out)
+	}
+}
+
+func TestQuietReporterSilencesProgress(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewReporter(&buf, true)
 	r.Step("a").Done("done")
-	r.Step("b").Fail(errors.New("e"))
 	r.Info("ignored")
 	r.Warn("ignored")
 	if buf.Len() != 0 {
-		t.Fatalf("quiet reporter wrote %q", buf.String())
+		t.Fatalf("quiet reporter wrote %q on Done/Info/Warn", buf.String())
 	}
 }

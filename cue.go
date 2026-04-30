@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +11,25 @@ import (
 	"strconv"
 	"strings"
 )
+
+// errNotACuesheet is the sentinel returned by ParseCue when the input
+// has no cue keywords in its first cueSniffBytes. Wrap with
+// errors.Is to detect.
+var errNotACuesheet = errors.New("does not look like a cuesheet")
+
+// cueSniffBytes is how far ParseCue reads before deciding the input
+// is not a cuesheet. Real redumper cuesheets are tens to hundreds of
+// bytes; 4 KiB is generous even for unusually REM-heavy cues.
+const cueSniffBytes = 4 * 1024
+
+// cueKeywords are the tokens ParseCue's main loop dispatches on (or
+// explicitly ignores in the default arm). Presence of any one of
+// these in the head buffer is the test for "this is a cuesheet".
+var cueKeywords = [][]byte{
+	[]byte("FILE"), []byte("TRACK"), []byte("INDEX"),
+	[]byte("REM"), []byte("PERFORMER"), []byte("TITLE"),
+	[]byte("CATALOG"), []byte("PREGAP"),
+}
 
 // Track is a single track entry in a cuesheet, augmented with
 // filesystem metadata at pack time.
@@ -42,7 +63,21 @@ var validModes = map[string]bool{
 // any of `/`, `\`, `..`), and cues where a single FILE contains more
 // than one TRACK (Redumper never produces this shape).
 func ParseCue(r io.Reader) ([]Track, error) {
-	scanner := bufio.NewScanner(r)
+	// Read up to cueSniffBytes into a buffer before scanning. If the
+	// buffer holds none of the cue keywords, return errNotACuesheet
+	// without engaging the scanner — bounds runtime on hostile input
+	// (e.g. a multi-GB .iso accidentally passed as the cue arg).
+	head := make([]byte, cueSniffBytes)
+	n, err := io.ReadFull(r, head)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+	head = head[:n]
+	if !containsAnyKeyword(head, cueKeywords) {
+		return nil, fmt.Errorf("%w (no FILE/TRACK/REM/... in first %d bytes)",
+			errNotACuesheet, cueSniffBytes)
+	}
+	scanner := bufio.NewScanner(io.MultiReader(bytes.NewReader(head), r))
 	var tracks []Track
 	var cur *Track
 	var hasIndex01 bool
@@ -259,4 +294,13 @@ func OpenBinStream(files []ResolvedFile) (io.Reader, func() error, error) {
 		readers = append(readers, f)
 	}
 	return io.MultiReader(readers...), closeAll, nil
+}
+
+func containsAnyKeyword(buf []byte, keywords [][]byte) bool {
+	for _, kw := range keywords {
+		if bytes.Contains(buf, kw) {
+			return true
+		}
+	}
+	return false
 }

@@ -1,0 +1,18 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-30-cue-non-cue-rejection.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: ParseCue head-sniff rejects non-cue input",
+      "status": "completed",
+      "description": "**Goal:** ParseCue reads at most 4 KiB before deciding whether the input looks like a cuesheet. Inputs lacking any cue keyword in that window get a sentinel error; valid cuesheets parse exactly as before.\n\n**Files:**\n- Modify: cue.go (add sentinel errNotACuesheet, modify ParseCue body before the bufio.NewScanner call)\n- Modify: cue_test.go (add TestParseCueRejectsNonCueInput, TestParseCueRejectsRandomBinaryProperty)\n\n**Acceptance Criteria:**\n- ParseCue(strings.NewReader(<binary 8 KiB>)) returns error containing \"does not look like a cuesheet\"\n- The error wraps errNotACuesheet (errors.Is true)\n- All existing TestParseCueAccepts and TestResolveCue cases still pass\n- testing/quick property test of 50+ random binary inputs returns the sentinel without panicking\n- 4 GB hostile input returns within milliseconds (bounded by 4 KiB read)\n\n**Verify:** go test -run 'TestParseCue|TestResolveCue' -v ./...\n\n```json:metadata\n{\"files\": [\"cue.go\", \"cue_test.go\"], \"verifyCommand\": \"go test -run 'TestParseCue|TestResolveCue' -v ./...\", \"acceptanceCriteria\": [\"ParseCue rejects 8 KiB of 0xFF with sentinel\", \"errors.Is(err, errNotACuesheet) is true\", \"existing cue tests pass\", \"property test passes 50 seeds without panic\", \"4 GB hostile input returns in <1s\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: quietReporter surfaces failures",
+      "status": "completed",
+      "description": "**Goal:** --quiet silences progress (Step.Done, Info, Warn) but keeps failures (Step.Fail) visible on stderr.\n\n**Files:**\n- Modify: reporter.go (quietReporter becomes stateful, quietStep.Fail writes)\n- Modify: reporter_test.go (replace TestReporterQuietProducesNoOutput with TestQuietReporterEmitsFailures + TestQuietReporterSilencesProgress)\n\n**Acceptance Criteria:**\n- NewReporter(w, true) writes nothing on Step.Done, Info, Warn\n- On Step.Fail, writes a single line containing label + error to w\n- No call sites in main.go change\n- go test ./... passes\n\n**Verify:** go test -run TestReporter -v ./...\n\n```json:metadata\n{\"files\": [\"reporter.go\", \"reporter_test.go\"], \"verifyCommand\": \"go test -run TestReporter -v ./...\", \"acceptanceCriteria\": [\"TestQuietReporterEmitsFailures passes\", \"TestQuietReporterSilencesProgress passes\", \"no main.go changes\", \"full go test ./... passes\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-30T12:00:00Z"
+}

@@ -22,11 +22,11 @@ type StepHandle interface {
 }
 
 // NewReporter returns a reporter that writes to w. If quiet is true,
-// it discards all output. ANSI/TTY decoration is enabled when w is the
+// it discards all output except failures. ANSI/TTY decoration is enabled when w is the
 // current process's stderr and stderr is a TTY.
 func NewReporter(w io.Writer, quiet bool) Reporter {
 	if quiet {
-		return quietReporter{}
+		return quietReporter{w: w}
 	}
 	return &textReporter{w: w, tty: isStderrTTY(w)}
 }
@@ -78,16 +78,26 @@ func (s *textStep) Fail(err error) {
 	fmt.Fprintf(s.r.w, " ... %s %s\n", mark, err.Error())
 }
 
-type quietReporter struct{}
+// quietReporter discards progress (Step.Done, Info, Warn) but still
+// surfaces failures via Step.Fail to its writer. This keeps `--quiet`
+// useful: the user opted out of progress, not out of error visibility.
+type quietReporter struct{ w io.Writer }
 
-func (quietReporter) Step(string) StepHandle { return quietStep{} }
-func (quietReporter) Info(string, ...any)    {}
-func (quietReporter) Warn(string, ...any)    {}
+func (q quietReporter) Step(label string) StepHandle {
+	return quietStep{w: q.w, label: label}
+}
+func (quietReporter) Info(string, ...any) {}
+func (quietReporter) Warn(string, ...any) {}
 
-type quietStep struct{}
+type quietStep struct {
+	w     io.Writer
+	label string
+}
 
 func (quietStep) Done(string, ...any) {}
-func (quietStep) Fail(error)          {}
+func (s quietStep) Fail(err error) {
+	fmt.Fprintf(s.w, "%s: %v\n", s.label, err)
+}
 
 // runStep wraps the Step/Done/Fail pattern. fn returns (doneMsg, err);
 // on success runStep calls Done(doneMsg), on failure Fail(err) and
