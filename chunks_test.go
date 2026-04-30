@@ -103,3 +103,41 @@ func TestChunkLengthCapDLTAExempt(t *testing.T) {
 		t.Fatalf("expected io.ErrUnexpectedEOF reading DLTA payload, got %v", err)
 	}
 }
+
+func TestMFSTRoundTrip(t *testing.T) {
+	in := &Manifest{
+		ToolVersion:      "miniscram 1.0.0-test",
+		CreatedUnix:      1714435200,
+		WriteOffsetBytes: -48,
+		LeadinLBA:        -45150,
+		Scram:            ScramInfo{Size: 897527784},
+	}
+	payload := encodeMFSTPayload(in)
+	out, err := decodeMFSTPayload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ToolVersion != in.ToolVersion ||
+		out.CreatedUnix != in.CreatedUnix ||
+		out.WriteOffsetBytes != in.WriteOffsetBytes ||
+		out.LeadinLBA != in.LeadinLBA ||
+		out.Scram.Size != in.Scram.Size {
+		t.Fatalf("round-trip mismatch:\nin:  %+v\nout: %+v", in, out)
+	}
+}
+
+func TestMFSTRejectsTruncated(t *testing.T) {
+	full := encodeMFSTPayload(&Manifest{
+		ToolVersion: "miniscram", CreatedUnix: 1, WriteOffsetBytes: 0,
+		LeadinLBA: 0, Scram: ScramInfo{Size: 0},
+	})
+	for i := 0; i < len(full); i++ {
+		_, err := decodeMFSTPayload(full[:i])
+		if err == nil {
+			t.Fatalf("decoding truncated MFST (len=%d) should fail", i)
+		}
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Errorf("len=%d: expected ErrUnexpectedEOF, got %v", i, err)
+		}
+	}
+}

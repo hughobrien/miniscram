@@ -30,6 +30,116 @@ func fourcc(s string) [4]byte {
 // dltaTag is the one tag exempt from the length cap.
 var dltaTag = fourcc("DLTA")
 
+var (
+	mfstTag = fourcc("MFST")
+	trksTag = fourcc("TRKS")
+	hashTag = fourcc("HASH")
+)
+
+// encodeMFSTPayload emits the MFST chunk payload per spec §"MFST":
+// tool_version_len(uint16 BE) || tool_version(UTF-8) ||
+// created_unix(int64 BE) || write_offset_bytes(int32 BE) ||
+// leadin_lba(int32 BE) || scram_size(int64 BE).
+func encodeMFSTPayload(m *Manifest) []byte {
+	var b []byte
+	tv := []byte(m.ToolVersion)
+	b = binary.BigEndian.AppendUint16(b, uint16(len(tv)))
+	b = append(b, tv...)
+	b = binary.BigEndian.AppendUint64(b, uint64(m.CreatedUnix))
+	b = binary.BigEndian.AppendUint32(b, uint32(int32(m.WriteOffsetBytes)))
+	b = binary.BigEndian.AppendUint32(b, uint32(m.LeadinLBA))
+	b = binary.BigEndian.AppendUint64(b, uint64(m.Scram.Size))
+	return b
+}
+
+// decodeMFSTPayload inverts encodeMFSTPayload. Populates only the
+// MFST scalar fields on the returned Manifest.
+func decodeMFSTPayload(payload []byte) (*Manifest, error) {
+	r := payloadReader{buf: payload}
+	tvLen, err := r.uint16()
+	if err != nil {
+		return nil, fmt.Errorf("MFST tool_version_len: %w", err)
+	}
+	tv, err := r.bytes(int(tvLen))
+	if err != nil {
+		return nil, fmt.Errorf("MFST tool_version: %w", err)
+	}
+	created, err := r.uint64()
+	if err != nil {
+		return nil, fmt.Errorf("MFST created_unix: %w", err)
+	}
+	wo, err := r.uint32()
+	if err != nil {
+		return nil, fmt.Errorf("MFST write_offset_bytes: %w", err)
+	}
+	lba, err := r.uint32()
+	if err != nil {
+		return nil, fmt.Errorf("MFST leadin_lba: %w", err)
+	}
+	ss, err := r.uint64()
+	if err != nil {
+		return nil, fmt.Errorf("MFST scram_size: %w", err)
+	}
+	return &Manifest{
+		ToolVersion:      string(tv),
+		CreatedUnix:      int64(created),
+		WriteOffsetBytes: int(int32(wo)),
+		LeadinLBA:        int32(lba),
+		Scram:            ScramInfo{Size: int64(ss)},
+	}, nil
+}
+
+// payloadReader is a thin cursor over a byte slice that returns
+// io.ErrUnexpectedEOF on any short read, with helper methods for
+// the integer widths the codecs use.
+type payloadReader struct {
+	buf []byte
+	pos int
+}
+
+func (r *payloadReader) bytes(n int) ([]byte, error) {
+	if r.pos+n > len(r.buf) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	out := r.buf[r.pos : r.pos+n]
+	r.pos += n
+	return out, nil
+}
+
+func (r *payloadReader) uint8() (uint8, error) {
+	b, err := r.bytes(1)
+	if err != nil {
+		return 0, err
+	}
+	return b[0], nil
+}
+
+func (r *payloadReader) uint16() (uint16, error) {
+	b, err := r.bytes(2)
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint16(b), nil
+}
+
+func (r *payloadReader) uint32() (uint32, error) {
+	b, err := r.bytes(4)
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint32(b), nil
+}
+
+func (r *payloadReader) uint64() (uint64, error) {
+	b, err := r.bytes(8)
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(b), nil
+}
+
+func (r *payloadReader) eof() bool { return r.pos == len(r.buf) }
+
 // writeChunk emits a chunk: tag(4) + length(4 BE) + payload + CRC32(4 BE).
 // CRC is computed over (tag || payload).
 func writeChunk(w io.Writer, tag [4]byte, payload []byte) error {
