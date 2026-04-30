@@ -49,7 +49,7 @@ func Pack(opts PackOptions, r Reporter) error {
 		opts.LeadinLBA = LBALeadinStart
 	}
 	if r == nil {
-		r = quietReporter{}
+		r = quietReporter{w: io.Discard}
 	}
 
 	if err := runStep(r, "running scramble-table self-test", func() (string, error) {
