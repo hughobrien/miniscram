@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -322,4 +323,69 @@ func rspcParity(stream *[1170]byte) {
 		stream[1118+nq] = v43
 		stream[1144+nq] = v44
 	}
+}
+
+// =====================================================================
+// Bin-sector classifier
+// =====================================================================
+//
+// Adapted from redumper's Scrambler::descramble decision
+// (cd/cd_scrambler.ixx:23-61), https://github.com/superg/redumper
+// Copyright (C) the redumper contributors
+
+// classifyBinSector mirrors redumper's Scrambler::descramble decision
+// (cd/cd_scrambler.ixx:23-61) applied to a bin sector (rather than
+// the scrambled .scram sector). Returns true iff the corresponding
+// .scram sector at expectedLBA holds scrambled bytes — i.e. miniscram
+// must rescramble bin to predict scram. Returns false when bin already
+// equals scram for this sector (redumper passed it through; we do
+// likewise).
+//
+// Decision tree:
+//  1. all-zero bin sector             → false (case 46: zeroed_sector)
+//  2. MSF in bin matches expectedLBA  → true  (strong MSF check, precedes sync)
+//  3. bin[0:SyncLen] != Sync          → false (fail-type-1: invalid sync)
+//  4. mode byte ∈ {1, 2}             → true  (sync+mode check)
+//  5. mode == 0 && user-data zeroed   → true  (sync+mode-0-zeroed)
+//  6. otherwise                       → false (fail-type-2)
+//
+// Caller is responsible for not invoking this on AUDIO-track sectors;
+// bin in audio tracks is raw PCM and never scrambled.
+func classifyBinSector(bin []byte, expectedLBA int32) bool {
+	if len(bin) < SectorSize {
+		return false
+	}
+	if isZeroed(bin) {
+		return false
+	}
+	// Strong MSF check: if the LBA hint was provided and the decoded MSF
+	// matches, this is a valid sector regardless of sync byte state.
+	// This mirrors the oracle order (MSF before sync) so that sectors with
+	// non-canonical sync but a matching MSF are correctly classified as pass.
+	if BCDMSFToLBA([3]byte{bin[12], bin[13], bin[14]}) == expectedLBA {
+		return true
+	}
+	if !bytes.Equal(bin[:SyncLen], Sync[:]) {
+		return false
+	}
+	switch bin[15] {
+	case 1, 2:
+		return true
+	case 0:
+		// Mode 0 with zeroed user-data: bytes [16, SectorSize).
+		// Matches redumper's MODE0_DATA_SIZE = 2336 (cdrom.ixx:17),
+		// the full Mode 0 data area after sync (12) + header (4).
+		return isZeroed(bin[16:SectorSize])
+	}
+	return false
+}
+
+// isZeroed reports whether buf is all zeros.
+func isZeroed(buf []byte) bool {
+	for _, b := range buf {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
