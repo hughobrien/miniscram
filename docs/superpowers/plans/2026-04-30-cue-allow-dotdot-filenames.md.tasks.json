@@ -1,0 +1,12 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-30-cue-allow-dotdot-filenames.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Tighten cue path-safety check",
+      "status": "pending",
+      "description": "**Goal:** Replace strings.Contains(rawName, \"..\") in cue.go with explicit equality against \".\" and \"..\" so legitimate filenames containing \"..\" parse while path traversal stays blocked.\n\n**Files:**\n- Modify: cue.go (line 86, ParseCue FILE arm)\n- Modify: cue_test.go (extend TestParseCueAccepts with dotdot-in-name; extend TestParseCueRejects with dot-name and dotdot-name)\n\n**Acceptance Criteria:**\n- F.E.A.R..bin parses with Track.Filename == \"F.E.A.R..bin\"\n- \".\" rejected\n- \"..\" rejected\n- existing accept/reject sub-tests unchanged\n- go test ./... passes\n\n**Verify:** go test -run TestParseCue -v ./...\n\n```json:metadata\n{\"files\": [\"cue.go\", \"cue_test.go\"], \"verifyCommand\": \"go test -run TestParseCue -v ./...\", \"acceptanceCriteria\": [\"F.E.A.R..bin parses\", \"'.' rejected\", \"'..' rejected\", \"existing sub-tests still pass\", \"go test ./... passes\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-30T13:00:00Z"
+}
