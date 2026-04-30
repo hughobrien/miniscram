@@ -119,9 +119,9 @@ func BuildEpsilonHat(
 	bin io.Reader,
 	scram io.Reader,
 	onMismatch func(off int64, scramRun []byte),
-) ([]int32, int, error) {
+) ([]int32, int, int, error) {
 	if p.ScramSize <= 0 {
-		return nil, 0, errors.New("ScramSize must be positive")
+		return nil, 0, 0, errors.New("ScramSize must be positive")
 	}
 	totalLBAs := TotalLBAs(p.ScramSize, p.WriteOffsetBytes)
 	endLBA := p.LeadinLBA + totalLBAs
@@ -130,7 +130,7 @@ func BuildEpsilonHat(
 	if p.WriteOffsetBytes > 0 {
 		zeros := make([]byte, p.WriteOffsetBytes)
 		if _, err := out.Write(zeros); err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 		written = int64(p.WriteOffsetBytes)
 	}
@@ -143,6 +143,7 @@ func BuildEpsilonHat(
 	scramBuf := make([]byte, SectorSize)
 	var errLBAs []int32
 	var mismatchedSectors int
+	var passThroughs int
 	var scramCur int64
 
 	advanceScram := func(target int64) error {
@@ -168,11 +169,20 @@ func BuildEpsilonHat(
 			sec = generateMode1ZeroSector(lba)
 		case lba < p.BinFirstLBA+p.BinSectorCount:
 			if _, err := io.ReadFull(bin, binBuf); err != nil {
-				return nil, 0, fmt.Errorf("reading bin LBA %d: %w", lba, err)
+				return nil, 0, 0, fmt.Errorf("reading bin LBA %d: %w", lba, err)
 			}
 			copy(sec[:], binBuf)
 			if trackModeAt(p.Tracks, lba) != "AUDIO" {
-				Scramble(&sec)
+				// Mirror redumper's Scrambler::descramble() decision
+				// (cd/cd_scrambler.ixx:23-61). Scramble bin only when it
+				// holds the descrambled form ("pass" sectors). For "fail"
+				// sectors, .bin == .scram for the LBA — passing through
+				// preserves the original disc bytes without an override.
+				if classifyBinSector(sec[:], lba) {
+					Scramble(&sec)
+				} else {
+					passThroughs++
+				}
 			}
 		default:
 			sec = generateLeadoutSector(lba)
@@ -189,16 +199,16 @@ func BuildEpsilonHat(
 		}
 		hatStart := written
 		if _, err := out.Write(secBytes); err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 		written += int64(len(secBytes))
 
 		if scram != nil {
 			if err := advanceScram(hatStart); err != nil {
-				return nil, 0, err
+				return nil, 0, 0, err
 			}
 			if _, err := io.ReadFull(scram, scramBuf[:len(secBytes)]); err != nil {
-				return nil, 0, fmt.Errorf("reading scram at %d: %w", hatStart, err)
+				return nil, 0, 0, fmt.Errorf("reading scram at %d: %w", hatStart, err)
 			}
 			scramCur = hatStart + int64(len(secBytes))
 
@@ -232,7 +242,7 @@ func BuildEpsilonHat(
 		onMismatch(runStart, run)
 	}
 
-	return errLBAs, mismatchedSectors, nil
+	return errLBAs, mismatchedSectors, passThroughs, nil
 }
 
 // CheckLayoutMismatch returns *LayoutMismatchError when the mismatch
