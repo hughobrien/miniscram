@@ -288,31 +288,48 @@ enumerate, and they document the invariant in a self-checking way.
 
 - `BCDMSFToLBA` / `LBAToBCDMSF` — round-trip on the addressable LBA
   range (`[-150, 99·60·75 - 150)`), assert `BCDMSFToLBA(LBAToBCDMSF(lba)) == lba`.
+  (✅ covered in `format/drop-scrambler-hash`)
 - `Scramble` (in `ecma130.go`) — XOR with a fixed table is its own
   inverse; assert `Scramble(Scramble(buf)) == buf` for arbitrary
-  2352-byte buffers.
+  2352-byte buffers. (✅ covered in `format/drop-scrambler-hash`)
 - `ScramOffset` / `TotalLBAs` (in `layout.go`) — algebraic identity
   across arbitrary `(scramSize, writeOffset)` pairs satisfying the
   precondition.
 - `WriteContainer` / `ReadContainer` round-trip — given an arbitrary
   manifest + delta payload, write then read should reproduce both
-  byte-for-byte.
+  byte-for-byte. (✅ covered in `format/drop-scrambler-hash`)
 - `BuildEpsilonHat` lockstep — for an arbitrary `BuildParams`,
   building twice produces identical bytes (idempotence on the same
   inputs).
 - `IterateDeltaRecords` — for any structurally valid delta payload,
   iterating and re-encoding yields identical bytes.
 
+**Bonus coverage** (not in original candidate list, added in
+`format/drop-scrambler-hash` alongside the v2 chunk-format work):
+
+- MFST / TRKS / HASH codec round-trips — encode/decode for each v2
+  chunk codec on randomized inputs.
+
 **Acceptance:**
 
-- [ ] At least one property test per candidate above (or a written
-      reason in the task entry for why a given candidate isn't
-      property-test-friendly after all).
-- [ ] Property tests run as part of `go test ./...` with a default
-      `quick.Config{MaxCount: 1000}` or similar — no separate
-      build tag, no opt-in.
-- [ ] Where a property test catches a real bug while being written,
-      the bug fix and the test land in the same commit.
+- [x] `Scramble` involution
+- [x] `BCDMSFToLBA` / `LBAToBCDMSF` round-trip
+- [x] `WriteContainer` / `ReadContainer` round-trip
+- [ ] (deferred) `BuildEpsilonHat` lockstep — needs full disc-layout
+      generator (`BinFirstLBA`, `BinSectorCount`, scram size, tracks,
+      write offset, all consistent); defer to a focused follow-up.
+- [ ] (deferred) `ScramOffset` / `TotalLBAs` — needs valid
+      `(scramSize, writeOffset)` precondition generator; defer.
+- [ ] (deferred) `IterateDeltaRecords` — needs valid delta-stream
+      generator; defer.
+- [x] Property tests run as part of `go test ./...` with a default
+      `quick.Config{MaxCount: 1000}` (or `100` for the expensive
+      WriteContainer/ReadContainer round-trip) — no separate build
+      tag, no opt-in.
+- [x] Where a property test catches a real bug while being written,
+      the bug fix and the test land in the same commit. (No bugs
+      caught by the round of tests landed in
+      `format/drop-scrambler-hash`.)
 
 **Effort:** Iterative. ~30 min per property test once the pattern is
 established. Can be picked up in slices.
