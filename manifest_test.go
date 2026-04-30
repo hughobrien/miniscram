@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -111,4 +115,199 @@ func TestContainerDeltaIsZlibFramed(t *testing.T) {
 			return
 		}
 	}
+}
+
+// validV2Container builds a minimal valid v2 container in memory and
+// returns its bytes. Used as a base by corruption tests, which mutate
+// specific bytes/chunks and assert the reader rejects.
+func validV2Container(t *testing.T) []byte {
+	t.Helper()
+	m := &Manifest{
+		ToolVersion: "miniscram-test",
+		CreatedUnix: 1,
+		Scram:       ScramInfo{Size: 0, Hashes: FileHashes{MD5: strings.Repeat("0", 32), SHA1: strings.Repeat("0", 40), SHA256: strings.Repeat("0", 64)}},
+		Tracks: []Track{{
+			Number: 1, Mode: "AUDIO", FirstLBA: 0, Size: 0, Filename: "t.bin",
+			Hashes: FileHashes{MD5: strings.Repeat("0", 32), SHA1: strings.Repeat("0", 40), SHA256: strings.Repeat("0", 64)},
+		}},
+	}
+	path := filepath.Join(t.TempDir(), "valid.miniscram")
+	if err := WriteContainer(path, m, bytes.NewReader([]byte{0, 0, 0, 0})); err != nil {
+		t.Fatalf("writing valid container: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// chunkRange locates the [start, end) byte range of the named chunk
+// inside a container blob (post-header). Returns (-1, -1) if not found.
+func chunkRange(t *testing.T, raw []byte, want [4]byte) (int, int) {
+	t.Helper()
+	off := fileHeaderSize
+	for off < len(raw) {
+		var tag [4]byte
+		copy(tag[:], raw[off:off+4])
+		length := int(binary.BigEndian.Uint32(raw[off+4 : off+8]))
+		end := off + 8 + length + 4 // type + length + payload + CRC
+		if tag == want {
+			return off, end
+		}
+		off = end
+	}
+	return -1, -1
+}
+
+// writeRaw writes raw bytes to a tempfile and returns the path.
+func writeRaw(t *testing.T, raw []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "corrupt.miniscram")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestContainerRejectsCorruption(t *testing.T) {
+	t.Run("bad-magic", func(t *testing.T) {
+		raw := validV2Container(t)
+		copy(raw[:4], []byte("BADM"))
+		_, _, err := ReadContainer(writeRaw(t, raw))
+		if err == nil || !strings.Contains(err.Error(), "bad magic") {
+			t.Fatalf("expected bad-magic error, got %v", err)
+		}
+	})
+
+	for _, ver := range []byte{0x01, 0x03, 0x09} {
+		t.Run(fmt.Sprintf("wrong-version-0x%02x", ver), func(t *testing.T) {
+			raw := validV2Container(t)
+			raw[4] = ver
+			_, _, err := ReadContainer(writeRaw(t, raw))
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("0x%02x", ver)) {
+				t.Fatalf("expected version-0x%02x error, got %v", ver, err)
+			}
+			if !strings.Contains(err.Error(), "v2") {
+				t.Errorf("expected error to mention 'v2', got %v", err)
+			}
+		})
+	}
+
+	t.Run("truncated-mid-chunk", func(t *testing.T) {
+		raw := validV2Container(t)
+		mfstStart, mfstEnd := chunkRange(t, raw, mfstTag)
+		_, _, err := ReadContainer(writeRaw(t, raw[:mfstStart+(mfstEnd-mfstStart)/2]))
+		if err == nil {
+			t.Fatal("expected error reading truncated MFST")
+		}
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Errorf("expected io.ErrUnexpectedEOF, got %v", err)
+		}
+	})
+
+	t.Run("bad-crc", func(t *testing.T) {
+		raw := validV2Container(t)
+		_, mfstEnd := chunkRange(t, raw, mfstTag)
+		raw[mfstEnd-1] ^= 0xFF // flip last byte of MFST's CRC
+		_, _, err := ReadContainer(writeRaw(t, raw))
+		if err == nil || !strings.Contains(err.Error(), "crc mismatch") {
+			t.Fatalf("expected crc-mismatch error, got %v", err)
+		}
+	})
+
+	t.Run("length-cap-exceeded", func(t *testing.T) {
+		raw := validV2Container(t)
+		_, mfstEnd := chunkRange(t, raw, mfstTag)
+		// Inject a forged FAKE chunk after MFST with length > 16 MiB.
+		var fake bytes.Buffer
+		fake.Write([]byte{'F', 'A', 'K', 'E'})
+		binary.Write(&fake, binary.BigEndian, uint32(16<<20+1))
+		// No payload bytes — readChunk should reject before reading them.
+		corrupt := append(append([]byte{}, raw[:mfstEnd]...), fake.Bytes()...)
+		corrupt = append(corrupt, raw[mfstEnd:]...)
+		_, _, err := ReadContainer(writeRaw(t, corrupt))
+		if err == nil || !strings.Contains(err.Error(), "16 MiB") {
+			t.Fatalf("expected 16-MiB-cap error, got %v", err)
+		}
+	})
+
+	t.Run("unknown-critical-chunk", func(t *testing.T) {
+		raw := validV2Container(t)
+		_, mfstEnd := chunkRange(t, raw, mfstTag)
+		// Inject a valid XXXX chunk (with correct CRC) after MFST.
+		var bogus bytes.Buffer
+		writeChunk(&bogus, fourcc("XXXX"), []byte("payload"))
+		corrupt := append(append([]byte{}, raw[:mfstEnd]...), bogus.Bytes()...)
+		corrupt = append(corrupt, raw[mfstEnd:]...)
+		_, _, err := ReadContainer(writeRaw(t, corrupt))
+		if err == nil || !strings.Contains(err.Error(), "unsupported critical chunk") {
+			t.Fatalf("expected unsupported-critical-chunk error, got %v", err)
+		}
+	})
+
+	t.Run("unknown-ancillary-chunk-accepted", func(t *testing.T) {
+		raw := validV2Container(t)
+		_, mfstEnd := chunkRange(t, raw, mfstTag)
+		var bogus bytes.Buffer
+		writeChunk(&bogus, fourcc("xfut"), []byte("future-data"))
+		corrupt := append(append([]byte{}, raw[:mfstEnd]...), bogus.Bytes()...)
+		corrupt = append(corrupt, raw[mfstEnd:]...)
+		if _, _, err := ReadContainer(writeRaw(t, corrupt)); err != nil {
+			t.Fatalf("ancillary chunk should be skipped, got %v", err)
+		}
+	})
+
+	for _, missing := range []struct {
+		name string
+		tag  [4]byte
+	}{
+		{"missing-mfst", mfstTag},
+		{"missing-trks", trksTag},
+		{"missing-hash", hashTag},
+		{"missing-dlta", dltaTag},
+	} {
+		t.Run(missing.name, func(t *testing.T) {
+			raw := validV2Container(t)
+			start, end := chunkRange(t, raw, missing.tag)
+			corrupt := append(append([]byte{}, raw[:start]...), raw[end:]...)
+			_, _, err := ReadContainer(writeRaw(t, corrupt))
+			if err == nil || !strings.Contains(err.Error(), "missing required chunk") {
+				t.Fatalf("expected missing-required-chunk error, got %v", err)
+			}
+			if !strings.Contains(err.Error(), string(missing.tag[:])) {
+				t.Errorf("expected error to name %q, got %v", missing.tag, err)
+			}
+		})
+	}
+
+	t.Run("duplicate-mfst", func(t *testing.T) {
+		raw := validV2Container(t)
+		mfstStart, mfstEnd := chunkRange(t, raw, mfstTag)
+		mfstChunk := append([]byte{}, raw[mfstStart:mfstEnd]...)
+		// Insert a second copy of MFST right after the first.
+		corrupt := append(append([]byte{}, raw[:mfstEnd]...), mfstChunk...)
+		corrupt = append(corrupt, raw[mfstEnd:]...)
+		_, _, err := ReadContainer(writeRaw(t, corrupt))
+		if err == nil || !strings.Contains(err.Error(), "duplicate chunk") {
+			t.Fatalf("expected duplicate-chunk error, got %v", err)
+		}
+	})
+
+	t.Run("mfst-not-first", func(t *testing.T) {
+		raw := validV2Container(t)
+		mfstStart, mfstEnd := chunkRange(t, raw, mfstTag)
+		trksStart, trksEnd := chunkRange(t, raw, trksTag)
+		// Swap MFST and TRKS so TRKS appears first.
+		mfst := append([]byte{}, raw[mfstStart:mfstEnd]...)
+		trks := append([]byte{}, raw[trksStart:trksEnd]...)
+		corrupt := append([]byte{}, raw[:mfstStart]...)
+		corrupt = append(corrupt, trks...)
+		corrupt = append(corrupt, mfst...)
+		corrupt = append(corrupt, raw[trksEnd:]...)
+		_, _, err := ReadContainer(writeRaw(t, corrupt))
+		if err == nil || !strings.Contains(err.Error(), "MFST must be the first chunk") {
+			t.Fatalf("expected MFST-not-first error, got %v", err)
+		}
+	})
 }
