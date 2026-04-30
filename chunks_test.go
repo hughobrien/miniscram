@@ -141,3 +141,37 @@ func TestMFSTRejectsTruncated(t *testing.T) {
 		}
 	}
 }
+
+func TestTRKSRoundTrip(t *testing.T) {
+	in := []Track{
+		{Number: 1, Mode: "MODE1/2352", FirstLBA: 0, Size: 791104608, Filename: "x.bin"},
+		{Number: 2, Mode: "AUDIO", FirstLBA: 336420, Size: 47040, Filename: "x.bin"},
+	}
+	payload := encodeTRKSPayload(in)
+	out, err := decodeTRKSPayload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != len(in) {
+		t.Fatalf("count: got %d want %d", len(out), len(in))
+	}
+	for i := range in {
+		// Hashes intentionally not compared — populated by HASH codec.
+		got, want := out[i], in[i]
+		if got.Number != want.Number || got.Mode != want.Mode ||
+			got.FirstLBA != want.FirstLBA || got.Size != want.Size ||
+			got.Filename != want.Filename {
+			t.Errorf("track %d:\ngot:  %+v\nwant: %+v", i, got, want)
+		}
+	}
+}
+
+func TestTRKSRejectsTruncated(t *testing.T) {
+	full := encodeTRKSPayload([]Track{{Number: 1, Mode: "AUDIO", FirstLBA: 0, Size: 0, Filename: "t.bin"}})
+	for i := 0; i < len(full); i++ {
+		_, err := decodeTRKSPayload(full[:i])
+		if err == nil {
+			t.Errorf("decoding truncated TRKS (len=%d) should fail", i)
+		}
+	}
+}
