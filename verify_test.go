@@ -51,13 +51,7 @@ func TestVerifySynthDiscOK(t *testing.T) {
 
 func TestVerifyDetectsScramHashMismatch(t *testing.T) {
 	containerPath, dir, m := packForVerify(t)
-	data, _ := os.ReadFile(containerPath)
-	idx := bytes.Index(data, []byte(m.Scram.Hashes.SHA256))
-	if idx < 0 {
-		t.Fatal("sha256 not found in container")
-	}
-	data[idx] ^= 1
-	os.WriteFile(containerPath, data, 0o644)
+	tamperContainerHash(t, containerPath, m.Scram.Hashes.SHA256)
 	err := Verify(VerifyOptions{ContainerPath: containerPath}, NewReporter(io.Discard, true))
 	if !errors.Is(err, errOutputHashMismatch) {
 		t.Fatalf("expected errOutputHashMismatch, got %v", err)

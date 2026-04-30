@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,12 +16,20 @@ func TestContainerRoundtrip(t *testing.T) {
 		WriteOffsetBytes: -48,
 		LeadinLBA:        -45150,
 		Scram: ScramInfo{
-			Size:   897527784,
-			Hashes: FileHashes{MD5: "abc", SHA1: "def", SHA256: "ghi"},
+			Size: 897527784,
+			Hashes: FileHashes{
+				MD5:    strings.Repeat("a", 32),
+				SHA1:   strings.Repeat("b", 40),
+				SHA256: strings.Repeat("c", 64),
+			},
 		},
 		Tracks: []Track{{
 			Number: 1, Mode: "MODE1/2352", FirstLBA: 0, Size: 791104608, Filename: "x.bin",
-			Hashes: FileHashes{MD5: "11", SHA1: "22", SHA256: "33"},
+			Hashes: FileHashes{
+				MD5:    strings.Repeat("1", 32),
+				SHA1:   strings.Repeat("2", 40),
+				SHA256: strings.Repeat("3", 64),
+			},
 		}},
 	}
 	delta := []byte("DELTA-PAYLOAD-FAKE-VCDIFF-BYTES")
@@ -49,8 +56,8 @@ func TestContainerRoundtrip(t *testing.T) {
 func TestContainerRejectsInvalid(t *testing.T) {
 	// bad-magic and unknown-version: just check error is non-nil.
 	for _, body := range [][]byte{
-		append([]byte("BADM"), make([]byte, containerHeaderSize-4)...),     // bad magic
-		append([]byte("MSCM\x09"), make([]byte, containerHeaderSize-5)...), // unknown version
+		{'B', 'A', 'D', 'M', 0x00}, // bad magic
+		{'M', 'S', 'C', 'M', 0x09}, // unknown version
 	} {
 		path := filepath.Join(t.TempDir(), "bad.miniscram")
 		os.WriteFile(path, body, 0o644)
@@ -64,10 +71,18 @@ func TestContainerDeltaIsZlibFramed(t *testing.T) {
 	m := &Manifest{
 		ToolVersion: "miniscram-test",
 		CreatedUnix: 1714435200,
-		Scram:       ScramInfo{Size: 0, Hashes: FileHashes{MD5: "0", SHA1: "0", SHA256: "0"}},
+		Scram: ScramInfo{Size: 0, Hashes: FileHashes{
+			MD5:    strings.Repeat("0", 32),
+			SHA1:   strings.Repeat("0", 40),
+			SHA256: strings.Repeat("0", 64),
+		}},
 		Tracks: []Track{{
 			Number: 1, Mode: "MODE1/2352", FirstLBA: 0, Size: 0, Filename: "t.bin",
-			Hashes: FileHashes{MD5: "0", SHA1: "0", SHA256: "0"},
+			Hashes: FileHashes{
+				MD5:    strings.Repeat("0", 32),
+				SHA1:   strings.Repeat("0", 40),
+				SHA256: strings.Repeat("0", 64),
+			},
 		}},
 	}
 	delta := bytes.Repeat([]byte("ABCDEFGH"), 1024)
@@ -75,43 +90,25 @@ func TestContainerDeltaIsZlibFramed(t *testing.T) {
 	if err := WriteContainer(path, m, bytes.NewReader(delta)); err != nil {
 		t.Fatal(err)
 	}
+	// Walk chunks; find DLTA; check its payload starts with 0x78.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mlen := binary.BigEndian.Uint32(raw[containerHeaderSize-4 : containerHeaderSize])
-	postManifest := raw[containerHeaderSize+int(mlen):]
-	if len(postManifest) < 2 {
-		t.Fatalf("post-manifest too short: %d bytes", len(postManifest))
-	}
-	if postManifest[0] != 0x78 {
-		t.Fatalf("expected zlib magic 0x78 at start of post-manifest, got 0x%02x", postManifest[0])
-	}
-	if len(postManifest) >= len(delta) {
-		t.Fatalf("compression no-op: post-manifest %d bytes vs plaintext %d bytes", len(postManifest), len(delta))
-	}
-}
-
-func TestContainerRejectsPlaintextDelta(t *testing.T) {
-	manifest := []byte(`{"tool_version":"x","created_unix":0,"write_offset_bytes":0,"leadin_lba":0,` +
-		`"scram":{"size":0,"hashes":{"md5":"0","sha1":"0","sha256":"0"}},` +
-		`"tracks":[{"number":1,"mode":"MODE1/2352","first_lba":0,"filename":"t.bin","size":0,` +
-		`"hashes":{"md5":"0","sha1":"0","sha256":"0"}}]}`)
-	var buf bytes.Buffer
-	buf.WriteString(containerMagic)
-	buf.WriteByte(containerVersion)
-	binary.Write(&buf, binary.BigEndian, uint32(len(manifest)))
-	buf.Write(manifest)
-	buf.Write([]byte{0, 0, 0, 0}) // any non-zlib bytes; zlib.NewReader fails on the magic
-	path := filepath.Join(t.TempDir(), "plain.miniscram")
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, _, err := ReadContainer(path)
-	if err == nil {
-		t.Fatalf("expected error reading plaintext-delta file")
-	}
-	if !strings.Contains(err.Error(), "decompressing delta payload") {
-		t.Fatalf("expected error to mention 'decompressing delta payload', got: %v", err)
+	r := bytes.NewReader(raw[fileHeaderSize:])
+	for {
+		tag, payload, err := readChunk(r)
+		if err != nil {
+			t.Fatalf("walking chunks: %v", err)
+		}
+		if tag == dltaTag {
+			if len(payload) < 2 || payload[0] != 0x78 {
+				t.Fatalf("DLTA payload should start with zlib magic 0x78, got 0x%02x", payload[0])
+			}
+			if len(payload) >= len(delta) {
+				t.Fatalf("compression no-op: DLTA payload %d bytes vs plaintext %d bytes", len(payload), len(delta))
+			}
+			return
+		}
 	}
 }
