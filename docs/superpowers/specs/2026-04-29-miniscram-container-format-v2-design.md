@@ -1,17 +1,18 @@
-# miniscram container format v3 — chunk-based binary
+# miniscram container format v2 — chunk-based binary
 
-Replace the v1/v2 container layout (fixed header + length-prefixed
-JSON manifest + zlib delta) with a PNG/CHD-style chunk format. The
-JSON manifest goes away entirely; what remains of the manifest is
-encoded as fixed binary fields inside named chunks.
+Replace the v1 container layout (fixed header + length-prefixed JSON
+manifest + zlib delta) with a PNG/CHD-style chunk format. The JSON
+manifest goes away entirely; what remains of the manifest is encoded
+as fixed binary fields inside named chunks.
 
-Container version byte is **0x03**. v1 and v2 are not readable by
-this build. Any other version byte produces a hard error pointing
-the user at the source repo to build a matching binary.
+Container version byte is **0x02**. v1 is not readable by this build.
+Any other version byte produces a hard error pointing the user at the
+source repo to build a matching binary.
 
-This redesign incorporates the v1→v2 audit (drop the in-header
-scrambler-table SHA) as a stepping stone — that field is gone in v3
-for the same reasons documented in the v2 commit and PR body.
+This redesign folds in the "drop the in-header scrambler-table SHA"
+audit (the first commit on this branch). That intermediate shape —
+slim header but still JSON manifest — was never released; v2 is the
+single shipping increment from v1.
 
 ---
 
@@ -25,7 +26,7 @@ for the same reasons documented in the v2 commit and PR body.
    only `encoding/binary` and `hash/crc32` from the Go std library.
 3. **Forward-compat lever, unused for now.** PNG critical/ancillary
    convention (uppercase first letter = required, lowercase = readers
-   may skip) is reserved. v3 ships with no ancillary chunks; the
+   may skip) is reserved. v2 ships with no ancillary chunks; the
    convention is just available for future incremental additions
    without bumping version.
 4. **Per-chunk integrity.** CRC32 over `(type || payload)` on every
@@ -34,11 +35,11 @@ for the same reasons documented in the v2 commit and PR body.
 
 ## Non-goals
 
-- Backward compatibility. v3 readers do not handle v1 or v2. Old
-  containers must be repacked with the matching binary.
+- Backward compatibility. v2 readers do not handle v1. Old containers
+  must be repacked with the matching binary.
 - Format extensibility *features* (ancillary chunks, optional fields,
   unknown-tag handling beyond the version-byte gate). The convention
-  is reserved; v3 itself adds no ancillary chunks.
+  is reserved; v2 itself adds no ancillary chunks.
 - Changes to the delta wire format (still zlib over the same
   override-record encoding).
 - Changes to scrambling, ECC/EDC, or any ECMA-130 specifics.
@@ -55,7 +56,7 @@ File header (8 bytes, fixed):
    0    1    2    3    4    5    6    7
 
   bytes 0..3   magic         "MSCM"
-  byte  4      version       0x03
+  byte  4      version       0x02
   bytes 5..7   reserved      must be 0x00
 
 Chunk (repeated until EOF):
@@ -84,9 +85,9 @@ and CHD convention.
 
 ---
 
-## Chunk vocabulary (v3)
+## Chunk vocabulary (v2)
 
-All v3 chunks are critical (uppercase first letter). All four must
+All v2 chunks are critical (uppercase first letter). All four must
 appear exactly once. `MFST` must be the first chunk; the others may
 appear in any order.
 
@@ -130,7 +131,7 @@ per record:
   digest               bytes           raw binary digest
 ```
 
-A v3 container records `MD5 `, `SHA1`, `S256` for the scram and for
+A v2 container records `MD5 `, `SHA1`, `S256` for the scram and for
 each track — same coverage as v2.
 
 ### `DLTA` — zlib-compressed delta payload
@@ -145,8 +146,8 @@ where the delta ends; no read-to-EOF heuristic.
 ```
 1. Read 8-byte file header.
 2. Reject bad magic.
-3. Reject any version != 0x03 with the error
-     "container version 0x%02x; this build only reads v3.
+3. Reject any version != 0x02 with the error
+     "container version 0x%02x; this build only reads v2.
       rebuild miniscram from a matching commit:
       https://github.com/hughobrien/miniscram"
 4. Walk chunks until EOF:
@@ -168,15 +169,15 @@ where the delta ends; no read-to-EOF heuristic.
 2. Emit chunks in the order: MFST, TRKS, HASH, DLTA.
 3. Each chunk: write type, write length (BE uint32), write payload,
    write CRC32(type || payload) (BE uint32).
-4. fsync, atomic rename — same write-then-rename pattern as v1/v2.
+4. fsync, atomic rename — same write-then-rename pattern as v1.
 ```
 
 ---
 
 ## Audit: what's stored, what's not
 
-The v3 manifest stores only fields with a real consumer. Everything
-that was in v1/v2 was checked against actual usage:
+The v2 manifest stores only fields with a real consumer. Every v1
+field was checked against actual usage:
 
 | Field | Consumer | Verdict |
 |---|---|---|
@@ -193,10 +194,12 @@ that was in v1/v2 was checked against actual usage:
 | `HASH` per file | output verification | critical (skipped on `--no-verify`) |
 | `DLTA` | reconstruction | critical |
 
-Dropped vs v2:
-- The 32-byte in-header scrambler SHA (covered by the v2 audit).
+Dropped vs v1:
+- The 32-byte in-header scrambler SHA (the audit captured in this
+  branch's first commit — redundant with the build-startup pin in
+  `ecma130.go` and the version-byte gate).
 - The `(go1.x.y)` runtime suffix on `tool_version` — forensics noise,
-  doesn't affect output bytes. v3 records just `miniscram x.y.z`.
+  doesn't affect output bytes. v2 records just `miniscram x.y.z`.
 - The ISO-8601 `created_utc` string. Replaced by `created_unix` int64;
   display formatting moves to inspect.
 - The variable-length JSON manifest framing.
@@ -216,7 +219,7 @@ Considered and kept:
 Each rejection produces a clear error:
 
 - Bad magic → `"not a miniscram container (bad magic %q)"`
-- Wrong version → `"container version 0x%02x; this build only reads v3.
+- Wrong version → `"container version 0x%02x; this build only reads v2.
   rebuild miniscram from a matching commit:
   https://github.com/hughobrien/miniscram"`
 - Truncated header / chunk header / chunk payload → wrap `io.ErrUnexpectedEOF`
@@ -244,14 +247,14 @@ Each rejection produces a clear error:
   contract from the on-disk format.
 - `pack.go` — drop the `runtime.Version()` suffix on `toolVersion`;
   switch to int64 created_unix.
-- All test files — update fixtures and assertions for v3 layout and
+- All test files — update fixtures and assertions for v2 layout and
   the new field types.
 
 ## Testing
 
 - Existing `TestContainerRoundtrip` adapted to the new layout.
 - New `TestContainerRejectsCorruption` covering each rejection path:
-  bad magic, wrong version (v1, v2, v9 each), truncated mid-chunk,
+  bad magic, wrong version (v1, v3, v9 each), truncated mid-chunk,
   CRC mismatch (one bit flipped in payload), unknown critical chunk,
   unknown lowercase chunk (must accept), missing required chunk,
   duplicate critical chunk, MFST not first.
@@ -273,12 +276,12 @@ Each rejection produces a clear error:
 
 ## Versioning policy going forward
 
-v3 is the new baseline. Any breaking change (renaming an existing
+v2 is the new baseline. Any breaking change (renaming an existing
 chunk, changing a struct layout inside `MFST`/`TRKS`/`HASH`, changing
 the on-disk header) bumps the version byte. Adding a *new* lowercase
 chunk does not bump version — readers skip it. Adding a new uppercase
 chunk does bump, since old readers must reject it.
 
-There is no migration code path. A binary built against v3 reads only
-v3. Users who need to read older containers build the matching
+There is no migration code path. A binary built against v2 reads only
+v2. Users who need to read older containers build the matching
 historical commit.
