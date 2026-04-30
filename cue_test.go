@@ -56,6 +56,14 @@ FILE "Mixed2.bin" BINARY
 			t.Fatalf("err=%v tracks=%v", err, tracks)
 		}
 	})
+
+	t.Run("dotdot-in-name", func(t *testing.T) {
+		src := "FILE \"F.E.A.R..bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"
+		tracks, err := ParseCue(strings.NewReader(src))
+		if err != nil || len(tracks) != 1 || tracks[0].Filename != "F.E.A.R..bin" {
+			t.Fatalf("err=%v len=%d filename=%q; want nil,1,F.E.A.R..bin", err, len(tracks), tracks[0].Filename)
+		}
+	})
 }
 
 func TestParseCueRejects(t *testing.T) {
@@ -67,6 +75,8 @@ func TestParseCueRejects(t *testing.T) {
 		{"non-binary", "FILE \"x.wav\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n"},
 		{"relative-traversal", "FILE \"../bad.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"},
 		{"path-separator", "FILE \"subdir/x.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"},
+		{"dot-name", "FILE \".\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"},
+		{"dotdot-name", "FILE \"..\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"},
 		{"multi-track-per-file", "FILE \"shared.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n  TRACK 02 AUDIO\n    INDEX 01 02:00:00\n"},
 		{"no-index01", "FILE \"X.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 00 00:00:00\n"},
 	}
