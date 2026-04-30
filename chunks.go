@@ -254,6 +254,8 @@ func decodeHASHPayload(payload []byte, m *Manifest) error {
 			dest.SHA1 = hexDigest
 		case fourcc("S256"):
 			dest.SHA256 = hexDigest
+		default:
+			panic(fmt.Sprintf("HASH decode: algo %q present in hashAlgoLen but not handled in switch — update both", algo))
 		}
 	}
 	if !r.eof() {

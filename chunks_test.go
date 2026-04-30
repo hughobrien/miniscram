@@ -242,3 +242,20 @@ func TestHASHRejectsBadTarget(t *testing.T) {
 		t.Fatalf("expected target out-of-range error, got %v", err)
 	}
 }
+
+func TestHASHRejectsTruncated(t *testing.T) {
+	// Build a valid HASH payload (1 record), then walk every prefix.
+	full := encodeHASHPayload(&Manifest{
+		Scram: ScramInfo{Hashes: FileHashes{
+			MD5:    "0123456789abcdef0123456789abcdef",
+			SHA1:   "0123456789abcdef0123456789abcdef01234567",
+			SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}},
+	})
+	for i := 0; i < len(full); i++ {
+		err := decodeHASHPayload(full[:i], &Manifest{})
+		if err == nil {
+			t.Errorf("decoding truncated HASH (len=%d) should fail", i)
+		}
+	}
+}
