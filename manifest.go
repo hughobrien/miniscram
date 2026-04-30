@@ -144,6 +144,7 @@ func ReadContainer(path string) (*Manifest, []byte, error) {
 	var (
 		m            *Manifest
 		dlta         []byte
+		hashPayload  []byte
 		seen         = map[[4]byte]int{}
 		firstChunk   [4]byte
 		firstChunkOK bool
@@ -166,9 +167,16 @@ func ReadContainer(path string) (*Manifest, []byte, error) {
 		}
 		switch tag {
 		case mfstTag:
-			m, err = decodeMFSTPayload(payload)
+			decoded, err := decodeMFSTPayload(payload)
 			if err != nil {
 				return nil, nil, err
+			}
+			if m == nil {
+				m = decoded
+			} else {
+				// TRKS may have run first and seeded m.Tracks. Preserve.
+				decoded.Tracks = m.Tracks
+				m = decoded
 			}
 		case trksTag:
 			tracks, err := decodeTRKSPayload(payload)
@@ -180,12 +188,10 @@ func ReadContainer(path string) (*Manifest, []byte, error) {
 			}
 			m.Tracks = tracks
 		case hashTag:
-			if m == nil || m.Tracks == nil {
-				return nil, nil, fmt.Errorf("HASH chunk before MFST/TRKS")
-			}
-			if err := decodeHASHPayload(payload, m); err != nil {
-				return nil, nil, err
-			}
+			// Defer HASH decode until post-loop, so missing/out-of-order
+			// MFST/TRKS surface as their proper errors rather than as a
+			// generic "HASH before MFST/TRKS".
+			hashPayload = payload
 		case dltaTag:
 			zr, err := zlib.NewReader(bytes.NewReader(payload))
 			if err != nil {
@@ -203,13 +209,16 @@ func ReadContainer(path string) (*Manifest, []byte, error) {
 			// Lowercase first letter — ancillary, skip silently.
 		}
 	}
-	if firstChunkOK && firstChunk != mfstTag {
-		return nil, nil, fmt.Errorf("MFST must be the first chunk")
-	}
 	for _, required := range [][4]byte{mfstTag, trksTag, hashTag, dltaTag} {
 		if seen[required] == 0 {
 			return nil, nil, fmt.Errorf("missing required chunk %q", required)
 		}
+	}
+	if firstChunkOK && firstChunk != mfstTag {
+		return nil, nil, fmt.Errorf("MFST must be the first chunk")
+	}
+	if err := decodeHASHPayload(hashPayload, m); err != nil {
+		return nil, nil, err
 	}
 	return m, dlta, nil
 }
