@@ -4,7 +4,7 @@
     {
       "id": 1,
       "subject": "Task 1: Drain whole sectors of skipFirst in BuildEpsilonHat",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** BuildEpsilonHat accepts any WriteOffsetBytes in [-2*SectorSize, +2*SectorSize] without panicking and round-trips byte-exact for clean discs.\n\n**Files:**\n- Modify: builder.go (lines 191-195, per-sector loop in BuildEpsilonHat)\n- Modify: builder_test.go (extend TestBuilderCleanRoundTrip table; add TestBuildEpsilonHatNoPanicAcrossOffsetRange)\n\n**Acceptance Criteria:**\n- offsets -SectorSize, -2588, -4704, +2588 round-trip byte-exact via TestBuilderCleanRoundTrip\n- 15-offset property test passes (no panic, hat.Len == ScramSize)\n- existing TestBuilderCleanRoundTrip sub-tests still pass\n- go test ./... passes\n- end-to-end smoke check on /roms/final-fantasy-viii/SLUS-00892 succeeds (verify all-three-match, exit 0)\n\n**Verify:** go test -run 'TestBuilder|TestBuildEpsilonHatNoPanic' -v ./...\n\n```json:metadata\n{\"files\": [\"builder.go\", \"builder_test.go\"], \"verifyCommand\": \"go test -run 'TestBuilder|TestBuildEpsilonHatNoPanic' -v ./...\", \"acceptanceCriteria\": [\"-SectorSize round-trips byte-exact\", \"-2588 round-trips byte-exact\", \"-4704 round-trips byte-exact\", \"+2588 round-trips byte-exact\", \"property test 15 offsets pass without panic\", \"existing sub-tests still pass\", \"go test ./... passes\", \"FF VIII disc 1 pack+verify succeeds\"]}\n```"
     }
   ],
