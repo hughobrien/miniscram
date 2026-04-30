@@ -26,7 +26,9 @@ type realDiscFixture struct {
 }
 
 // realDiscFixtures is the authoritative dataset list. Keep entries
-// sorted alphabetically by Name.
+// sorted alphabetically by Name. Bounds were last reviewed for v2
+// chunk-format overhead (2026-04-29) — no measured fixture exceeded
+// pre-v2 bounds (chunk framing adds ~50 bytes baseline per container).
 var realDiscFixtures = []realDiscFixture{
 	{
 		Name:                    "deus-ex",
