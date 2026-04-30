@@ -257,10 +257,11 @@ $ ls -lh DeusEx_v1002f.miniscram
 ```
 
 **0 override records.** The 4-byte uncompressed delta is just the
-record count (`u32 = 0`); everything else in the 673-byte container
-is the binary header (41 bytes) plus the JSON manifest with track
-hashes. 856 MB → 673 bytes — about 1.3 million×, the irreducible
-cost being the manifest itself.
+record count (`u32 = 0`); everything else in the container is the
+5-byte file header plus the four critical chunks (MFST, TRKS,
+HASH, DLTA), with the irreducible cost dominated by the per-track
+hash records. 856 MB → 673 bytes — about 1.3 million×, the
+irreducible cost being the manifest itself.
 
 ### Things that should work, untested
 
@@ -298,95 +299,131 @@ cost being the manifest itself.
   Redumper preserves it in the `*_logs.zip` it produces alongside the
   `.scram`; keep that bundle next to the `.miniscram`.
 
-## Container format (v1)
+## Container format (v2)
 
 ### File structure
 
 A `.miniscram` file is laid out as:
 
-    binary header   41 bytes (fixed)
-    manifest body   variable (JSON)
-    delta payload   variable (binary)
+    file header     5 bytes (magic + version)
+    chunks          stream of length-prefixed, CRC-protected chunks
 
-### Binary header (41 bytes)
+The four critical chunks (`MFST`, `TRKS`, `HASH`, `DLTA`) must each
+appear exactly once. `MFST` is always first; the others may appear
+in any order. PNG-style critical/ancillary case convention applies:
+chunks whose 4-byte tag begins with an uppercase ASCII letter are
+critical and must be understood; lowercase tags are ancillary and
+may be safely skipped by readers that don't recognise them. v2
+defines no ancillary chunks — the convention is reserved for
+forward-compat additions.
+
+### File header (5 bytes)
 
 | Byte range | Field | Type | Notes |
 |---|---|---|---|
-| `[0, 4)`   | `magic` | 4 bytes | ASCII `"MSCM"` |
-| `[4, 5)`   | `version` | 1 byte | `0x01` for v1 |
-| `[5, 37)`  | `scrambler_table_sha256` | 32 bytes | Raw SHA-256 of the ECMA-130 scramble table |
-| `[37, 41)` | `manifest_length` | u32 BE | Byte count of the manifest body |
+| `[0, 4)` | `magic`   | 4 bytes | ASCII `"MSCM"` |
+| `[4, 5)` | `version` | 1 byte  | `0x02` for v2  |
 
-A reader rejects the container if the magic is wrong, the version
-isn't `0x01`, or `scrambler_table_sha256` doesn't match the reader's
-own ECMA-130 implementation.
+A reader rejects the container if the magic is wrong or the version
+isn't `0x02`. There is no migration code: a binary built against v2
+reads only v2. Users with older containers build the matching
+historical commit.
 
-### Manifest (JSON)
+### Chunk framing
 
-UTF-8 encoded JSON object. All fields are required.
-
-```json
-{
-  "tool_version": "miniscram 1.0.0 (go1.22)",
-  "created_utc": "2026-04-28T14:30:21Z",
-  "write_offset_bytes": -52,
-  "leadin_lba": -45150,
-  "scram": {
-    "size": 739729728,
-    "hashes": {"md5": "...", "sha1": "...", "sha256": "..."}
-  },
-  "tracks": [
-    {
-      "number": 1,
-      "mode": "MODE1/2352",
-      "first_lba": 0,
-      "filename": "DeusEx_v1002f.bin",
-      "size": 739729728,
-      "hashes": {"md5": "...", "sha1": "...", "sha256": "..."}
-    }
-  ]
-}
-```
-
-Field semantics:
-
-- `write_offset_bytes`: signed bytes; positive = scram leads, negative = scram lags. Always a multiple of 4 (audio sample alignment).
-- `leadin_lba`: integer LBA where the scram file begins on disc. Real Redumper output uses `-45150`; truncated test fixtures may use higher values.
-- `scram.size`: byte length of the original `.scram`.
-- `scram.hashes`: lowercase hex MD5, SHA-1, SHA-256 of the original `.scram`.
-- `tracks[*].number`: 1-indexed track number per the cuesheet.
-- `tracks[*].mode`: one of `"MODE1/2352"`, `"MODE2/2352"`, `"AUDIO"`.
-- `tracks[*].first_lba`: absolute LBA where the track's `.bin` begins on disc (cumulative file size in sectors).
-- `tracks[*].filename`: basename of the track's `.bin`. No paths.
-- `tracks[*].size`: byte length of the track's `.bin`. Always a multiple of `2352`.
-- `tracks[*].hashes`: lowercase hex MD5, SHA-1, SHA-256 of the track's `.bin`.
-
-### Delta payload (binary)
-
-Begins immediately after the manifest body, as a `compress/zlib`
-`BestCompression` stream. Decompressed, the layout is the big-endian
-record sequence below.
+Each chunk:
 
 | Field | Type | Notes |
 |---|---|---|
-| `count` | u32 | Number of override records |
-| `record[i]` | variable | See below |
+| `tag`     | 4 bytes        | FOURCC, e.g. `"MFST"` |
+| `length`  | u32 BE         | Payload byte count    |
+| `payload` | `length` bytes | Per-chunk format      |
+| `crc32`   | u32 BE         | CRC-32/IEEE over `(tag \|\| payload)` |
+
+Reader behaviour:
+
+- Walks chunks until clean EOF after the last `crc32` trailer.
+- Rejects any non-`DLTA` chunk whose `length` exceeds 16 MiB
+  (matches MAME CHD's metadata cap; defends against `malloc(garbage)`
+  if a corrupt length slips past the CRC against a hostile payload).
+- Rejects any chunk whose CRC32 doesn't match.
+- After the walk, verifies all four critical chunks were seen
+  exactly once and `MFST` appeared first.
+
+### `MFST` — manifest scalars
+
+| Field | Type | Notes |
+|---|---|---|
+| `tool_version_len`     | u16 BE | Length of `tool_version` in bytes |
+| `tool_version`         | bytes  | UTF-8, e.g. `"miniscram 1.0.0"` (no NUL terminator) |
+| `created_unix`         | i64 BE | UTC seconds since the Unix epoch |
+| `write_offset_bytes`   | i32 BE | Sync offset between bin and scram, signed |
+| `leadin_lba`           | i32 BE | LBA where lead-in starts on disc, signed |
+| `scram_size`           | i64 BE | Expected size of the reconstructed `.scram` |
+
+### `TRKS` — track table
+
+| Field | Type | Notes |
+|---|---|---|
+| `count`              | u16 BE  | Number of tracks                            |
+| per track:           |         |                                              |
+| &nbsp;`number`       | u8      | CD track number (1..99)                     |
+| &nbsp;`mode_len`     | u8      | Length of `mode` in bytes                   |
+| &nbsp;`mode`         | bytes   | ASCII, e.g. `"MODE1/2352"`, `"AUDIO"`       |
+| &nbsp;`first_lba`    | i32 BE  | Absolute LBA where this track starts        |
+| &nbsp;`size`         | i64 BE  | Byte length of this track's `.bin` file     |
+| &nbsp;`filename_len` | u16 BE  | Length of `filename` in bytes               |
+| &nbsp;`filename`     | bytes   | UTF-8 basename of the track's `.bin` (no path) |
+
+### `HASH` — file hashes
+
+Tagged sub-records — decouples hash storage from track structure so
+new digest algorithms or hash targets are one entry, not a struct
+change. A v2 container records `MD5 ` (note trailing space; algo
+tags are exactly 4 bytes), `SHA1`, and `S256` for the scram and for
+each track.
+
+| Field | Type | Notes |
+|---|---|---|
+| `count`            | u16 BE        | Number of hash records                       |
+| per record:        |               |                                              |
+| &nbsp;`target`     | u8            | `0` = scram, `1..N` = 1-based track index    |
+| &nbsp;`algo`       | 4 bytes ASCII | `"MD5 "`, `"SHA1"`, or `"S256"`              |
+| &nbsp;`digest_len` | u8            | `16` for MD5, `20` for SHA1, `32` for SHA256 |
+| &nbsp;`digest`     | bytes         | Raw binary digest                            |
+
+A reader rejects: unknown `algo`, `digest_len` not matching the
+algorithm's expected length, `target` greater than the number of
+tracks, or trailing bytes after the declared count of records.
+
+### `DLTA` — delta payload
+
+`DLTA`'s payload is a `compress/zlib` `BestCompression` stream
+verbatim. The chunk's `length` prefix delimits the delta exactly,
+so the reader does not rely on a read-to-EOF heuristic.
+
+Decompressed, the delta is a big-endian record sequence:
+
+| Field | Type | Notes |
+|---|---|---|
+| `count`     | u32             | Number of override records              |
+| `record[i]` | variable        | See below                               |
 
 Each `record[i]`:
 
 | Field | Type | Notes |
 |---|---|---|
-| `file_offset` | u64 | Byte offset within the recovered `.scram` |
-| `length` | u32 | Payload length, `1 ≤ length ≤ scram.size` |
-| `payload` | `length` bytes | Bytes to write at `file_offset` |
+| `file_offset` | u64             | Byte offset within the recovered `.scram` |
+| `length`      | u32             | Payload length, `1 ≤ length ≤ scram.size` |
+| `payload`     | `length` bytes  | Bytes to write at `file_offset`           |
 
 To reconstruct the `.scram`, a reader:
 1. Reads bin files in cue order, scrambling all non-AUDIO tracks via ECMA-130 §15.
 2. Synthesises leadin (zeros), pregap (Mode 1 zero sectors), and leadout (Mode 0 zero sectors) regions per ECMA-130 §14.
-3. Concatenates everything into a buffer matching `scram.size`.
+3. Concatenates everything into a buffer matching `MFST.scram_size`.
 4. Applies each delta record by overwriting `length` bytes starting at `file_offset`.
 
-The result must hash to `scram.hashes`.
+The result must hash to the `HASH` chunk's `target=0` records.
 
 ## Acknowledgments
 
