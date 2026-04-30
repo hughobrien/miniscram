@@ -6,7 +6,7 @@ design docs in [`docs/superpowers/specs/`](./docs/superpowers/specs/).
 
 ## Repository layout
 
-- `*.go` — single Go package `main`, ~5K lines.
+- `*.go` — single Go package `main`, ~5K lines. Notable files: `chunks.go` (v2 chunk-framing primitives + per-tag codecs), `manifest.go` (container WriteContainer/ReadContainer orchestration), `ecma130.go` (CD-ROM scrambler/EDC/ECC tables + `buildScrambleTable`).
 - `docs/superpowers/specs/` — design specs (dated). Authoritative
   source of architectural intent.
 - `TASKS.md` — maintainer's work plan; recommendations there reflect
@@ -72,9 +72,10 @@ when the builder code is edited.
 
 - `go test ./...` — fast tests with synthetic fixtures.
 - `go test -tags redump_data ./...` — runs `e2e_redump_test.go` against
-  real Redumper dumps stored in `<repo>/<dataset>/` (gitignored, e.g.
-  `half-life/`). Each fixture row asserts byte-exact round-trip plus
-  per-fixture bounds (error count, delta size, container size).
+  real Redumper dumps stored in `test-discs/<name>/` (gitignored,
+  e.g. `test-discs/half-life/`). Each fixture row asserts byte-exact
+  round-trip plus per-fixture bounds (error count, delta size,
+  container size).
 
 ### Property tests are first-class
 
@@ -95,7 +96,7 @@ Theme E for an open task to expand coverage.
   open until a release window.
 - **Stage files explicitly** — `git add path/to/file.go`. Avoid
   `git add -A` because it sweeps multi-GB fixture data (e.g.,
-  `half-life/`) into the index.
+  `test-discs/half-life/`) into the index.
 - `/tmp` is RAM-backed (2 GB tmpfs). Pack/verify artifacts can hit
   ~1.3 GiB peak for half-life — write them next to the cuesheet, not
   in `/tmp`.
@@ -117,7 +118,6 @@ For one-off fixes you can skip straight to implementation.
 
 The following must stay out of git (already gitignored):
 
-- `half-life/` and any other `<dataset>/` fixture directories
-  (multi-GB).
+- `test-discs/<name>/` fixture directories (multi-GB).
 - `miniscram` (build artifact).
 - `*.pdf` (the spec references — freely available upstream).
