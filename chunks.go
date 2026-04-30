@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -157,6 +158,108 @@ func decodeTRKSPayload(payload []byte) ([]Track, error) {
 		return nil, fmt.Errorf("TRKS: %d trailing bytes after %d tracks", len(payload)-r.pos, count)
 	}
 	return tracks, nil
+}
+
+// hashAlgoLen maps the on-disk algo tag to its expected digest length.
+var hashAlgoLen = map[[4]byte]int{
+	fourcc("MD5 "): 16,
+	fourcc("SHA1"): 20,
+	fourcc("S256"): 32,
+}
+
+// encodeHASHPayload emits the HASH chunk payload per spec §"HASH".
+// One record per (file × algorithm).
+func encodeHASHPayload(m *Manifest) []byte {
+	var b []byte
+	count := uint16((1 + len(m.Tracks)) * 3) // scram + tracks, each × MD5/SHA1/SHA256
+	b = binary.BigEndian.AppendUint16(b, count)
+
+	emit := func(target uint8, h FileHashes) {
+		b = appendHashRecord(b, target, fourcc("MD5 "), h.MD5, 16)
+		b = appendHashRecord(b, target, fourcc("SHA1"), h.SHA1, 20)
+		b = appendHashRecord(b, target, fourcc("S256"), h.SHA256, 32)
+	}
+	emit(0, m.Scram.Hashes)
+	for i, t := range m.Tracks {
+		emit(uint8(i+1), t.Hashes)
+	}
+	return b
+}
+
+// appendHashRecord parses the hex string and appends one record.
+// Panics if the hex doesn't decode to exactly digestLen bytes — only
+// called from encodeHASHPayload, where lengths are invariants.
+func appendHashRecord(b []byte, target uint8, algo [4]byte, hexDigest string, digestLen int) []byte {
+	digest, err := hex.DecodeString(hexDigest)
+	if err != nil || len(digest) != digestLen {
+		panic(fmt.Sprintf("HASH encode: bad %v digest %q (decode err %v, len %d, want %d)",
+			algo, hexDigest, err, len(digest), digestLen))
+	}
+	b = append(b, target)
+	b = append(b, algo[:]...)
+	b = append(b, byte(digestLen))
+	b = append(b, digest...)
+	return b
+}
+
+// decodeHASHPayload reads the HASH chunk and populates Hashes fields
+// on the supplied Manifest. m.Tracks must already be sized to match
+// what encodeHASHPayload produced (i.e., decodeTRKSPayload ran first).
+func decodeHASHPayload(payload []byte, m *Manifest) error {
+	r := payloadReader{buf: payload}
+	count, err := r.uint16()
+	if err != nil {
+		return fmt.Errorf("HASH count: %w", err)
+	}
+	for i := uint16(0); i < count; i++ {
+		target, err := r.uint8()
+		if err != nil {
+			return fmt.Errorf("HASH record[%d] target: %w", i, err)
+		}
+		algoBytes, err := r.bytes(4)
+		if err != nil {
+			return fmt.Errorf("HASH record[%d] algo: %w", i, err)
+		}
+		var algo [4]byte
+		copy(algo[:], algoBytes)
+		want, ok := hashAlgoLen[algo]
+		if !ok {
+			return fmt.Errorf("HASH record[%d]: unknown algo %q", i, algo)
+		}
+		digestLen, err := r.uint8()
+		if err != nil {
+			return fmt.Errorf("HASH record[%d] digest_len: %w", i, err)
+		}
+		if int(digestLen) != want {
+			return fmt.Errorf("HASH record[%d] %q: digest length %d, want %d", i, algo, digestLen, want)
+		}
+		digest, err := r.bytes(int(digestLen))
+		if err != nil {
+			return fmt.Errorf("HASH record[%d] digest: %w", i, err)
+		}
+		hexDigest := hex.EncodeToString(digest)
+		var dest *FileHashes
+		switch {
+		case target == 0:
+			dest = &m.Scram.Hashes
+		case int(target) <= len(m.Tracks):
+			dest = &m.Tracks[target-1].Hashes
+		default:
+			return fmt.Errorf("HASH record[%d]: target %d out of range (have %d tracks)", i, target, len(m.Tracks))
+		}
+		switch algo {
+		case fourcc("MD5 "):
+			dest.MD5 = hexDigest
+		case fourcc("SHA1"):
+			dest.SHA1 = hexDigest
+		case fourcc("S256"):
+			dest.SHA256 = hexDigest
+		}
+	}
+	if !r.eof() {
+		return fmt.Errorf("HASH: %d trailing bytes after %d records", len(payload)-r.pos, count)
+	}
+	return nil
 }
 
 // payloadReader is a thin cursor over a byte slice that returns
