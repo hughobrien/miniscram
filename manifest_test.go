@@ -64,7 +64,7 @@ func TestContainerRejectsInvalid(t *testing.T) {
 	// scrambler-hash-mismatch: expect specific sentinel.
 	var buf bytes.Buffer
 	buf.WriteString("MSCM")
-	buf.WriteByte(0x01)
+	buf.WriteByte(0x00)
 	buf.Write(make([]byte, 36)) // 32 bytes all-zero hash + 4 bytes zero length
 	path := filepath.Join(t.TempDir(), "bad-hash.miniscram")
 	os.WriteFile(path, buf.Bytes(), 0o644)

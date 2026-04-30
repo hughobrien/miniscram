@@ -123,7 +123,7 @@ func TestCLIInspect(t *testing.T) {
 		if code := run([]string{"inspect", packSyntheticContainer(t)}, &stdout, &stderr); code != exitOK {
 			t.Fatalf("exit %d; stderr=%s", code, stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "container:  MSCM v1") {
+		if !strings.Contains(stdout.String(), "container:  MSCM v0") {
 			t.Errorf("missing header in stdout:\n%s", stdout.String())
 		}
 		if stderr.Len() > 0 {
