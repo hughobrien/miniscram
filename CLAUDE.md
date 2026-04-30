@@ -76,6 +76,17 @@ when the builder code is edited.
   `half-life/`). Each fixture row asserts byte-exact round-trip plus
   per-fixture bounds (error count, delta size, container size).
 
+### Property tests are first-class
+
+When a function has a clean invariant — round-trip
+(`f(g(x)) == x`), idempotence (`f(f(x)) == f(x)`), or agreement with
+an oracle (`f(x) == reference(x)` for some authoritative
+implementation) — prefer `testing/quick`-style randomized property
+tests over (or alongside) example-based fixtures. They catch the
+edge cases nobody thought of, especially for byte-format and
+algorithmic code where the input space is enormous. See TASKS.md
+Theme E for an open task to expand coverage.
+
 ## Workflow conventions
 
 - **Direct-to-main commits** — no feature branches.
