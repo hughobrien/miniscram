@@ -139,8 +139,7 @@ func Pack(opts PackOptions, r Reporter) error {
 	if err := os.Remove(hatPath); err == nil {
 		hatRemoved = true
 	}
-	_ = passThroughs // passThroughs surfaced in Task 6's reporter change
-	st.Done("%d override(s), delta %d bytes", len(errSectors), deltaSize)
+	st.Done("%d override(s), %d pass-through(s), delta %d bytes", len(errSectors), passThroughs, deltaSize)
 
 	// 7. assemble manifest and write container.
 	m := &Manifest{
