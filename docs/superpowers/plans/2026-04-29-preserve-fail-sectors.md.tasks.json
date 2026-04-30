@@ -1,0 +1,68 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-29-preserve-fail-sectors.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Copy redumper unscramble fixtures",
+      "status": "pending",
+      "description": "**Goal:** Get the 46 redumper test fixtures into the repo so subsequent tasks have ground truth.\n\n**Files:**\n- Create: `testdata/unscramble/01_invalid_sync.0.pass` ... `46_zeroed_sector.10350.fail` (46 files copied verbatim from `~/redumper/tests/unscramble/`)\n- Create: `testdata/unscramble/README.md`\n\n**Acceptance Criteria:**\n- [ ] All 46 fixture files byte-identical to upstream\n- [ ] README credits upstream and notes GPL-3.0 inheritance\n- [ ] `go build ./...` still succeeds\n\n**Verify:** `diff -r ~/redumper/tests/unscramble/ testdata/unscramble/ | grep -v 'README.md'` → empty\n\n```json:metadata\n{\"files\": [\"testdata/unscramble/\"], \"verifyCommand\": \"diff -r ~/redumper/tests/unscramble/ testdata/unscramble/ | grep -v README.md\", \"acceptanceCriteria\": [\"46 fixtures copied byte-identical\", \"README with attribution\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: Implement test-side oracle (Go port of redumper's descramble)",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** A Go port of `cd/cd_scrambler.ixx::descramble` lives in test code as ground-truth oracle.\n\n**Files:**\n- Create: `unscramble_oracle_test.go`\n\n**Acceptance Criteria:**\n- [ ] `oracleDescramble(scrambled []byte, lba *int32) (binForm []byte, verdict bool)` defined\n- [ ] `TestOracleAgainstFixtures` passes for all 46 imported fixtures\n- [ ] Test-only — not built into production binary\n\n**Verify:** `go test ./... -run TestOracleAgainstFixtures -v` → 46 PASS\n\n```json:metadata\n{\"files\": [\"unscramble_oracle_test.go\"], \"verifyCommand\": \"go test ./... -run TestOracleAgainstFixtures -v\", \"acceptanceCriteria\": [\"oracle ports redumper descramble verbatim\", \"46/46 fixtures match labels\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: Implement classifyBinSector + isZeroed + fixture test",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Production classifier in `ecma130.go` mirroring redumper's descramble decision but operating on the bin sector.\n\n**Files:**\n- Modify: `ecma130.go`\n- Create: `unscramble_fixtures_test.go`\n\n**Acceptance Criteria:**\n- [ ] `classifyBinSector(bin []byte, expectedLBA int32) bool` defined\n- [ ] `isZeroed(buf []byte) bool` helper added\n- [ ] All 46 fixtures pass via fixture test using oracle\n- [ ] No production callers yet; full suite green\n\n**Verify:** `go test ./... -run TestClassifyAgainstFixtures -v` → 46 PASS\n\n```json:metadata\n{\"files\": [\"ecma130.go\", \"unscramble_fixtures_test.go\"], \"verifyCommand\": \"go test ./... -run TestClassifyAgainstFixtures -v\", \"acceptanceCriteria\": [\"classifyBinSector pure\", \"46/46 fixtures match labels\", \"no production callers yet\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Property test for classifier vs oracle",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Randomized property test asserting classifier agrees with oracle.\n\n**Files:**\n- Create: `unscramble_property_test.go`\n\n**Acceptance Criteria:**\n- [ ] `TestClassifyMatchesOracleProperty` runs ≥1000 iterations\n- [ ] Each iteration: random sector + LBA → oracle bin form + verdict; classifier must agree\n- [ ] Runs in plain `go test ./...` (no build tag)\n\n**Verify:** `go test ./... -run TestClassifyMatchesOracleProperty -v` → PASS\n\n```json:metadata\n{\"files\": [\"unscramble_property_test.go\"], \"verifyCommand\": \"go test ./... -run TestClassifyMatchesOracleProperty -v\", \"acceptanceCriteria\": [\"1000+ iterations\", \"classifier and oracle agree on all generated inputs\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: Wire classifier into BuildEpsilonHat",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** Replace unconditional `Scramble(&sec)` in bin-region branch with classifier-gated call. Thread `passThroughs` count through return tuple.\n\n**Files:**\n- Modify: `builder.go`, `unpack.go`, `pack.go`, `builder_test.go`\n\n**Acceptance Criteria:**\n- [ ] `BuildEpsilonHat` returns `(errLBAs, mismatched, passThroughs, err)`\n- [ ] `buildHatAndDelta` returns analogous tuple\n- [ ] All callers updated; full suite green\n- [ ] Synthetic discs unaffected (passThroughs == 0)\n\n**Verify:** `go test ./...` → ok\n\n```json:metadata\n{\"files\": [\"builder.go\", \"unpack.go\", \"pack.go\", \"builder_test.go\"], \"verifyCommand\": \"go test ./...\", \"acceptanceCriteria\": [\"BuildEpsilonHat passThroughs return\", \"all callers updated\", \"synthetic discs unaffected\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 6: Plumb pass-through count through pack reporter",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** Surface pass-through count in `building scram prediction + delta` reporter step.\n\n**Files:**\n- Modify: `pack.go:142`\n\n**Acceptance Criteria:**\n- [ ] Reporter prints `N override(s), M pass-through(s), delta K bytes`\n- [ ] No regressions\n\n**Verify:** `go test ./...` → ok\n\n```json:metadata\n{\"files\": [\"pack.go\"], \"verifyCommand\": \"go test ./...\", \"acceptanceCriteria\": [\"reporter format includes pass-throughs\", \"no regressions\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 7: Bump container format version to 0x00 sentinel",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** Set `containerVersion` to `0x00` and update unsupported-version error. The 0x00 value signals the in-flight `format/drop-scrambler-hash` branch to rebase.\n\n**Files:**\n- Modify: `manifest.go:17, 152`\n\n**Acceptance Criteria:**\n- [ ] `containerVersion = byte(0x00)`\n- [ ] Error message names the rule change\n- [ ] Full suite green\n\n**Verify:** `go test ./...` → ok\n\n```json:metadata\n{\"files\": [\"manifest.go\"], \"verifyCommand\": \"go test ./...\", \"acceptanceCriteria\": [\"containerVersion=0x00\", \"rejection message updated\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 8: synthDiscWithFailSector helper + e2e round-trip",
+      "status": "pending",
+      "blockedBy": [6],
+      "description": "**Goal:** Synthetic fixture exercising the new pass-through path: pack → unpack → byte-equal scram.\n\n**Files:**\n- Modify: `fixtures_test.go` (helper)\n- Modify: `e2e_test.go` (round-trip case)\n\n**Acceptance Criteria:**\n- [ ] Helper builds Mode 1 disc with one fail sector (valid sync, invalid mode 0xF7) at known LBA\n- [ ] Bin and scram identical for that LBA\n- [ ] Round-trip byte-equal\n- [ ] Reporter shows ≥1 pass-through during pack\n\n**Verify:** `go test ./... -run TestE2EFailSectorRoundTrip -v` → PASS\n\n```json:metadata\n{\"files\": [\"fixtures_test.go\", \"e2e_test.go\"], \"verifyCommand\": \"go test ./... -run TestE2EFailSectorRoundTrip -v\", \"acceptanceCriteria\": [\"synthDiscWithFailSector helper\", \"byte-equal round-trip\", \"reporter pass-through count > 0\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 9: Tighten half-life e2e bounds (optional, fixture-gated)",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Measure new delta + container sizes for half-life with fail-sector fix; tighten bound assertions.\n\n**Optional**, only runs when `test-discs/half-life/` is present. If absent, either symlink from main worktree or skip — bounds stay at conservative 15 MB.\n\n**Files:**\n- Modify: `e2e_redump_test.go:64-65`\n\n**Acceptance Criteria:**\n- [ ] (If fixture available) bounds tightened to measured value × 1.1\n- [ ] Build-tagged test passes\n\n**Verify:** `go test -tags redump_data ./... -run TestE2ERoundTripRealDiscs/half-life -v`\n\n```json:metadata\n{\"files\": [\"e2e_redump_test.go\"], \"verifyCommand\": \"go test -tags redump_data ./... -run TestE2ERoundTripRealDiscs/half-life -v\", \"acceptanceCriteria\": [\"bounds tightened to measured values\", \"fixture-gated test passes\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-29T00:00:00Z"
+}
