@@ -14,7 +14,7 @@ import (
 
 const (
 	containerMagic   = "MSCM"
-	containerVersion = byte(0x01) // v1
+	containerVersion = byte(0x00) // v0 sentinel — see TASKS.md / spec
 	// Header layout: 4 magic + 1 version + 32 scrambler_hash + 4 manifest_len.
 	containerHeaderSize = 4 + 1 + 32 + 4
 )
@@ -149,7 +149,7 @@ func ReadContainer(path string) (*Manifest, [32]byte, []byte, error) {
 		return nil, [32]byte{}, nil, fmt.Errorf("not a miniscram container (bad magic %q)", header[:4])
 	}
 	if header[4] != containerVersion {
-		return nil, [32]byte{}, nil, fmt.Errorf("unsupported container version 0x%02x (this build expects 0x%02x)",
+		return nil, [32]byte{}, nil, fmt.Errorf("unsupported container version 0x%02x (this build expects 0x%02x); the prediction-rule change in feat/preserve-fail-sectors broke wire compatibility — re-pack from .bin",
 			header[4], containerVersion)
 	}
 	expectedHash, err := hex.DecodeString(expectedScrambleTableSHA256)
