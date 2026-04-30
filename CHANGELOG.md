@@ -4,6 +4,60 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-30
+
+### Added
+
+- **PlayStation (PSX) disc support.** miniscram now packs and verifies
+  PSX dumps end-to-end: `MODE2/2352` data tracks combined with write
+  offsets larger than a single sector (PSX masters routinely produce
+  these). Demonstrated against all 8 PSX dumps in the redumper
+  corpus (Final Fantasy VIII × 4, Final Fantasy IX × 4); a new
+  README demo walks SLUS-00892 (FF VIII disc 1) through the pack +
+  inspect + unpack workflow with byte-exact round-trip.
+- `testing/quick` property test for `BuildEpsilonHat` across the
+  full `[-2*SectorSize, +2*SectorSize]` write-offset range. Draws
+  random offsets from 200 seeds and asserts no panic and
+  `hat.Len() == ScramSize`. Complements the deterministic
+  boundary-cliff table.
+
+### Fixed
+
+- **PSX panic on multi-sector write offsets.** `BuildEpsilonHat`
+  panicked with `slice bounds out of range [skipFirst:2352]` when
+  `|WriteOffsetBytes|` exceeded one sector. The per-sector loop's
+  `skipFirst` handler now drains whole sectors via an early
+  `continue` before applying the partial-sector slice. The `bin`
+  reader's `io.ReadFull` runs earlier in the iteration body, so its
+  position stays in lockstep with `lba` across the skip.
+  ([#15](https://github.com/hughobrien/miniscram/pull/15))
+- **Cue parser polite rejection of non-cue input.** Feeding
+  `miniscram pack` an `.iso` (or any binary blob) now returns
+  `does not look like a cuesheet (no FILE/TRACK/REM/... in first 4096 bytes)`
+  via a 4 KiB head-sniff in `ParseCue`. Previously a stdlib
+  `bufio.Scanner: token too long` error leaked through, and
+  multi-GB hostile inputs streamed for 90 s+ before failing. Bounds
+  runtime to a 4 KiB read.
+  ([#13](https://github.com/hughobrien/miniscram/pull/13))
+- **`--quiet` no longer swallows error messages.** `miniscram pack
+  --quiet` on a failing input exited non-zero with empty stderr.
+  The quiet reporter now still emits `<step-label>: <err>` on
+  `Step.Fail` while keeping `Step.Done`, `Info`, and `Warn` silent.
+  ([#13](https://github.com/hughobrien/miniscram/pull/13))
+- **Cue FILE names containing `..` substrings.** Filenames like
+  `F.E.A.R..bin` (legitimate redumper output where the title ends
+  in `.` and the extension begins with `.`) were rejected as path
+  traversal. The path-safety check now compares for exact equality
+  against `.` and `..` rather than substring containment.
+  ([#14](https://github.com/hughobrien/miniscram/pull/14))
+
+### Tested
+
+- Full redumper-corpus sweep over 119 CD dumps spanning Mode 1,
+  Mode 2/PSX, mixed-mode hybrid (data + audio), and multi-FILE
+  multi-disc games — **119/119 PASS** with byte-exact round-trip
+  verification (~26 s per disc average over SMB).
+
 ## [1.1.1] - 2026-04-30
 
 ### Fixed
