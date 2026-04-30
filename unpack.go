@@ -27,7 +27,7 @@ type UnpackOptions struct {
 // Unpack reproduces the original .scram from the container's track files + delta.
 func Unpack(opts UnpackOptions, r Reporter) error {
 	if r == nil {
-		r = quietReporter{}
+		r = quietReporter{w: io.Discard}
 	}
 
 	if err := runStep(r, "running scramble-table self-test", func() (string, error) {
@@ -198,7 +198,7 @@ type VerifyOptions struct {
 // encountered along the way.
 func Verify(opts VerifyOptions, r Reporter) error {
 	if r == nil {
-		r = quietReporter{}
+		r = quietReporter{w: io.Discard}
 	}
 
 	// Read the manifest up front so we have scram hashes for the final
