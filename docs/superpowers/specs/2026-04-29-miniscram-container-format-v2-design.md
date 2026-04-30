@@ -49,15 +49,14 @@ single shipping increment from v1.
 ## On-disk layout
 
 ```
-File header (8 bytes, fixed):
-  +----+----+----+----+----+----+----+----+
-  | 'M'| 'S'| 'C'| 'M'| ver|  reserved   |
-  +----+----+----+----+----+----+----+----+
-   0    1    2    3    4    5    6    7
+File header (5 bytes, fixed):
+  +----+----+----+----+----+
+  | 'M'| 'S'| 'C'| 'M'| ver|
+  +----+----+----+----+----+
+   0    1    2    3    4
 
   bytes 0..3   magic         "MSCM"
   byte  4      version       0x02
-  bytes 5..7   reserved      must be 0x00
 
 Chunk (repeated until EOF):
   +----+----+----+----+----+----+----+----+----+...
@@ -79,6 +78,18 @@ in `hash/crc32`). PNG uses the same polynomial. Computed over the
 error. There is no explicit end-of-file marker chunk — `DLTA`'s
 length prefix already delimits the delta payload, and EOF after the
 final chunk is unambiguous.
+
+**Length sanity cap.** For all chunks except `DLTA`, the reader rejects
+any `length` greater than 16 MiB (`16 << 20`). This matches MAME CHD's
+metadata cap and prevents `malloc(garbage)` if a corrupt length field
+happens to slip past the CRC against a hostile payload. `DLTA`'s cap
+is the remaining file size.
+
+**Signed integers.** The two `MFST` fields `write_offset_bytes` and
+`leadin_lba` are two's-complement big-endian int32 — they carry
+genuinely signed values (offset can be negative; plextor lead-in LBA
+is -45150). All other integers in the format are unsigned. CHD ducks
+this question by being all-unsigned across the board.
 
 **Endianness:** all multi-byte integers are big-endian, matching PNG
 and CHD convention.
@@ -144,7 +155,7 @@ where the delta ends; no read-to-EOF heuristic.
 ## Read behavior
 
 ```
-1. Read 8-byte file header.
+1. Read 5-byte file header.
 2. Reject bad magic.
 3. Reject any version != 0x02 with the error
      "container version 0x%02x; this build only reads v2.
@@ -152,9 +163,10 @@ where the delta ends; no read-to-EOF heuristic.
       https://github.com/hughobrien/miniscram"
 4. Walk chunks until EOF:
    a. Read 8-byte chunk header (type + length).
-   b. Read `length` bytes of payload.
-   c. Read 4-byte CRC; verify CRC32(type || payload).
-   d. Dispatch by type. Unknown uppercase type → reject as
+   b. Reject `length > 16 MiB` for any tag other than `DLTA`.
+   c. Read `length` bytes of payload.
+   d. Read 4-byte CRC; verify CRC32(type || payload).
+   e. Dispatch by type. Unknown uppercase type → reject as
       "unsupported critical chunk %q".
       Unknown lowercase type → skip silently (reserved for future).
 5. After EOF, verify all four critical chunks were seen exactly once.
@@ -165,7 +177,7 @@ where the delta ends; no read-to-EOF heuristic.
 ## Write behavior
 
 ```
-1. Write 8-byte file header (magic + version + 3 zero bytes).
+1. Write 5-byte file header (magic + version).
 2. Emit chunks in the order: MFST, TRKS, HASH, DLTA.
 3. Each chunk: write type, write length (BE uint32), write payload,
    write CRC32(type || payload) (BE uint32).
@@ -223,6 +235,7 @@ Each rejection produces a clear error:
   rebuild miniscram from a matching commit:
   https://github.com/hughobrien/miniscram"`
 - Truncated header / chunk header / chunk payload → wrap `io.ErrUnexpectedEOF`
+- Length cap exceeded → `"chunk %q length %d exceeds 16 MiB cap"`
 - CRC mismatch → `"chunk %q crc mismatch"`
 - Unknown critical chunk → `"unsupported critical chunk %q"`
 - Missing required chunk → `"missing required chunk %q"`
@@ -255,9 +268,10 @@ Each rejection produces a clear error:
 - Existing `TestContainerRoundtrip` adapted to the new layout.
 - New `TestContainerRejectsCorruption` covering each rejection path:
   bad magic, wrong version (v1, v3, v9 each), truncated mid-chunk,
-  CRC mismatch (one bit flipped in payload), unknown critical chunk,
-  unknown lowercase chunk (must accept), missing required chunk,
-  duplicate critical chunk, MFST not first.
+  CRC mismatch (one bit flipped in payload), length cap exceeded
+  (forge a non-DLTA chunk with length > 16 MiB), unknown critical
+  chunk, unknown lowercase chunk (must accept), missing required
+  chunk, duplicate critical chunk, MFST not first.
 - E2E synthetic round-trip (`e2e_test.go`) byte-exact-bin assertion
   remains the primary correctness gate. Format change is invisible
   to that test except for container size.
