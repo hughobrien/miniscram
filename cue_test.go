@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestParseCueAccepts(t *testing.T) {
@@ -141,5 +144,52 @@ func TestHashReaderMatchesHashFile(t *testing.T) {
 	}
 	if viaFile != viaReader {
 		t.Errorf("hashFile != hashReader")
+	}
+}
+
+func TestParseCueRejectsNonCueInput(t *testing.T) {
+	// 8 KiB of 0xFF, no newlines, no keywords — looks like a binary
+	// blob (e.g. a DVD .iso fed in by mistake).
+	blob := bytes.Repeat([]byte{0xFF}, 8*1024)
+	_, err := ParseCue(bytes.NewReader(blob))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, errNotACuesheet) {
+		t.Fatalf("expected errors.Is(err, errNotACuesheet), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not look like a cuesheet") {
+		t.Fatalf("expected friendly message, got %q", err.Error())
+	}
+}
+
+func TestParseCueRejectsRandomBinaryProperty(t *testing.T) {
+	// Random binary input ≥ 4 KiB with no cue keywords must always
+	// return the sentinel without panicking.
+	cueKeywords := []string{"FILE", "TRACK", "INDEX", "REM",
+		"PERFORMER", "TITLE", "CATALOG", "PREGAP"}
+	check := func(seed int64) bool {
+		r := rand.New(rand.NewSource(seed))
+		buf := make([]byte, 4*1024+r.Intn(4*1024))
+		r.Read(buf)
+		// Force-strip newlines and any accidental keyword to
+		// guarantee the sniff rejects.
+		for i, b := range buf {
+			if b == '\n' || b == '\r' {
+				buf[i] = 0
+			}
+		}
+		s := string(buf)
+		for _, kw := range cueKeywords {
+			if strings.Contains(s, kw) {
+				return true // skip seed; can't guarantee rejection
+			}
+		}
+		_, err := ParseCue(bytes.NewReader(buf))
+		return errors.Is(err, errNotACuesheet)
+	}
+	cfg := &quick.Config{MaxCount: 50}
+	if err := quick.Check(check, cfg); err != nil {
+		t.Fatal(err)
 	}
 }
