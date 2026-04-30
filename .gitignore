@@ -22,3 +22,6 @@ go.work.sum
 .DS_Store
 .idea/
 .vscode/
+
+# Local worktrees (created by `git worktree add .worktrees/...`)
+/.worktrees/
