@@ -189,6 +189,10 @@ func BuildEpsilonHat(
 		}
 
 		secBytes := sec[:]
+		if skipFirst >= len(sec) {
+			skipFirst -= len(sec)
+			continue
+		}
 		if skipFirst > 0 {
 			secBytes = secBytes[skipFirst:]
 			skipFirst = 0

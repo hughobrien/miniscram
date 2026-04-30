@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 )
@@ -91,6 +92,10 @@ func TestBuilderCleanRoundTrip(t *testing.T) {
 		{"mode1-neg-offset", 0x01, "MODE1/2352", -48},
 		{"mode1-pos-offset", 0x01, "MODE1/2352", 48},
 		{"mode2-neg-offset", 0x02, "MODE2/2352", -48},
+		{"mode1-neg-offset-one-sector", 0x01, "MODE1/2352", -SectorSize},
+		{"mode1-neg-offset-multi-sector", 0x01, "MODE1/2352", -2588},
+		{"mode1-neg-offset-max", 0x01, "MODE1/2352", -2 * SectorSize},
+		{"mode1-pos-offset-multi-sector", 0x01, "MODE1/2352", 2588},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bin, scram, params := synthDiscRaw(t, 100, tc.writeOffset, 10, tc.modeByte, tc.modeStr)
@@ -110,6 +115,24 @@ func TestBuilderCleanRoundTrip(t *testing.T) {
 			}
 			if !bytes.Equal(hat.Bytes(), scram) {
 				t.Fatal("ε̂ != scram")
+			}
+		})
+	}
+}
+
+func TestBuildEpsilonHatNoPanicAcrossOffsetRange(t *testing.T) {
+	offsets := []int{-4704, -3000, -2353, -2352, -2351, -1000, -48, 0, 48, 1000, 2351, 2352, 2353, 3000, 4704}
+	for _, off := range offsets {
+		off := off
+		t.Run(fmt.Sprintf("offset=%d", off), func(t *testing.T) {
+			bin, scram, params := synthDiscRaw(t, 100, off, 10, 0x01, "MODE1/2352")
+			var hat bytes.Buffer
+			_, _, _, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
+			if err != nil {
+				t.Fatalf("offset %d: %v", off, err)
+			}
+			if int64(hat.Len()) != params.ScramSize {
+				t.Fatalf("offset %d: ε̂ size %d != scramSize %d", off, hat.Len(), params.ScramSize)
 			}
 		})
 	}
