@@ -275,6 +275,54 @@ them without a clear motivating use case:
 
 ---
 
+## Theme E — Test infrastructure
+
+### E1. Expand property-test coverage
+
+**Goal:** Lean into `testing/quick`-style randomized property tests
+wherever the codebase has a clean invariant. They catch bugs that
+example-based fixtures miss because the input space is too large to
+enumerate, and they document the invariant in a self-checking way.
+
+**Candidates already visible in the code:**
+
+- `BCDMSFToLBA` / `LBAToBCDMSF` — round-trip on the addressable LBA
+  range (`[-150, 99·60·75 - 150)`), assert `BCDMSFToLBA(LBAToBCDMSF(lba)) == lba`.
+- `Scramble` (in `ecma130.go`) — XOR with a fixed table is its own
+  inverse; assert `Scramble(Scramble(buf)) == buf` for arbitrary
+  2352-byte buffers.
+- `ScramOffset` / `TotalLBAs` (in `layout.go`) — algebraic identity
+  across arbitrary `(scramSize, writeOffset)` pairs satisfying the
+  precondition.
+- `WriteContainer` / `ReadContainer` round-trip — given an arbitrary
+  manifest + delta payload, write then read should reproduce both
+  byte-for-byte.
+- `BuildEpsilonHat` lockstep — for an arbitrary `BuildParams`,
+  building twice produces identical bytes (idempotence on the same
+  inputs).
+- `IterateDeltaRecords` — for any structurally valid delta payload,
+  iterating and re-encoding yields identical bytes.
+
+**Acceptance:**
+
+- [ ] At least one property test per candidate above (or a written
+      reason in the task entry for why a given candidate isn't
+      property-test-friendly after all).
+- [ ] Property tests run as part of `go test ./...` with a default
+      `quick.Config{MaxCount: 1000}` or similar — no separate
+      build tag, no opt-in.
+- [ ] Where a property test catches a real bug while being written,
+      the bug fix and the test land in the same commit.
+
+**Effort:** Iterative. ~30 min per property test once the pattern is
+established. Can be picked up in slices.
+
+**Depends on:** nothing.
+
+**Open questions:** none — pick a candidate and write the test.
+
+---
+
 ## How to pick up a task
 
 Each entry is sized to be picked up cold. The recommended workflow:
