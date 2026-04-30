@@ -7,6 +7,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 )
 
 // formatHumanInspect produces the default `miniscram inspect` text
@@ -24,7 +25,7 @@ func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, f
 	fmt.Fprintf(&b, "container:  %s v%d\n", magic, version)
 	b.WriteString("manifest:\n")
 	fmt.Fprintf(&b, "  tool_version:           %s\n", m.ToolVersion)
-	fmt.Fprintf(&b, "  created_utc:            %s\n", m.CreatedUTC)
+	fmt.Fprintf(&b, "  created_utc:            %s\n", time.Unix(m.CreatedUnix, 0).UTC().Format(time.RFC3339))
 	fmt.Fprintf(&b, "  write_offset_bytes:     %d\n", m.WriteOffsetBytes)
 	fmt.Fprintf(&b, "  leadin_lba:             %d\n", m.LeadinLBA)
 	fmt.Fprintf(&b, "  scram.size:             %d\n", m.Scram.Size)

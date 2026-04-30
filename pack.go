@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -143,8 +142,8 @@ func Pack(opts PackOptions, r Reporter) error {
 
 	// 7. assemble manifest and write container.
 	m := &Manifest{
-		ToolVersion:      toolVersion + " (" + runtime.Version() + ")",
-		CreatedUTC:       time.Now().UTC().Format(time.RFC3339),
+		ToolVersion:      toolVersion,
+		CreatedUnix:      time.Now().UTC().Unix(),
 		WriteOffsetBytes: writeOffsetBytes,
 		LeadinLBA:        opts.LeadinLBA,
 		Scram: ScramInfo{

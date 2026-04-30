@@ -13,7 +13,7 @@ import (
 func TestContainerRoundtrip(t *testing.T) {
 	m := &Manifest{
 		ToolVersion:      "miniscram 1.0.0-test",
-		CreatedUTC:       "2026-04-27T17:00:00Z",
+		CreatedUnix:      1714435200,
 		WriteOffsetBytes: -48,
 		LeadinLBA:        -45150,
 		Scram: ScramInfo{
@@ -34,7 +34,7 @@ func TestContainerRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotM.ToolVersion != m.ToolVersion || gotM.CreatedUTC != m.CreatedUTC ||
+	if gotM.ToolVersion != m.ToolVersion || gotM.CreatedUnix != m.CreatedUnix ||
 		gotM.WriteOffsetBytes != m.WriteOffsetBytes || gotM.LeadinLBA != m.LeadinLBA {
 		t.Fatalf("manifest scalars mismatch: got %+v want %+v", gotM, m)
 	}
@@ -63,7 +63,7 @@ func TestContainerRejectsInvalid(t *testing.T) {
 func TestContainerDeltaIsZlibFramed(t *testing.T) {
 	m := &Manifest{
 		ToolVersion: "miniscram-test",
-		CreatedUTC:  "2026-04-28T00:00:00Z",
+		CreatedUnix: 1714435200,
 		Scram:       ScramInfo{Size: 0, Hashes: FileHashes{MD5: "0", SHA1: "0", SHA256: "0"}},
 		Tracks: []Track{{
 			Number: 1, Mode: "MODE1/2352", FirstLBA: 0, Size: 0, Filename: "t.bin",
@@ -93,7 +93,7 @@ func TestContainerDeltaIsZlibFramed(t *testing.T) {
 }
 
 func TestContainerRejectsPlaintextDelta(t *testing.T) {
-	manifest := []byte(`{"tool_version":"x","created_utc":"x","write_offset_bytes":0,"leadin_lba":0,` +
+	manifest := []byte(`{"tool_version":"x","created_unix":0,"write_offset_bytes":0,"leadin_lba":0,` +
 		`"scram":{"size":0,"hashes":{"md5":"0","sha1":"0","sha256":"0"}},` +
 		`"tracks":[{"number":1,"mode":"MODE1/2352","first_lba":0,"filename":"t.bin","size":0,` +
 		`"hashes":{"md5":"0","sha1":"0","sha256":"0"}}]}`)
