@@ -3,18 +3,12 @@
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](./LICENSE)
 [![Release](https://img.shields.io/github/v/release/hughobrien/miniscram?display_name=tag&sort=semver)](https://github.com/hughobrien/miniscram/releases)
 
-Compactly preserve scrambled CD-ROM dumps. miniscram stores a
-[Redumper](https://github.com/superg/redumper) `.scram` file as a small
-structured delta against the unscrambled `.bin`, so you keep the
-original byte-for-byte but only store the parts that can't be
-recomputed from the cuesheet and bins.
-
-Inspired by [Hauenstein, *"Compact Preservation of Scrambled CD-ROM
-Data"*](https://doi.org/10.5121/ijcsit.2022.14401) (IJCSIT, August
-2022) — same core idea (delta against an unscrambled-bin prediction),
-but with miniscram's own container format and override-record delta
-encoding rather than the paper's xdelta3-over-DiscImageCreator
-approach. Specialised for Redumper output.
+Shrink [Redumper](https://github.com/superg/redumper) `.scram` files
+from ~800 MB to between a few hundred bytes and a couple of MB —
+without losing a byte. miniscram stores only the delta between the
+original `.scram` and a scramble predicted from the unscrambled
+`.bin`. Round-trip byte-equality is verified at pack time; the
+source `.scram` is only deleted after `unpack` reproduces it exactly.
 
 ## Install
 
