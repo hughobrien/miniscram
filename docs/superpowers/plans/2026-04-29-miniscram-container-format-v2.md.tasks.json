@@ -4,58 +4,58 @@
     {
       "id": 1,
       "subject": "Task 1: chunk-framing primitives (chunks.go)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Implement writeChunk/readChunk with CRC32 over (type || payload) and a 16 MiB length sanity cap on every non-DLTA chunk.\n\n**Files:** chunks.go (new), chunks_test.go (new)\n\n**Verify:** `go test -run TestChunk -v ./...`\n\n```json:metadata\n{\"files\": [\"chunks.go\", \"chunks_test.go\"], \"verifyCommand\": \"go test -run TestChunk -v ./...\", \"acceptanceCriteria\": [\"writeChunk emits correct framing\", \"readChunk verifies CRC and enforces length cap\", \"round-trip preserves bytes\", \"bad-CRC and truncation errors are clear\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: Manifest CreatedUTC → CreatedUnix int64; drop runtime suffix",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** Migrate Manifest.CreatedUTC string → CreatedUnix int64. Drop the runtime.Version() suffix from tool_version. JSON path keeps working until Task 6 replaces it.\n\n**Files:** manifest.go, pack.go, inspect.go, manifest_test.go, inspect_test.go\n\n**Verify:** `go build ./... && go test -count=1 ./...`\n\n```json:metadata\n{\"files\": [\"manifest.go\", \"pack.go\", \"inspect.go\", \"manifest_test.go\", \"inspect_test.go\"], \"verifyCommand\": \"go build ./... && go test -count=1 ./...\", \"acceptanceCriteria\": [\"CreatedUnix int64 replaces CreatedUTC string\", \"runtime.Version() suffix removed from tool_version\", \"all tests still pass\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: MFST payload codec",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [2],
       "description": "**Goal:** Implement encodeMFSTPayload and decodeMFSTPayload per spec §MFST.\n\n**Files:** chunks.go, chunks_test.go\n\n**Verify:** `go test -run TestMFST -v ./...`\n\n```json:metadata\n{\"files\": [\"chunks.go\", \"chunks_test.go\"], \"verifyCommand\": \"go test -run TestMFST -v ./...\", \"acceptanceCriteria\": [\"round-trip preserves all 5 MFST fields\", \"truncated payloads return ErrUnexpectedEOF\"]}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: TRKS payload codec",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [3],
       "description": "**Goal:** Implement encodeTRKSPayload / decodeTRKSPayload per spec §TRKS.\n\n**Files:** chunks.go, chunks_test.go\n\n**Verify:** `go test -run TestTRKS -v ./...`\n\n```json:metadata\n{\"files\": [\"chunks.go\", \"chunks_test.go\"], \"verifyCommand\": \"go test -run TestTRKS -v ./...\", \"acceptanceCriteria\": [\"2-track round-trip preserves all fields\", \"Hashes left zero (populated by HASH codec)\"]}\n```"
     },
     {
       "id": 5,
       "subject": "Task 5: HASH payload codec",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [4],
       "description": "**Goal:** Implement encodeHASHPayload and decodeHASHPayload per spec §HASH. Decoder mutates m.Tracks (already sized by Task 4's decoder).\n\n**Files:** chunks.go, chunks_test.go\n\n**Verify:** `go test -run TestHASH -v ./...`\n\n```json:metadata\n{\"files\": [\"chunks.go\", \"chunks_test.go\"], \"verifyCommand\": \"go test -run TestHASH -v ./...\", \"acceptanceCriteria\": [\"round-trip preserves all hashes\", \"unknown algo rejected\", \"bad digest_len rejected\", \"target out-of-range rejected\"]}\n```"
     },
     {
       "id": 6,
       "subject": "Task 6: WriteContainer / ReadContainer chunk-based rewrite",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [5],
       "description": "**Goal:** Replace WriteContainer/ReadContainer with chunk-based implementations. Drop the JSON encoding path entirely.\n\n**Files:** manifest.go, manifest_test.go\n\n**Verify:** `go test -count=1 ./...`\n\n```json:metadata\n{\"files\": [\"manifest.go\", \"manifest_test.go\"], \"verifyCommand\": \"go test -count=1 ./...\", \"acceptanceCriteria\": [\"chunk-based WriteContainer emits 4 chunks\", \"chunk-based ReadContainer validates structure\", \"all existing tests pass\"]}\n```"
     },
     {
       "id": 7,
       "subject": "Task 7: Corruption rejection tests",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [6],
       "description": "**Goal:** Cover every rejection path enumerated in spec §Error handling with discrete sub-tests.\n\n**Files:** manifest_test.go\n\n**Verify:** `go test -run TestContainerRejectsCorruption -v ./...`\n\n```json:metadata\n{\"files\": [\"manifest_test.go\"], \"verifyCommand\": \"go test -run TestContainerRejectsCorruption -v ./...\", \"acceptanceCriteria\": [\"15 sub-tests covering every named rejection path\"]}\n```"
     },
     {
       "id": 8,
       "subject": "Task 8: Refresh e2e_redump container-size bounds for v2",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [7],
       "description": "**Goal:** Refresh per-fixture container-size bounds in e2e_redump_test.go to reflect v2 actual sizes with ~5% headroom.\n\n**Files:** e2e_redump_test.go\n\n**Verify:** `go test -tags redump_data -count=1 ./...`\n\n```json:metadata\n{\"files\": [\"e2e_redump_test.go\"], \"verifyCommand\": \"go test -tags redump_data -count=1 ./...\", \"acceptanceCriteria\": [\"per-fixture bounds match v2 actual sizes\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-04-29T03:50:00Z"
+  "lastUpdated": "2026-04-30T04:30:00Z"
 }
