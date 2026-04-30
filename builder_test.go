@@ -97,7 +97,7 @@ func TestBuilderCleanRoundTrip(t *testing.T) {
 			var hat bytes.Buffer
 			var deltaBuf bytes.Buffer
 			enc := NewDeltaEncoder(&deltaBuf)
-			errs, mismatched, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), enc.Append)
+			errs, mismatched, _, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), enc.Append)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +119,7 @@ func TestBuilderDetectsErrorSector(t *testing.T) {
 	bin, scram, params := synthDiscRaw(t, 100, 0, 10, 0x01, "MODE1/2352")
 	scram[(150+2)*SectorSize+200] ^= 0xFF
 	var hat bytes.Buffer
-	errs, mismatched, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
+	errs, mismatched, _, err := BuildEpsilonHat(&hat, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestBuilderRefusesAtTooManyMismatches(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		scram[(150+i)*SectorSize+50] ^= 0xFF
 	}
-	errLBAs, mismatched, err := BuildEpsilonHat(io.Discard, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
+	errLBAs, mismatched, _, err := BuildEpsilonHat(io.Discard, params, bytes.NewReader(bin), bytes.NewReader(scram), nil)
 	if err != nil {
 		t.Fatal("BuildEpsilonHat itself should not error")
 	}

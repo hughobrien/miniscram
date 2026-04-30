@@ -124,7 +124,7 @@ func Pack(opts PackOptions, r Reporter) error {
 	// 6. build the scram prediction (ε̂ in Hauenstein's notation) plus
 	// delta in one pass over the multi-bin stream.
 	st = r.Step("building scram prediction + delta")
-	hatPath, deltaPath, errSectors, deltaSize, err := buildHatAndDelta(opts, resolved.Files, tracks, scramSize, writeOffsetBytes, binSectors)
+	hatPath, deltaPath, errSectors, deltaSize, passThroughs, err := buildHatAndDelta(opts, resolved.Files, tracks, scramSize, writeOffsetBytes, binSectors)
 	if err != nil {
 		st.Fail(err)
 		return err
@@ -139,6 +139,7 @@ func Pack(opts PackOptions, r Reporter) error {
 	if err := os.Remove(hatPath); err == nil {
 		hatRemoved = true
 	}
+	_ = passThroughs // passThroughs surfaced in Task 6's reporter change
 	st.Done("%d override(s), delta %d bytes", len(errSectors), deltaSize)
 
 	// 7. assemble manifest and write container.
@@ -480,17 +481,17 @@ func checkConstantOffset(scramPath string, scramSize int64, leadinLBA int32) err
 // buildHatAndDelta produces the ε̂ temp file and the delta temp file
 // in one pass. Returns paths to both plus the override LBA list and
 // the delta payload size in bytes.
-func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, scramSize int64, writeOffsetBytes int, binSectors int32) (string, string, []int32, int64, error) {
+func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, scramSize int64, writeOffsetBytes int, binSectors int32) (string, string, []int32, int64, int, error) {
 	hatFile, err := os.CreateTemp(filepath.Dir(opts.OutputPath), "miniscram-hat-*")
 	if err != nil {
-		return "", "", nil, 0, err
+		return "", "", nil, 0, 0, err
 	}
 	hatPath := hatFile.Name()
 	deltaFile, err := os.CreateTemp(filepath.Dir(opts.OutputPath), "miniscram-delta-*")
 	if err != nil {
 		hatFile.Close()
 		os.Remove(hatPath)
-		return "", "", nil, 0, err
+		return "", "", nil, 0, 0, err
 	}
 	deltaPath := deltaFile.Name()
 
@@ -500,7 +501,7 @@ func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, sc
 		deltaFile.Close()
 		os.Remove(hatPath)
 		os.Remove(deltaPath)
-		return "", "", nil, 0, err
+		return "", "", nil, 0, 0, err
 	}
 	defer closeBin()
 	scramFile, err := os.Open(opts.ScramPath)
@@ -509,7 +510,7 @@ func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, sc
 		deltaFile.Close()
 		os.Remove(hatPath)
 		os.Remove(deltaPath)
-		return "", "", nil, 0, err
+		return "", "", nil, 0, 0, err
 	}
 	defer scramFile.Close()
 
@@ -522,7 +523,7 @@ func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, sc
 		Tracks:           tracks,
 	}
 	enc := NewDeltaEncoder(deltaFile)
-	errs, mismatched, err := BuildEpsilonHat(hatFile, params, binReader, scramFile, enc.Append)
+	errs, mismatched, passThroughs, err := BuildEpsilonHat(hatFile, params, binReader, scramFile, enc.Append)
 	hatFile.Sync()
 	deltaFile.Sync()
 	hatFile.Close()
@@ -533,19 +534,19 @@ func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, sc
 	if err != nil {
 		os.Remove(hatPath)
 		os.Remove(deltaPath)
-		return "", "", nil, 0, err
+		return "", "", nil, 0, 0, err
 	}
 	totalDisc := TotalLBAs(scramSize, writeOffsetBytes)
 	if err := CheckLayoutMismatch(errs, mismatched, totalDisc); err != nil {
 		os.Remove(hatPath)
 		os.Remove(deltaPath)
-		return "", "", nil, 0, err
+		return "", "", nil, 0, 0, err
 	}
 	deltaInfo, err := os.Stat(deltaPath)
 	if err != nil {
 		os.Remove(hatPath)
 		os.Remove(deltaPath)
-		return "", "", nil, 0, err
+		return "", "", nil, 0, 0, err
 	}
-	return hatPath, deltaPath, errs, deltaInfo.Size(), nil
+	return hatPath, deltaPath, errs, deltaInfo.Size(), passThroughs, nil
 }
