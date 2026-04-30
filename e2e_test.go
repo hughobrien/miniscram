@@ -65,9 +65,9 @@ func TestE2EFailSectorRoundTrip(t *testing.T) {
 	if !strings.Contains(repOut, "pass-through") {
 		t.Fatalf("reporter output contains no 'pass-through' mention:\n%s", repOut)
 	}
-	// The message format is "%d pass-through(s)" — ensure count ≥ 1, i.e.
-	// not "0 pass-through(s)".
-	if strings.Contains(repOut, "0 pass-through(s)") {
+	// The message format is "%d override(s), %d pass-through(s), delta %d bytes".
+	// Anchor on surrounding delimiters to ensure count ≥ 1, not "0 pass-through(s)".
+	if strings.Contains(repOut, ", 0 pass-through(s),") {
 		t.Fatalf("expected ≥1 pass-through but reporter shows 0:\n%s", repOut)
 	}
 
