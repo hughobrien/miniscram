@@ -89,6 +89,76 @@ func decodeMFSTPayload(payload []byte) (*Manifest, error) {
 	}, nil
 }
 
+// encodeTRKSPayload emits the TRKS chunk payload per spec §"TRKS".
+// Per-track Hashes are emitted in the HASH chunk, not here.
+func encodeTRKSPayload(tracks []Track) []byte {
+	var b []byte
+	b = binary.BigEndian.AppendUint16(b, uint16(len(tracks)))
+	for _, t := range tracks {
+		mode := []byte(t.Mode)
+		filename := []byte(t.Filename)
+		b = append(b, byte(t.Number), byte(len(mode)))
+		b = append(b, mode...)
+		b = binary.BigEndian.AppendUint32(b, uint32(t.FirstLBA))
+		b = binary.BigEndian.AppendUint64(b, uint64(t.Size))
+		b = binary.BigEndian.AppendUint16(b, uint16(len(filename)))
+		b = append(b, filename...)
+	}
+	return b
+}
+
+// decodeTRKSPayload inverts encodeTRKSPayload. Per-track Hashes are
+// left zero; HASH chunk populates them.
+func decodeTRKSPayload(payload []byte) ([]Track, error) {
+	r := payloadReader{buf: payload}
+	count, err := r.uint16()
+	if err != nil {
+		return nil, fmt.Errorf("TRKS count: %w", err)
+	}
+	tracks := make([]Track, count)
+	for i := range tracks {
+		num, err := r.uint8()
+		if err != nil {
+			return nil, fmt.Errorf("TRKS track[%d] number: %w", i, err)
+		}
+		modeLen, err := r.uint8()
+		if err != nil {
+			return nil, fmt.Errorf("TRKS track[%d] mode_len: %w", i, err)
+		}
+		mode, err := r.bytes(int(modeLen))
+		if err != nil {
+			return nil, fmt.Errorf("TRKS track[%d] mode: %w", i, err)
+		}
+		firstLBA, err := r.uint32()
+		if err != nil {
+			return nil, fmt.Errorf("TRKS track[%d] first_lba: %w", i, err)
+		}
+		size, err := r.uint64()
+		if err != nil {
+			return nil, fmt.Errorf("TRKS track[%d] size: %w", i, err)
+		}
+		fnLen, err := r.uint16()
+		if err != nil {
+			return nil, fmt.Errorf("TRKS track[%d] filename_len: %w", i, err)
+		}
+		fn, err := r.bytes(int(fnLen))
+		if err != nil {
+			return nil, fmt.Errorf("TRKS track[%d] filename: %w", i, err)
+		}
+		tracks[i] = Track{
+			Number:   int(num),
+			Mode:     string(mode),
+			FirstLBA: int32(firstLBA),
+			Size:     int64(size),
+			Filename: string(fn),
+		}
+	}
+	if !r.eof() {
+		return nil, fmt.Errorf("TRKS: %d trailing bytes after %d tracks", len(payload)-r.pos, count)
+	}
+	return tracks, nil
+}
+
 // payloadReader is a thin cursor over a byte slice that returns
 // io.ErrUnexpectedEOF on any short read, with helper methods for
 // the integer widths the codecs use.
