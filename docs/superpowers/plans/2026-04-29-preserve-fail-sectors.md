@@ -198,7 +198,8 @@ func oracleDescramble(scrambled []byte, lba *int32) (binForm []byte, verdict boo
 	copy(buf, scrambled)
 
 	// is_zeroed → return false, leave scrambled bytes (bin == scram).
-	if bytes.Count(buf, []byte{0}) == len(buf) || len(buf) < SyncLen+3 {
+	// SyncLen+4 = 16 = sizeof(Sector::sync)+sizeof(Sector::header).
+	if bytes.Count(buf, []byte{0}) == len(buf) || len(buf) < SyncLen+4 {
 		return buf, false
 	}
 
@@ -225,7 +226,12 @@ func oracleDescramble(scrambled []byte, lba *int32) (binForm []byte, verdict boo
 			return buf, true
 		case 0:
 			// Mode 0 with zeroed user-data ⇒ pass.
-			ud := buf[16 : 16+2048]
+			// MODE0_DATA_SIZE = 2336 (cdrom.ixx:17).
+			end := 16 + 2336
+			if end > len(buf) {
+				end = len(buf)
+			}
+			ud := buf[16:end]
 			if bytes.Count(ud, []byte{0}) == len(ud) {
 				return buf, true
 			}
@@ -433,10 +439,12 @@ Add at the end of the file (or alongside existing `Scramble`):
 // equals scram for this sector (redumper passed it through; we do
 // likewise).
 //
-// Decision tree:
+// Decision tree (MSF check precedes sync check, matching redumper —
+// fixture 01_invalid_sync.0.pass has invalid sync but matching MSF
+// and is classified pass via this branch):
 //   1. all-zero bin sector              → false (case 46: zeroed_sector)
-//   2. bin[0:SyncLen] != Sync           → false (fail-type-1: invalid sync)
-//   3. MSF in bin matches expectedLBA   → true  (strong MSF check)
+//   2. MSF in bin matches expectedLBA   → true  (strong MSF check, precedes sync)
+//   3. bin[0:SyncLen] != Sync           → false (fail-type-1: invalid sync)
 //   4. mode byte ∈ {1, 2}               → true  (sync+mode check)
 //   5. mode == 0 && user-data zeroed    → true  (sync+mode-0-zeroed)
 //   6. otherwise                        → false (fail-type-2)
@@ -450,20 +458,20 @@ func classifyBinSector(bin []byte, expectedLBA int32) bool {
 	if isZeroed(bin) {
 		return false
 	}
-	if !bytes.Equal(bin[:SyncLen], Sync[:]) {
-		return false
-	}
 	if BCDMSFToLBA([3]byte{bin[12], bin[13], bin[14]}) == expectedLBA {
 		return true
+	}
+	if !bytes.Equal(bin[:SyncLen], Sync[:]) {
+		return false
 	}
 	switch bin[15] {
 	case 1, 2:
 		return true
 	case 0:
-		// Mode 0 with zeroed user-data: bytes [16, 16+2048)
-		// matches redumper's s->mode2.user_data slice
-		// (CD-ROM Mode 2 Form 0/1: 2048-byte user-data field).
-		return isZeroed(bin[16 : 16+2048])
+		// Mode 0 with zeroed user-data: bytes [16, SectorSize).
+		// Matches redumper's MODE0_DATA_SIZE = 2336 (cdrom.ixx:17),
+		// the full Mode 0 data area after sync (12) + header (4).
+		return isZeroed(bin[16:SectorSize])
 	}
 	return false
 }

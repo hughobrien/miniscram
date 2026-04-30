@@ -77,9 +77,9 @@ func classifyBinSector(bin []byte, expectedLBA int32) bool
 Helper `isZeroed(buf []byte) bool` is a one-liner using `bytes.IndexFunc`
 or a hand-rolled loop. The classifier is pure, no allocations.
 
-The user-data slice in step 5 is `bin[16 : 16+2048]` — matches
-redumper's `s->mode2.user_data` (the 2048-byte user-data field per
-ECMA-130, immediately after the 16-byte sync+header).
+The user-data slice in step 5 is `bin[16:SectorSize]` — 2336 bytes,
+matching redumper's `MODE0_DATA_SIZE` (`cdrom.ixx:17`), the full
+Mode 0 data area immediately after the 16-byte sync+header.
 
 ### Integration in BuildEpsilonHat
 
