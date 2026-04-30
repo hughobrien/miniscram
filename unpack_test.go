@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
+	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
@@ -50,16 +53,59 @@ func TestUnpackRejectsTrackFileSizeMismatch(t *testing.T) {
 	}
 }
 
-// tamperContainerHash corrupts the first occurrence of target in the container file.
-func tamperContainerHash(t *testing.T, containerPath, target string) {
+// tamperContainerHash flips one byte in the raw digest matching the
+// hex-encoded target, then re-frames the HASH chunk with a fresh CRC
+// so the chunk layer accepts it and the hash-mismatch check runs.
+func tamperContainerHash(t *testing.T, containerPath, hexTarget string) {
 	t.Helper()
-	data, _ := os.ReadFile(containerPath)
-	idx := bytes.Index(data, []byte(target))
-	if idx < 0 {
-		t.Fatalf("hash %q not in container", target)
+	rawTarget, err := hex.DecodeString(hexTarget)
+	if err != nil {
+		t.Fatalf("decoding hex target %q: %v", hexTarget, err)
 	}
-	data[idx] ^= 1
+	data, err := os.ReadFile(containerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashStart, payloadOff, payloadLen, ok := findHASHChunk(data)
+	if !ok {
+		t.Fatal("HASH chunk not found in container")
+	}
+	payload := data[payloadOff : payloadOff+payloadLen]
+	idx := bytes.Index(payload, rawTarget)
+	if idx < 0 {
+		t.Fatalf("hash %q (raw) not in HASH chunk", hexTarget)
+	}
+	payload[idx] ^= 1
+	// Recompute CRC over (tag || payload) so the chunk layer accepts it.
+	h := crc32.New(crc32Table)
+	h.Write(data[hashStart : hashStart+4])
+	h.Write(payload)
+	binary.BigEndian.PutUint32(data[payloadOff+payloadLen:payloadOff+payloadLen+4], h.Sum32())
 	os.WriteFile(containerPath, data, 0o644)
+}
+
+// findHASHChunk locates the HASH chunk in a v2 container.
+// Returns (chunkStart, payloadStart, payloadLen, ok). chunkStart is the
+// position of the 4-byte tag; payloadStart is just past tag+length;
+// payloadLen is the parsed length.
+func findHASHChunk(data []byte) (chunkStart, payloadOff, payloadLen int, ok bool) {
+	if len(data) < fileHeaderSize {
+		return 0, 0, 0, false
+	}
+	pos := fileHeaderSize
+	for pos+8 <= len(data) {
+		tag := data[pos : pos+4]
+		length := int(binary.BigEndian.Uint32(data[pos+4 : pos+8]))
+		payloadStart := pos + 8
+		if payloadStart+length+4 > len(data) {
+			return 0, 0, 0, false
+		}
+		if string(tag) == "HASH" {
+			return pos, payloadStart, length, true
+		}
+		pos = payloadStart + length + 4 // skip payload + CRC
+	}
+	return 0, 0, 0, false
 }
 
 func TestUnpackVerifiesHashes(t *testing.T) {
