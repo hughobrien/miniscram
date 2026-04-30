@@ -9,10 +9,19 @@ Container version byte is **0x02**. v1 is not readable by this build.
 Any other version byte produces a hard error pointing the user at the
 source repo to build a matching binary.
 
-This redesign folds in the "drop the in-header scrambler-table SHA"
-audit (the first commit on this branch). That intermediate shape —
-slim header but still JSON manifest — was never released; v2 is the
-single shipping increment from v1.
+This redesign folds in two changes that share a version bump:
+
+- The "drop the in-header scrambler-table SHA" audit (the first
+  format-touching commit on this branch).
+- The classifier-gated prediction landed on `feat/preserve-fail-sectors`
+  — bin sectors that redumper passed through (`.fail` cases under
+  `redumper/tests/unscramble/`) are no longer re-scrambled by the
+  predictor, which changes the override-record byte offsets and
+  therefore breaks wire compat with v1.
+
+Neither intermediate shape ever ships in a release; v2 is the single
+shipping increment from v1, covering both wire breaks under one
+version byte.
 
 ---
 
