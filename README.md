@@ -87,25 +87,6 @@ malformed inputs.
 Four real-disc fixtures exercise different parts of the pipeline.
 Each is picked for what it stresses, not because of the game.
 
-### Half-Life GOTY — mixed-mode hybrid CD
-
-- **Copy protection:** none (`Error Count: 0` per the
-  [redump entry](http://redump.org/disc/25966/)).
-- **Why this disc:** 1 Mode 1 data track + 27 Red Book audio tracks.
-  The audio dominates the disc surface and exercises the audio-bypass
-  path of the scrambler (audio sectors are not descrambled — only the
-  data track is).
-
-```
-$ ls -lh HALFLIFE.scram HALFLIFE.miniscram
--rw-rw-r-- 1 hugh hugh  332K HALFLIFE.miniscram
--rwxr--r-- 1 hugh hugh  766M HALFLIFE.scram
-```
-
-766 MB → 332 KB (~2400×). Lead-in noise and per-track boundary
-sectors account for most of the delta; audio sectors themselves
-bypass the scrambler and don't contribute overrides.
-
 ### Freelancer — SafeDisc 2.70.030
 
 - **Copy protection:** SafeDisc 2.70.030 + Macrovision Security
@@ -118,8 +99,8 @@ bypass the scrambler and don't contribute overrides.
   verbatim.
 
 Full end-to-end demo: `sha256sum` the original, pack (which consumes
-the `.scram`), inspect the container, verify it rebuilds, unpack to
-restore, then `sha256sum` again to prove byte-equality.
+the `.scram`), inspect the container, unpack to restore, then
+`sha256sum` again to prove byte-equality.
 
 ```
 $ ls FL_*
@@ -176,15 +157,6 @@ tracks:
 delta:
   override_records:       45927
 
-$ miniscram verify FL_v1.miniscram
-reading manifest ... OK ok
-running scramble-table self-test ... OK ok
-reading container FL_v1.miniscram ... OK delta 7084781 bytes
-verifying bin hashes ... OK all tracks match
-building scram prediction ... OK ok
-applying delta ... OK 7084781 byte(s) of delta applied
-verifying scram hashes ... OK all three match
-
 $ miniscram unpack FL_v1.miniscram
 running scramble-table self-test ... OK ok
 reading container FL_v1.miniscram ... OK delta 7084781 bytes
@@ -238,6 +210,25 @@ $ ls -lh MP2_Play.scram MP2_Play.miniscram
 SecuROM doesn't corrupt main-channel sectors the way SafeDisc does;
 the protection bytes that matter sit in `MP2_Play_logs.zip`, not in
 the `.scram`.
+
+### Half-Life GOTY — mixed-mode hybrid CD
+
+- **Copy protection:** none (`Error Count: 0` per the
+  [redump entry](http://redump.org/disc/25966/)).
+- **Why this disc:** 1 Mode 1 data track + 27 Red Book audio tracks.
+  The audio dominates the disc surface and exercises the audio-bypass
+  path of the scrambler (audio sectors are not descrambled — only the
+  data track is).
+
+```
+$ ls -lh HALFLIFE.scram HALFLIFE.miniscram
+-rw-rw-r-- 1 hugh hugh  332K HALFLIFE.miniscram
+-rwxr--r-- 1 hugh hugh  766M HALFLIFE.scram
+```
+
+766 MB → 332 KB (~2400×). Lead-in noise and per-track boundary
+sectors account for most of the delta; audio sectors themselves
+bypass the scrambler and don't contribute overrides.
 
 ### Deus Ex v1002f — clean Mode 1 baseline
 
