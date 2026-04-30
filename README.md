@@ -145,6 +145,26 @@ $ ls -lh HALFLIFE.scram HALFLIFE.miniscram
 sectors account for most of the delta; audio sectors themselves
 bypass the scrambler and don't contribute overrides.
 
+### Final Fantasy VIII (PSX) — Mode 2 with a multi-sector write offset
+
+- **Copy protection:** none per the
+  [redump entry](http://redump.org/disc/69/) (`Error Count: 0`).
+- **Why this disc:** a Sony PlayStation dump — `MODE2/2352` data
+  track, `XA` form sectors, and a write offset of −2588 bytes
+  (one whole sector plus 236 more). PSX masters routinely produce
+  offsets larger than a single sector, exercising the builder's
+  multi-sector skipFirst drain.
+
+```
+$ ls -lh SLUS-00892.scram SLUS-00892.miniscram
+-rw-r--r-- 1 hugh users 206K SLUS-00892.miniscram
+-rw-r--r-- 1 hugh users 800M SLUS-00892.scram
+```
+
+800 MB → 206 KB (~3970×). 2478 disagreeing sectors → 39875 override
+records, 5.7 MB uncompressed delta; zlib brings that down to ~200 KB
+on disk.
+
 ### Deus Ex v1002f — clean Mode 1 baseline
 
 - **Copy protection:** none per the
@@ -166,9 +186,10 @@ TRKS / HASH / DLTA chunks. 856 MB → 329 bytes — about 2.7 million×.
 
 ### Things that should work, untested on real-disc fixtures
 
-- **Mode 2/2352 data tracks** (CD-i, VCD, PSX-XA Form 2). The
-  scrambler treats Mode 1 and Mode 2 identically; covered by
-  synthetic round-trip tests but no real-disc dataset yet.
+- **Mode 2/2352 data tracks** (CD-i, VCD). The scrambler treats Mode
+  1 and Mode 2 identically; covered by synthetic round-trip tests
+  and the Final Fantasy VIII demo above (`MODE2/2352`), but no
+  CD-i / VCD dataset has been exercised end-to-end yet.
 - **Audio-only discs.** The disc round-trips, but ~150 pregap
   sectors get baked into the delta as overrides (~350 KiB extra
   noise) because pregap is synthesised as Mode 1 zero sectors.
