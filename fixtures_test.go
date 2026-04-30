@@ -184,6 +184,45 @@ func mustHashFile(t *testing.T, path string) FileHashes {
 	}
 }
 
+// synthDiscWithFailSector returns a synthetic single-track Mode 1 disc whose
+// data track contains one "fail" sector at failOffset (0-based sector index
+// from track start, i.e. LBA = failOffset). The fail sector has a valid
+// scrambled sync but an invalid mode byte (0xF7), so classifyBinSector
+// returns false and the packer passes it through unchanged — the sector
+// appears as identical bytes in both .bin and .scram.
+//
+// Used by TestE2EFailSectorRoundTrip to verify the pass-through path
+// round-trips byte-for-byte.
+func synthDiscWithFailSector(t *testing.T, mainSectors, leadoutSectors, failOffset int) SynthDisc {
+	t.Helper()
+	disc := synthDisc(t, SynthOpts{
+		MainSectors:    mainSectors,
+		LeadoutSectors: int32(leadoutSectors),
+	})
+
+	// Build the fail sector: valid sync, deterministic non-zero noise
+	// elsewhere, invalid mode byte 0xF7.
+	var failSec [SectorSize]byte
+	copy(failSec[:SyncLen], Sync[:])
+	for i := SyncLen; i < SectorSize; i++ {
+		failSec[i] = byte(i*7 + 13)
+	}
+	failSec[15] = 0xF7 // invalid mode — classifier returns false
+
+	// Overwrite bin at failOffset.
+	binOff := failOffset * SectorSize
+	copy(disc.Bin[binOff:binOff+SectorSize], failSec[:])
+
+	// Overwrite scram at the corresponding position. The synthetic scram
+	// starts at LBAPregapStart (-150) with zero write offset; for a data
+	// LBA = failOffset the scram index is (failOffset - LBAPregapStart).
+	scramIdx := failOffset - int(LBAPregapStart) // failOffset + 150
+	scramOff := scramIdx * SectorSize
+	copy(disc.Scram[scramOff:scramOff+SectorSize], failSec[:])
+
+	return disc
+}
+
 // buildDelta returns a delta payload with one 1-byte override per offset.
 func buildDelta(t *testing.T, offs []uint64) []byte {
 	t.Helper()
