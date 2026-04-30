@@ -28,12 +28,12 @@ the `.scram`), inspect the container, unpack to restore, then
 `sha256sum` again to prove reproducibility.
 
 ```
-$ ls FL_*
-FL_v1 (Track 0).bin
-FL_v1.bin
-FL_v1.cue
-FL_v1.scram
-FL_v1_logs.zip
+$ ls -lh FL_v1*
+-rw-r--r-- 1 hugh users 164K FL_v1 (Track 0).bin
+-rw-r--r-- 1 hugh users 697M FL_v1.bin
+-rw-r--r-- 1 hugh users   71 FL_v1.cue
+-rw-r--r-- 1 hugh users 798M FL_v1.scram
+-rw-r--r-- 1 hugh users  24M FL_v1_logs.zip
 
 $ sha256sum FL_v1.scram
 c9832355013839c6a539124c1794bf3567410a64002bfabc58a64058e81a9761  FL_v1.scram
@@ -56,12 +56,12 @@ applying delta ... OK 7084781 byte(s) of delta applied
 verifying scram hashes ... OK all three match
 removed source FL_v1.scram
 
-$ ls FL_*
-FL_v1 (Track 0).bin
-FL_v1.bin
-FL_v1.cue
-FL_v1.miniscram
-FL_v1_logs.zip
+$ ls -lh FL_v1*
+-rw-r--r-- 1 hugh users 164K FL_v1 (Track 0).bin
+-rw-r--r-- 1 hugh users 697M FL_v1.bin
+-rw-r--r-- 1 hugh users   71 FL_v1.cue
+-rw-r--r-- 1 hugh users 1.5M FL_v1.miniscram
+-rw-r--r-- 1 hugh users  24M FL_v1_logs.zip
 
 $ miniscram inspect FL_v1.miniscram
 container:  MSCM v2
@@ -90,13 +90,13 @@ building scram prediction ... OK ok
 applying delta ... OK 7084781 byte(s) of delta applied
 verifying output hashes ... OK all three match
 
-$ ls FL_*
-FL_v1 (Track 0).bin
-FL_v1.bin
-FL_v1.cue
-FL_v1.miniscram
-FL_v1.scram
-FL_v1_logs.zip
+$ ls -lh FL_v1*
+-rw-r--r-- 1 hugh users 164K FL_v1 (Track 0).bin
+-rw-r--r-- 1 hugh users 697M FL_v1.bin
+-rw-r--r-- 1 hugh users   71 FL_v1.cue
+-rw-r--r-- 1 hugh users 1.5M FL_v1.miniscram
+-rw-r--r-- 1 hugh users 798M FL_v1.scram
+-rw-r--r-- 1 hugh users  24M FL_v1_logs.zip
 
 $ sha256sum FL_v1.scram
 c9832355013839c6a539124c1794bf3567410a64002bfabc58a64058e81a9761  FL_v1.scram
@@ -120,8 +120,8 @@ on disk.
 
 ```
 $ ls -lh MP2_Play.scram MP2_Play.miniscram
--rw-rw-r-- 1 hugh hugh  366K MP2_Play.miniscram
--rwxr--r-- 1 hugh hugh  811M MP2_Play.scram
+-rw-r--r-- 1 hugh users  366K MP2_Play.miniscram
+-rw-r--r-- 1 hugh users  811M MP2_Play.scram
 ```
 
 811 MB → 366 KB (~2270×). Smaller delta than Freelancer because
@@ -137,8 +137,8 @@ SecuROM doesn't corrupt main-channel sectors the way SafeDisc does.
 
 ```
 $ ls -lh HALFLIFE.scram HALFLIFE.miniscram
--rw-rw-r-- 1 hugh hugh  332K HALFLIFE.miniscram
--rwxr--r-- 1 hugh hugh  766M HALFLIFE.scram
+-rw-r--r-- 1 hugh users  332K HALFLIFE.miniscram
+-rw-r--r-- 1 hugh users  766M HALFLIFE.scram
 ```
 
 766 MB → 332 KB (~2400×). Lead-in noise and per-track boundary
@@ -156,8 +156,8 @@ bypass the scrambler and don't contribute overrides.
 
 ```
 $ ls -lh DeusEx_v1002f.scram DeusEx_v1002f.miniscram
--rw-rw-r-- 1 hugh hugh  329 DeusEx_v1002f.miniscram
--rwxr--r-- 1 hugh hugh 856M DeusEx_v1002f.scram
+-rw-r--r-- 1 hugh users  329 DeusEx_v1002f.miniscram
+-rw-r--r-- 1 hugh users 856M DeusEx_v1002f.scram
 ```
 
 **0 override records.** The 4-byte delta is just the record count
