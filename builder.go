@@ -189,6 +189,14 @@ func BuildEpsilonHat(
 		}
 
 		secBytes := sec[:]
+		// skipFirst can exceed one sector (offsets up to ±4704 = 2 sectors).
+		// Drain whole sectors here: bin's io.ReadFull above advances in
+		// lockstep with lba, scram is read lazily via advanceScram, and no
+		// run is open yet because we're still in the leadin-drain phase.
+		if skipFirst >= len(sec) {
+			skipFirst -= len(sec)
+			continue
+		}
 		if skipFirst > 0 {
 			secBytes = secBytes[skipFirst:]
 			skipFirst = 0
