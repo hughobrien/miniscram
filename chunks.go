@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -47,6 +48,9 @@ func encodeMFSTPayload(m *Manifest) []byte {
 	b = binary.BigEndian.AppendUint16(b, uint16(len(tv)))
 	b = append(b, tv...)
 	b = binary.BigEndian.AppendUint64(b, uint64(m.CreatedUnix))
+	// WriteOffsetBytes is host-int; cast through int32 first to truncate to
+	// the spec's wire width with sign preservation, then to uint32 for the
+	// BE appender.
 	b = binary.BigEndian.AppendUint32(b, uint32(int32(m.WriteOffsetBytes)))
 	b = binary.BigEndian.AppendUint32(b, uint32(m.LeadinLBA))
 	b = binary.BigEndian.AppendUint64(b, uint64(m.Scram.Size))
@@ -272,6 +276,9 @@ type payloadReader struct {
 	pos int
 }
 
+// bytes returns the next n bytes from the cursor as a sub-slice of the
+// underlying buffer. The returned slice aliases r.buf — copy (e.g. via
+// string(...)) if you need to retain it past the buffer's lifetime.
 func (r *payloadReader) bytes(n int) ([]byte, error) {
 	if r.pos+n > len(r.buf) {
 		return nil, io.ErrUnexpectedEOF
@@ -340,11 +347,11 @@ func writeChunk(w io.Writer, tag [4]byte, payload []byte) error {
 func readChunk(r io.Reader) ([4]byte, []byte, error) {
 	var head [8]byte
 	n, err := io.ReadFull(r, head[:])
-	if err == io.EOF && n == 0 {
+	if errors.Is(err, io.EOF) && n == 0 {
 		return [4]byte{}, nil, io.EOF
 	}
 	if err != nil {
-		if err == io.ErrUnexpectedEOF || err == io.EOF {
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 			return [4]byte{}, nil, fmt.Errorf("reading chunk header: %w", io.ErrUnexpectedEOF)
 		}
 		return [4]byte{}, nil, fmt.Errorf("reading chunk header: %w", err)
@@ -357,14 +364,14 @@ func readChunk(r io.Reader) ([4]byte, []byte, error) {
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return tag, nil, fmt.Errorf("reading chunk %q payload: %w", tag, io.ErrUnexpectedEOF)
 		}
 		return tag, nil, err
 	}
 	var crcBuf [4]byte
 	if _, err := io.ReadFull(r, crcBuf[:]); err != nil {
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return tag, nil, fmt.Errorf("reading chunk %q crc: %w", tag, io.ErrUnexpectedEOF)
 		}
 		return tag, nil, err
