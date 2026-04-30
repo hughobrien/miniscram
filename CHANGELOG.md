@@ -4,6 +4,18 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-04-30
+
+### Fixed
+
+- Subcommand flag parsing rejected positional arguments followed by
+  flags (e.g. `miniscram pack disc.cue -o out.miniscram --keep-source`)
+  with "expected exactly one positional argument; got N". Go's
+  `flag.Parse` stops at the first non-flag token; `parseSubcommand`
+  now peels positionals off and re-parses until exhausted, so flags
+  and positionals can appear in any order. Reported in
+  [#11](https://github.com/hughobrien/miniscram/issues/11).
+
 ## [1.1.0] - 2026-04-30
 
 ### Added
@@ -104,5 +116,6 @@ Real Redumper dumps:
 - Test fixtures from the
   [redump.org](https://redump.org) preservation community.
 
+[1.1.1]: https://github.com/hughobrien/miniscram/releases/tag/v1.1.1
 [1.1.0]: https://github.com/hughobrien/miniscram/releases/tag/v1.1.0
 [1.0.0]: https://github.com/hughobrien/miniscram/releases/tag/v1.0.0

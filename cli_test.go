@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -24,6 +26,78 @@ func TestCLIMissingPositional(t *testing.T) {
 				t.Fatalf("exit %d, want %d", code, exitUsage)
 			}
 		})
+	}
+}
+
+// TestParseSubcommandInterleaved covers issue #11: flags after a
+// positional argument were misclassified as positionals because Go's
+// flag.Parse stops at the first non-flag token.
+func TestParseSubcommandInterleaved(t *testing.T) {
+	cases := []struct {
+		name           string
+		args           []string
+		wantPositional []string
+		wantOutput     string
+		wantKeep       bool
+	}{
+		{"flags-after-positional",
+			[]string{"file.cue", "-o", "out", "--keep-source"},
+			[]string{"file.cue"}, "out", true},
+		{"flags-before-positional",
+			[]string{"-o", "out", "--keep-source", "file.cue"},
+			[]string{"file.cue"}, "out", true},
+		{"flags-around-positional",
+			[]string{"-o", "out", "file.cue", "--keep-source"},
+			[]string{"file.cue"}, "out", true},
+		{"only-positional",
+			[]string{"file.cue"},
+			[]string{"file.cue"}, "", false},
+		{"only-flags",
+			[]string{"-o", "out", "--keep-source"},
+			nil, "out", true},
+		{"empty",
+			[]string{},
+			nil, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			var output string
+			var keep bool
+			pos, _, exit, ok := parseSubcommand("pack", "", tc.args, &stderr,
+				func(fs *flag.FlagSet) {
+					fs.StringVar(&output, "o", "", "")
+					fs.BoolVar(&keep, "keep-source", false, "")
+				})
+			if !ok {
+				t.Fatalf("parse failed (exit=%d): %s", exit, stderr.String())
+			}
+			if !reflect.DeepEqual(pos, tc.wantPositional) {
+				t.Fatalf("positional = %v, want %v", pos, tc.wantPositional)
+			}
+			if output != tc.wantOutput {
+				t.Fatalf("output = %q, want %q", output, tc.wantOutput)
+			}
+			if keep != tc.wantKeep {
+				t.Fatalf("keep = %v, want %v", keep, tc.wantKeep)
+			}
+		})
+	}
+}
+
+// TestCLIUnpackFlagsAfterPositional reproduces issue #11 end-to-end:
+// `unpack <container> -o <out>` (positional first, flag after) must
+// reconstruct the .scram, not bail with "expected exactly one
+// positional argument".
+func TestCLIUnpackFlagsAfterPositional(t *testing.T) {
+	container := packSyntheticContainer(t)
+	out := filepath.Join(filepath.Dir(container), "out.scram")
+	var stderr bytes.Buffer
+	if code := run([]string{"unpack", "-q", container, "-o", out}, io.Discard, &stderr); code != exitOK {
+		t.Fatalf("unpack with flag after positional: exit %d; stderr=%s", code, stderr.String())
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("output not created: %v", err)
 	}
 }
 

@@ -92,14 +92,26 @@ func parseSubcommand(name, helpText string, args []string, stderr io.Writer, con
 	if configure != nil {
 		configure(fs)
 	}
-	if err := fs.Parse(args); err != nil {
-		return nil, commonFlags{}, exitUsage, false
+	// Go's flag.Parse stops at the first non-flag argument, so a
+	// positional followed by flags would otherwise be misclassified
+	// (issue #11). Peel positionals off and re-parse until exhausted.
+	var positional []string
+	remaining := args
+	for {
+		if err := fs.Parse(remaining); err != nil {
+			return nil, commonFlags{}, exitUsage, false
+		}
+		if fs.NArg() == 0 {
+			break
+		}
+		positional = append(positional, fs.Arg(0))
+		remaining = fs.Args()[1:]
 	}
 	if *help || *helpLong {
 		fmt.Fprint(stderr, helpText)
 		return nil, commonFlags{}, exitOK, false
 	}
-	return fs.Args(), commonFlags{quiet: *quiet || *quietLong}, 0, true
+	return positional, commonFlags{quiet: *quiet || *quietLong}, 0, true
 }
 
 // requireOnePositional asserts exactly one positional and prints a
