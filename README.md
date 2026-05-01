@@ -49,7 +49,7 @@ writing container ... OK FL_v1.miniscram
 reading manifest ... OK 1 track(s), 836338152 byte scram
 reading container FL_v1.miniscram ... OK delta 7084781 bytes
 verifying bin hashes ... OK all tracks match
-building scram prediction ... OK 355499 sector(s)
+building scram prediction ... OK 355585 sector(s)
 applying delta ... OK 7084781 byte(s) of delta applied
 verifying scram hashes ... OK all three match
 removed source FL_v1.scram
@@ -83,7 +83,7 @@ delta:
 $ miniscram unpack FL_v1.miniscram
 reading container FL_v1.miniscram ... OK delta 7084781 bytes
 verifying bin hashes ... OK all tracks match
-building scram prediction ... OK 355499 sector(s)
+building scram prediction ... OK 355585 sector(s)
 applying delta ... OK 7084781 byte(s) of delta applied
 verifying output hashes ... OK all three match
 
