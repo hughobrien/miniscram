@@ -23,6 +23,21 @@ func TestReporterStep(t *testing.T) {
 	}
 }
 
+func TestStepDoneEmptyMessage(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(&buf, false)
+	r.Step("foo").Done("")
+	if got, want := buf.String(), "foo ... OK\n"; got != want {
+		t.Fatalf("Done(\"\") = %q, want %q", got, want)
+	}
+
+	buf.Reset()
+	r.Step("bar").Done("baz")
+	if got, want := buf.String(), "bar ... OK baz\n"; got != want {
+		t.Fatalf("Done(\"baz\") = %q, want %q", got, want)
+	}
+}
+
 func TestReporterInfoAndWarn(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewReporter(&buf, false)
