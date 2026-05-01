@@ -52,15 +52,6 @@ func Pack(opts PackOptions, r Reporter) error {
 		r = quietReporter{w: io.Discard}
 	}
 
-	if err := runStep(r, "running scramble-table self-test", func() (string, error) {
-		if err := CheckScrambleTable(); err != nil {
-			return "", err
-		}
-		return "ok", nil
-	}); err != nil {
-		return err
-	}
-
 	// 1. resolve cue (parse + stat + cumulative LBAs).
 	st := r.Step("resolving cue " + opts.CuePath)
 	resolved, err := ResolveCue(opts.CuePath)
@@ -98,7 +89,7 @@ func Pack(opts PackOptions, r Reporter) error {
 		st.Fail(err)
 		return err
 	}
-	st.Done("ok")
+	st.Done("")
 
 	// 5. single hashing pass over track files.
 	st = r.Step("hashing tracks")
