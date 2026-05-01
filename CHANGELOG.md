@@ -4,6 +4,41 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-05-01
+
+### Fixed
+
+- **Sector-count narration off-by-one.** The "building scram
+  prediction" step printed `scram.Size / SectorSize`, a truncating
+  divide that undercounted by 1 whenever the scram wasn't a whole
+  multiple of 2352. Freelancer's 836,338,152-byte scram reported
+  355585 but the loop iterates 355586 times. Switched to `TotalLBAs`
+  — the same ceiling-division helper `BuildEpsilonHat` uses — so
+  narration matches the work performed.
+- **Reporter trailing space on empty messages.** `Done("")` and
+  `Fail` with an empty error message rendered `... OK \n` /
+  `... FAIL \n` with a stray space before the newline; both now
+  render cleanly.
+
+### Changed
+
+- Dropped the redundant runtime "self-test scrambler table" step.
+  The startup pin in `ecma130.go`'s `init()` already panics before
+  `main()` if the builder drifts, so the runtime wrapper was never
+  reachable in a healthy binary. Pack and unpack each emit one
+  fewer narration line.
+
+### Added
+
+- `scripts/sweep` — SQLite-backed corpus harness that walks
+  `*.cue`/`*.scram` pairs under a root, runs `pack --keep-source`
+  (with default verify) per case, and records
+  PASS/FAIL/CRASH/TIMEOUT in a durable database. Each invocation
+  processes up to 10 cases, so a long sweep survives interruption.
+  Lives in a nested Go module so its SQLite driver stays out of
+  the binary's dependency graph. Used to validate the step-output
+  cleanup against the 119-disc redumper corpus: 119/119 PASS.
+
 ## [1.2.0] - 2026-04-30
 
 ### Added
@@ -170,6 +205,8 @@ Real Redumper dumps:
 - Test fixtures from the
   [redump.org](https://redump.org) preservation community.
 
+[1.2.1]: https://github.com/hughobrien/miniscram/releases/tag/v1.2.1
+[1.2.0]: https://github.com/hughobrien/miniscram/releases/tag/v1.2.0
 [1.1.1]: https://github.com/hughobrien/miniscram/releases/tag/v1.1.1
 [1.1.0]: https://github.com/hughobrien/miniscram/releases/tag/v1.1.0
 [1.0.0]: https://github.com/hughobrien/miniscram/releases/tag/v1.0.0
