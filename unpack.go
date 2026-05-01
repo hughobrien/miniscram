@@ -30,15 +30,6 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		r = quietReporter{w: io.Discard}
 	}
 
-	if err := runStep(r, "running scramble-table self-test", func() (string, error) {
-		if err := CheckScrambleTable(); err != nil {
-			return "", err
-		}
-		return "ok", nil
-	}); err != nil {
-		return err
-	}
-
 	if !opts.Force {
 		if _, err := os.Stat(opts.OutputPath); err == nil {
 			return fmt.Errorf("output %s already exists (pass -f / --force to overwrite)", opts.OutputPath)
@@ -122,7 +113,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		return err
 	}
 	hatFile.Close()
-	st.Done("ok")
+	st.Done("%d sector(s)", m.Scram.Size/SectorSize)
 
 	// Move the scram prediction file into place at OutputPath.
 	if err := os.Rename(hatPath, opts.OutputPath); err != nil {
@@ -210,7 +201,7 @@ func Verify(opts VerifyOptions, r Reporter) error {
 		st.Fail(err)
 		return err
 	}
-	st.Done("ok")
+	st.Done("%d track(s), %d byte scram", len(m.Tracks), m.Scram.Size)
 
 	// Allocate a tempfile next to the container. The rebuild produces
 	// a scram-sized file (often hundreds of MB); the container's

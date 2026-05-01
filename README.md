@@ -39,19 +39,17 @@ $ sha256sum FL_v1.scram
 c9832355013839c6a539124c1794bf3567410a64002bfabc58a64058e81a9761  FL_v1.scram
 
 $ miniscram pack FL_v1.cue
-running scramble-table self-test ... OK ok
 resolving cue FL_v1.cue ... OK 1 track(s), 729914976 bytes total
 detecting write offset ... OK -48 bytes
-checking constant offset ... OK ok
+checking constant offset ... OK
 hashing tracks ... OK 1 track(s) hashed
 hashing scram ... OK c98323550138
 building scram prediction + delta ... OK 2812 disagreeing sector(s) → 45927 override record(s), 0 pass-through(s), delta 7084781 bytes
 writing container ... OK FL_v1.miniscram
-reading manifest ... OK ok
-running scramble-table self-test ... OK ok
+reading manifest ... OK 1 track(s), 836338152 byte scram
 reading container FL_v1.miniscram ... OK delta 7084781 bytes
 verifying bin hashes ... OK all tracks match
-building scram prediction ... OK ok
+building scram prediction ... OK 355499 sector(s)
 applying delta ... OK 7084781 byte(s) of delta applied
 verifying scram hashes ... OK all three match
 removed source FL_v1.scram
@@ -83,10 +81,9 @@ delta:
   override_records:       45927
 
 $ miniscram unpack FL_v1.miniscram
-running scramble-table self-test ... OK ok
 reading container FL_v1.miniscram ... OK delta 7084781 bytes
 verifying bin hashes ... OK all tracks match
-building scram prediction ... OK ok
+building scram prediction ... OK 355499 sector(s)
 applying delta ... OK 7084781 byte(s) of delta applied
 verifying output hashes ... OK all three match
 
