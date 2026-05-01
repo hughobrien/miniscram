@@ -63,7 +63,12 @@ func (s *textStep) Done(format string, args ...any) {
 	if s.r.tty {
 		mark = "✓"
 	}
-	fmt.Fprintf(s.r.w, " ... %s %s\n", mark, fmt.Sprintf(format, args...))
+	msg := fmt.Sprintf(format, args...)
+	if msg == "" {
+		fmt.Fprintf(s.r.w, " ... %s\n", mark)
+		return
+	}
+	fmt.Fprintf(s.r.w, " ... %s %s\n", mark, msg)
 }
 
 func (s *textStep) Fail(err error) {
@@ -75,7 +80,12 @@ func (s *textStep) Fail(err error) {
 	if s.r.tty {
 		mark = "✗"
 	}
-	fmt.Fprintf(s.r.w, " ... %s %s\n", mark, err.Error())
+	msg := err.Error()
+	if msg == "" {
+		fmt.Fprintf(s.r.w, " ... %s\n", mark)
+		return
+	}
+	fmt.Fprintf(s.r.w, " ... %s %s\n", mark, msg)
 }
 
 // quietReporter discards progress (Step.Done, Info, Warn) but still
