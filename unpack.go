@@ -113,7 +113,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		return err
 	}
 	hatFile.Close()
-	st.Done("%d sector(s)", m.Scram.Size/SectorSize)
+	st.Done("%d sector(s)", TotalLBAs(m.Scram.Size, m.WriteOffsetBytes))
 
 	// Move the scram prediction file into place at OutputPath.
 	if err := os.Rename(hatPath, opts.OutputPath); err != nil {

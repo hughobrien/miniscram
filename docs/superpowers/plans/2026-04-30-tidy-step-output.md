@@ -324,12 +324,12 @@ writing container ... OK FL_v1.miniscram
 reading manifest ... OK 1 track(s), 836338152 byte scram
 reading container FL_v1.miniscram ... OK delta 7084781 bytes
 verifying bin hashes ... OK all tracks match
-building scram prediction ... OK 355585 sector(s)
+building scram prediction ... OK 355586 sector(s)
 applying delta ... OK 7084781 byte(s) of delta applied
 verifying scram hashes ... OK all three match
 ```
 
-(836338152 / 2352 = 355585, integer division.)
+(`TotalLBAs(836338152, -48) = 355586` — accounts for write offset and the trailing partial sector. The FL_v1 scram is non-aligned: `836338152 mod 2352 = 2232`, so a truncating divide would undercount by 1.)
 
 - [ ] **Step 7: Update README.md FL_v1 unpack output**
 
@@ -349,7 +349,7 @@ After:
 ```
 reading container FL_v1.miniscram ... OK delta 7084781 bytes
 verifying bin hashes ... OK all tracks match
-building scram prediction ... OK 355585 sector(s)
+building scram prediction ... OK 355586 sector(s)
 applying delta ... OK 7084781 byte(s) of delta applied
 verifying output hashes ... OK all three match
 ```
