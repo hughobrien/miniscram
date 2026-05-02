@@ -17,11 +17,10 @@ var (
 
 // UnpackOptions holds inputs for Unpack.
 type UnpackOptions struct {
-	ContainerPath         string
-	OutputPath            string
-	Verify                bool
-	Force                 bool
-	SuppressVerifyWarning bool // skip the "verification skipped" Warn; for callers that perform their own verification (e.g. Verify)
+	ContainerPath string
+	OutputPath    string
+	Verify        bool
+	Force         bool
 }
 
 // Unpack reproduces the original .scram from the container's track files + delta.
@@ -155,11 +154,9 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	outFile.Close()
 	st.Done("%d byte(s) of delta applied", len(delta))
 
-	// Verify recovered scram hashes (unless skipped).
+	// Verify recovered scram hashes (unless caller opts out — the Verify
+	// subcommand does this to avoid double-hashing the rebuilt scram).
 	if !opts.Verify {
-		if !opts.SuppressVerifyWarning {
-			r.Warn("verification skipped (--no-verify)")
-		}
 		return nil
 	}
 	wantOut := m.Scram.Hashes
@@ -219,11 +216,10 @@ func Verify(opts VerifyOptions, r Reporter) error {
 	// own final hash; Force=true allows writing into the tempfile we
 	// just created.
 	if err := Unpack(UnpackOptions{
-		ContainerPath:         opts.ContainerPath,
-		OutputPath:            tmpPath,
-		Verify:                false,
-		Force:                 true,
-		SuppressVerifyWarning: true,
+		ContainerPath: opts.ContainerPath,
+		OutputPath:    tmpPath,
+		Verify:        false,
+		Force:         true,
 	}, r); err != nil {
 		return err
 	}
