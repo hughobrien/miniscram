@@ -56,8 +56,6 @@ OPTIONS:
     --keep-source          do not remove <scram> after verified pack.
     --no-verify            skip inline round-trip verification.
                            implies --keep-source.
-    --allow-cross-fs       permit auto-delete of <scram> when <out>
-                           is on a different filesystem.
     -q, --quiet            suppress progress output.
     -h, --help             show this help.
 `
