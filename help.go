@@ -108,9 +108,8 @@ ARGUMENTS:
     <container>    path to a .miniscram file
 
 OPTIONS:
-    --full         append a per-record listing of every override
-                   (no cap). without it, only the override count
-                   is printed.
+    --full         append a per-record listing of every override.
+                   without it, only the override count is printed.
     --json         emit machine-readable JSON: the manifest verbatim
                    plus a delta_records array. always includes all
                    records.

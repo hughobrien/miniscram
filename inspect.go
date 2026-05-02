@@ -73,7 +73,7 @@ func formatHumanInspect(m *Manifest, magic string, version byte, delta []byte, f
 
 // formatJSONInspect emits the manifest JSON plus a top-level
 // `delta_records` array of {byte_offset, length, lba} objects.
-// Always includes all records (no cap).
+// Always includes all records.
 func formatJSONInspect(m *Manifest, delta []byte) ([]byte, error) {
 	type recordOut struct {
 		ByteOffset uint64 `json:"byte_offset"`
