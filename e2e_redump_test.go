@@ -117,7 +117,6 @@ func TestE2ERoundTripRealDiscs(t *testing.T) {
 				CuePath:    cuePath,
 				ScramPath:  scramPath,
 				OutputPath: containerPath,
-				Verify:     true,
 			}, rep); err != nil {
 				t.Fatalf("Pack: %v", err)
 			}

@@ -20,7 +20,7 @@ func packForVerify(t *testing.T) (containerPath, dir string, m *Manifest) {
 	containerPath = filepath.Join(dir, "x.miniscram")
 	if err := Pack(PackOptions{
 		CuePath: cuePath, ScramPath: scramPath,
-		OutputPath: containerPath, LeadinLBA: LBAPregapStart, Verify: true,
+		OutputPath: containerPath, LeadinLBA: LBAPregapStart,
 	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatal(err)
 	}

@@ -54,8 +54,6 @@ OPTIONS:
                            default: <cue-stem>.miniscram next to <cue>.
     -f, --force            overwrite existing output.
     --keep-source          do not remove <scram> after verified pack.
-    --no-verify            skip inline round-trip verification.
-                           implies --keep-source.
     -q, --quiet            suppress progress output.
     -h, --help             show this help.
 `
@@ -73,7 +71,6 @@ OPTIONS:
                            default: <miniscram-stem>.scram next to
                            <in.miniscram>.
     -f, --force            overwrite existing output.
-    --no-verify            skip output hash verification (md5/sha1/sha256).
     -q, --quiet            suppress progress output.
     -h, --help             show this help.
 `

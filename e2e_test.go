@@ -55,7 +55,6 @@ func TestE2EFailSectorRoundTrip(t *testing.T) {
 		ScramPath:  scramPath,
 		OutputPath: outPath,
 		LeadinLBA:  LBAPregapStart,
-		Verify:     true,
 	}, rep); err != nil {
 		t.Fatalf("Pack: %v", err)
 	}
@@ -107,7 +106,6 @@ func runE2E(t *testing.T, opts SynthOpts) {
 		ScramPath:  scramPath,
 		OutputPath: outPath,
 		LeadinLBA:  LBAPregapStart,
-		Verify:     true,
 	}, rep); err != nil {
 		t.Fatalf("Pack: %v", err)
 	}

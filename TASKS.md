@@ -83,8 +83,7 @@ check at step 3.
 **Outcome:** New `Verify` Go function in `verify.go`; thin
 `runVerify` CLI wrapper in `main.go`. Wraps `Unpack(Verify:false)`
 to a tempfile, then `hashFile` + `compareHashes` against the
-manifest. `UnpackOptions.SuppressVerifyWarning` added to silence
-the "verification skipped" warning during verify's internal unpack.
+manifest.
 
 ---
 

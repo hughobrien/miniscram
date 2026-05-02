@@ -127,12 +127,11 @@ func requireOnePositional(stderr io.Writer, helpText string, positional []string
 
 func runPack(args []string, stderr io.Writer) int {
 	var output, outputLong string
-	var keepSource, noVerify, force, forceLong bool
+	var keepSource, force, forceLong bool
 	positional, common, exit, ok := parseSubcommand("pack", packHelpText, args, stderr, func(fs *flag.FlagSet) {
 		fs.StringVar(&output, "o", "", "output path")
 		fs.StringVar(&outputLong, "output", "", "output path")
 		fs.BoolVar(&keepSource, "keep-source", false, "keep .scram after verified pack")
-		fs.BoolVar(&noVerify, "no-verify", false, "skip round-trip verification")
 		fs.BoolVar(&force, "f", false, "overwrite output")
 		fs.BoolVar(&forceLong, "force", false, "overwrite output")
 	})
@@ -155,17 +154,10 @@ func runPack(args []string, stderr io.Writer) int {
 			return exitUsage
 		}
 	}
-	noVerifyImpliesKeep := noVerify && !keepSource
-	if noVerify {
-		keepSource = true
-	}
 	rep := NewReporter(stderr, common.quiet)
-	if noVerifyImpliesKeep {
-		rep.Info("--no-verify implies --keep-source; original .scram will be kept")
-	}
 	err := Pack(PackOptions{
 		CuePath: cuePath, ScramPath: scramPath, OutputPath: out,
-		LeadinLBA: LBALeadinStart, Verify: !noVerify,
+		LeadinLBA: LBALeadinStart,
 	}, rep)
 	if err != nil {
 		return errToExit(err)
@@ -182,11 +174,10 @@ func runPack(args []string, stderr io.Writer) int {
 
 func runUnpack(args []string, stderr io.Writer) int {
 	var output, outputLong string
-	var noVerify, force, forceLong bool
+	var force, forceLong bool
 	positional, common, exit, ok := parseSubcommand("unpack", unpackHelpText, args, stderr, func(fs *flag.FlagSet) {
 		fs.StringVar(&output, "o", "", "output path")
 		fs.StringVar(&outputLong, "output", "", "output path")
-		fs.BoolVar(&noVerify, "no-verify", false, "skip output hash verification")
 		fs.BoolVar(&force, "f", false, "overwrite output")
 		fs.BoolVar(&forceLong, "force", false, "overwrite output")
 	})
@@ -204,7 +195,7 @@ func runUnpack(args []string, stderr io.Writer) int {
 	rep := NewReporter(stderr, common.quiet)
 	if err := Unpack(UnpackOptions{
 		ContainerPath: containerPath, OutputPath: out,
-		Verify: !noVerify, Force: force || forceLong,
+		Verify: true, Force: force || forceLong,
 	}, rep); err != nil {
 		return errToExit(err)
 	}
