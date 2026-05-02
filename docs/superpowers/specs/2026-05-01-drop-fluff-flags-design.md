@@ -127,15 +127,26 @@ Three small CLI surface cleanups that have accumulated since v1:
 
 ## Testing
 
-No existing tests reference the removed flags (`grep` confirms). The
-behavioral change is in CLI flag set definitions, not in `Pack` /
-`Unpack` core logic — those still call `Verify` exactly as before
-when `Verify: true`, which is now the only path.
+No tests test the removed CLI flags directly. But because we're
+dropping the `Verify` field from `PackOptions`, every test that
+constructs a `PackOptions` literal needs the `Verify: true` line
+removed:
 
-A targeted CLI test for the new behavior is optional; the change is
-mostly deletion. If we add anything, a `cli_test.go` smoke test that
-asserts `pack --no-verify` and `pack --allow-cross-fs` both exit
-non-zero would document the breakage. Low value — skip unless trivial.
+- `pack_test.go:21`
+- `verify_test.go:23`
+- `cli_test.go:147`
+- `cli_test.go:182`
+- `e2e_test.go:58`
+- `e2e_test.go:110`
+- `e2e_redump_test.go:120`
+
+`UnpackOptions{... Verify: true ...}` literals are unchanged —
+that field survives as internal API. Sites for reference (no edits):
+`unpack_test.go:35,49,132`, `e2e_test.go:79,134`, `e2e_redump_test.go:157`.
+
+No new tests. The behavioral change is purely in CLI flag set
+definitions; `Pack`/`Unpack` core logic is unchanged on the path
+that's now the only path.
 
 ## Out of scope
 
