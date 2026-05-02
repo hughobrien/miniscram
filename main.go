@@ -127,13 +127,12 @@ func requireOnePositional(stderr io.Writer, helpText string, positional []string
 
 func runPack(args []string, stderr io.Writer) int {
 	var output, outputLong string
-	var keepSource, noVerify, allowCrossFS, force, forceLong bool
+	var keepSource, noVerify, force, forceLong bool
 	positional, common, exit, ok := parseSubcommand("pack", packHelpText, args, stderr, func(fs *flag.FlagSet) {
 		fs.StringVar(&output, "o", "", "output path")
 		fs.StringVar(&outputLong, "output", "", "output path")
 		fs.BoolVar(&keepSource, "keep-source", false, "keep .scram after verified pack")
 		fs.BoolVar(&noVerify, "no-verify", false, "skip round-trip verification")
-		fs.BoolVar(&allowCrossFS, "allow-cross-fs", false, "permit auto-delete across filesystems")
 		fs.BoolVar(&force, "f", false, "overwrite output")
 		fs.BoolVar(&forceLong, "force", false, "overwrite output")
 	})
@@ -172,9 +171,9 @@ func runPack(args []string, stderr io.Writer) int {
 		return errToExit(err)
 	}
 	if !keepSource {
-		if removed, removeErr := maybeRemoveSource(scramPath, out, allowCrossFS, rep); removeErr != nil {
-			rep.Warn("source removal skipped: %v", removeErr)
-		} else if removed {
+		if err := os.Remove(scramPath); err != nil {
+			rep.Warn("source removal skipped: %v", err)
+		} else {
 			rep.Info("removed source %s", scramPath)
 		}
 	}
@@ -225,17 +224,6 @@ func runVerify(args []string, stderr io.Writer) int {
 		return errToExit(err)
 	}
 	return exitOK
-}
-
-func maybeRemoveSource(scramPath, outPath string, allowCrossFS bool, r Reporter) (bool, error) {
-	if !sameFilesystem(scramPath, outPath) && !allowCrossFS {
-		return false, fmt.Errorf("output %s is on a different filesystem from %s; pass --allow-cross-fs to permit auto-delete",
-			outPath, scramPath)
-	}
-	if err := os.Remove(scramPath); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 func pickFirst(a, b string) string {
