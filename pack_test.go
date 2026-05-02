@@ -18,7 +18,7 @@ func packSyntheticContainer(t *testing.T) string {
 	out := filepath.Join(dir, "x.miniscram")
 	if err := Pack(PackOptions{
 		CuePath: cuePath, ScramPath: scramPath,
-		OutputPath: out, LeadinLBA: LBAPregapStart, Verify: true,
+		OutputPath: out, LeadinLBA: LBAPregapStart,
 	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatal(err)
 	}

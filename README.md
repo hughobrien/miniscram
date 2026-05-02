@@ -225,7 +225,7 @@ TRKS / HASH / DLTA chunks. 856 MB → 329 bytes — about 2.7 million×.
 
 Pack a `.scram` into a `.miniscram` container.
 
-    miniscram pack disc.cue [-o out.miniscram] [-f] [--no-verify] [--keep-source]
+    miniscram pack disc.cue [-o out.miniscram] [-f] [--keep-source]
 
 Reads `disc.scram` (derived from the cue stem) and the `.bin` files
 referenced by `disc.cue`. Writes `disc.miniscram` and removes
@@ -235,7 +235,7 @@ referenced by `disc.cue`. Writes `disc.miniscram` and removes
 
 Reproduce the `.scram` from `.bin` + `.miniscram`.
 
-    miniscram unpack disc.miniscram [-o out.scram] [-f] [--no-verify]
+    miniscram unpack disc.miniscram [-o out.scram] [-f]
 
 ### `verify`
 

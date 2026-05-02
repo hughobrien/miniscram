@@ -144,7 +144,7 @@ func TestCLIPackHappyPath(t *testing.T) {
 	outPath := filepath.Join(dir, "x.miniscram")
 	if err := Pack(PackOptions{
 		CuePath: cuePath, ScramPath: scramPath, OutputPath: outPath,
-		LeadinLBA: LBAPregapStart, Verify: true,
+		LeadinLBA: LBAPregapStart,
 	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatalf("Pack: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestCLIVerifyWrongBin(t *testing.T) {
 	containerPath := filepath.Join(dir, "x.miniscram")
 	if err := Pack(PackOptions{
 		CuePath: cuePath, ScramPath: scramPath, OutputPath: containerPath,
-		LeadinLBA: LBAPregapStart, Verify: true,
+		LeadinLBA: LBAPregapStart,
 	}, NewReporter(io.Discard, true)); err != nil {
 		t.Fatalf("Pack: %v", err)
 	}

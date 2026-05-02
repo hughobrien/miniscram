@@ -31,14 +31,13 @@ var (
 )
 
 // PackOptions captures everything Pack needs. Defaults match the spec
-// (Verify on, LeadinLBA = LBALeadinStart). Fields without a comment
-// match the obvious thing.
+// (LeadinLBA = LBALeadinStart). Fields without a comment match the
+// obvious thing.
 type PackOptions struct {
 	CuePath    string
 	ScramPath  string
 	OutputPath string
 	LeadinLBA  int32 // 0 → use LBALeadinStart
-	Verify     bool
 }
 
 // Pack produces a .miniscram container at OutputPath. It does not
@@ -158,11 +157,7 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	st.Done("%s", opts.OutputPath)
 
-	// 8. verify by round-tripping (unless --no-verify).
-	if !opts.Verify {
-		r.Warn("verification skipped (--no-verify)")
-		return nil
-	}
+	// 8. verify by round-tripping.
 	if err := Verify(VerifyOptions{ContainerPath: opts.OutputPath}, r); err != nil {
 		// Only delete the just-written container when the failure
 		// implicates the container itself (e.g. round-trip output
