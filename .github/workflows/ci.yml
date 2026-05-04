@@ -36,3 +36,31 @@ jobs:
 
       - name: Test
         run: go test -race -count=1 ./...
+
+  gui:
+    name: build miniscram-gui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/miniscram-gui/go.mod
+          cache: true
+          cache-dependency-path: tools/miniscram-gui/go.sum
+
+      - name: Install GUI build deps (X11 + GL + Wayland + Vulkan)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+            libxi-dev libxxf86vm-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libvulkan-dev pkg-config
+
+      - name: Build
+        working-directory: tools/miniscram-gui
+        run: go build .
+
+      - name: Vet
+        working-directory: tools/miniscram-gui
+        run: go vet ./...
