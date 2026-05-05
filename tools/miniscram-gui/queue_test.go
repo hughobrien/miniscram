@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -358,5 +362,64 @@ func TestCancelCurrent(t *testing.T) {
 	// another. Item 2 was never spawned (q.stopped). So 2 event rows.
 	if rows := eventsRecent(m.db, 10); len(rows) != 2 {
 		t.Errorf("event rows = %d, want 2", len(rows))
+	}
+}
+
+func TestPackPhasesCoverage(t *testing.T) {
+	miniscramBin, err := exec.LookPath("miniscram")
+	if err != nil {
+		t.Skip("miniscram not on PATH; build it and run again to lock packPhases")
+	}
+
+	fixtureCue := os.Getenv("MINISCRAM_TEST_CUE")
+	if fixtureCue == "" {
+		// Scan for fixtures in test-discs
+		matches, _ := filepath.Glob(filepath.Join("..", "..", "test-discs", "*", "*.cue"))
+		matchesUpper, _ := filepath.Glob(filepath.Join("..", "..", "test-discs", "*", "*.CUE"))
+		matches = append(matches, matchesUpper...)
+		if len(matches) > 0 {
+			fixtureCue = matches[0]
+		}
+	}
+	if fixtureCue == "" {
+		t.Skip("no MINISCRAM_TEST_CUE env and no test-discs/*/.cue fixture; skipping")
+	}
+
+	// Pack to a temp output to avoid clobbering a real .miniscram next to the cue.
+	tmp := t.TempDir()
+	out := filepath.Join(tmp, "fixture.miniscram")
+	// Note: we run pack without --keep-source to allow it to complete without
+	// attempting to delete the .scram file. We just care about the emitted steps.
+	cmd := exec.Command(miniscramBin, "pack", "--progress=json", "-o", out, fixtureCue)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	// We don't care if pack fails; we just want to check the step labels it emitted.
+	_ = cmd.Run()
+
+	seen := map[string]bool{}
+	var unknown []string
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var ev progressEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Errorf("non-JSON line on --progress=json stderr: %q", line)
+			continue
+		}
+		if ev.Type != "step" {
+			continue
+		}
+		seen[ev.Label] = true
+		if _, ok := lookupFraction(ev.Label); !ok {
+			unknown = append(unknown, ev.Label)
+		}
+	}
+	if len(unknown) > 0 {
+		t.Errorf("emitted step labels with no packPhases match:\n  %s", strings.Join(unknown, "\n  "))
+	}
+	if len(seen) == 0 {
+		t.Error("no step events captured — did --progress=json work?")
 	}
 }

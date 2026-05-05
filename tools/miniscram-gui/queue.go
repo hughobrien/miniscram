@@ -195,7 +195,8 @@ func prettyProgressLine(s string) string {
 
 // packPhases maps known pack-step label prefixes to a target fraction.
 // Order matters only for human readability; lookup is by prefix-match.
-// Labels and their order come from pack.go (see the spec for citations).
+// Labels and their order come from pack.go and unpack.go (verify phase).
+// Pack emits steps up to 0.95, then Verify (via Unpack) continues to 1.0.
 var packPhases = []struct {
 	Prefix   string
 	Fraction float64
@@ -207,6 +208,14 @@ var packPhases = []struct {
 	{"hashing scram", 0.30},
 	{"building scram prediction + delta", 0.65},
 	{"writing container", 0.95},
+	// Verify (round-trip) steps, emitted by unpack.go
+	{"reading manifest", 0.96},
+	{"reading container", 0.97},
+	{"verifying bin hashes", 0.98},
+	{"building scram prediction", 0.99},
+	{"applying delta", 0.99},
+	{"verifying output hashes", 0.995},
+	{"verifying scram hashes", 1.0},
 }
 
 func lookupFraction(label string) (float64, bool) {
