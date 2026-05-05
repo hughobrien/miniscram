@@ -34,10 +34,19 @@ actions) — no library import. See issue #18 for the discussion.
 
 ## Build
 
-Native deps come from a Nix shell on Linux dev. On a real desktop
-the system X11/Wayland + GL + a C toolchain are sufficient.
+Two paths, both from the repo root:
 
-    nix-shell ../../shell.nix --run 'go build -o miniscram-gui .'
+    # Build a self-contained binary via the flake.
+    nix build .#miniscram-gui
+
+    # Or drop into a dev shell with the X11/Wayland/GL/Vulkan stack on
+    # the build path, then `go build` the GUI submodule directly.
+    nix develop .#gui
+    cd tools/miniscram-gui && go build .
+
+On a non-Nix Linux desktop, the system X11/Wayland + GL + Vulkan
+headers + a C toolchain are sufficient (see `.github/workflows/ci.yml`
+for the apt list).
 
 ## Storage
 
