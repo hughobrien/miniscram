@@ -68,7 +68,11 @@ func TestActionRunner_Happy(t *testing.T) {
 	gBefore := runtime.NumGoroutine()
 	r, done := newTestRunner(t, "happy")
 
-	if err := r.Start("verify", "/in/path.miniscram", ""); err != nil {
+	// Use os.Args[0] (the test binary) as a stand-in output path so
+	// os.Stat in wait() returns a real non-zero size. The runner only
+	// uses Output for state/result; it isn't passed to the command.
+	output := os.Args[0]
+	if err := r.Start("verify", "/in/path.miniscram", output); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
@@ -78,6 +82,9 @@ func TestActionRunner_Happy(t *testing.T) {
 	}
 	if res.DurationMs <= 0 {
 		t.Errorf("duration = %dms, want > 0", res.DurationMs)
+	}
+	if res.OutputSize <= 0 {
+		t.Errorf("OutputSize = %d, want > 0 for existing output path %q", res.OutputSize, output)
 	}
 
 	time.Sleep(100 * time.Millisecond)

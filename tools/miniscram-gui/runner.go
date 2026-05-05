@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -126,6 +127,7 @@ func (r *actionRunner) Cancel() {
 // Runs on its own goroutine; exits when the pipe closes.
 func (r *actionRunner) readStderr(stderr io.ReadCloser) {
 	scanner := bufio.NewScanner(stderr)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -152,6 +154,11 @@ func (r *actionRunner) wait() {
 	r.cmd = nil
 	r.state = nil
 	r.mu.Unlock()
+	if state == nil {
+		// Defensive: wait runs exactly once per Start, so this is unreachable
+		// unless a future change clears state from elsewhere. Don't panic.
+		return
+	}
 
 	res := actionResult{
 		Action:     state.Action,
@@ -170,6 +177,11 @@ func (r *actionRunner) wait() {
 		}
 	default:
 		res.Status = "success"
+		if state.Output != "" {
+			if st, err := os.Stat(state.Output); err == nil {
+				res.OutputSize = st.Size()
+			}
+		}
 	}
 
 	if r.onDone != nil {
