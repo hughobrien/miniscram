@@ -117,3 +117,66 @@ func TestAddPaths_NonCueNonDirIgnored(t *testing.T) {
 		t.Errorf("len(items) = %d, want 0 (.txt should be ignored)", got)
 	}
 }
+
+func TestPrettyProgressLine_Step(t *testing.T) {
+	got := prettyProgressLine(`{"type":"step","label":"writing miniscram"}`)
+	if got != "step: writing miniscram…" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestPrettyProgressLine_Done(t *testing.T) {
+	got := prettyProgressLine(`{"type":"done","label":"writing miniscram","msg":"123 bytes"}`)
+	if got != "done: writing miniscram ✓" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestPrettyProgressLine_Info(t *testing.T) {
+	got := prettyProgressLine(`{"type":"info","msg":"detected write offset 0"}`)
+	if got != "detected write offset 0" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestPrettyProgressLine_Fail(t *testing.T) {
+	got := prettyProgressLine(`{"type":"fail","label":"writing miniscram","error":"disk full"}`)
+	if got != "disk full" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestPrettyProgressLine_NotJSON(t *testing.T) {
+	got := prettyProgressLine("plain text line")
+	if got != "plain text line" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestLookupFraction_KnownLabels(t *testing.T) {
+	cases := map[string]float64{
+		"resolving cue /tmp/x.cue":            0.02, // prefix-match with suffix
+		"detecting write offset":              0.05,
+		"checking constant offset":            0.08,
+		"hashing tracks":                      0.15,
+		"hashing scram":                       0.30,
+		"building scram prediction + delta":   0.65,
+		"writing container":                   0.95,
+	}
+	for label, want := range cases {
+		got, ok := lookupFraction(label)
+		if !ok {
+			t.Errorf("lookupFraction(%q) returned !ok", label)
+			continue
+		}
+		if got != want {
+			t.Errorf("lookupFraction(%q) = %f, want %f", label, got, want)
+		}
+	}
+}
+
+func TestLookupFraction_UnknownLabel(t *testing.T) {
+	if _, ok := lookupFraction("frobnicating"); ok {
+		t.Error("lookupFraction unknown label returned ok=true")
+	}
+}

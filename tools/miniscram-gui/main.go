@@ -776,7 +776,7 @@ func loop(w *app.Window, mdl *model) error {
 			}
 			if verifyBtn.Clicked(gtx) && mdl.kind == "miniscram" && !mdl.runner.Running() {
 				mdl.toast = nil
-				_ = mdl.runner.Start("verify", mdl.path, "", "verify", mdl.path)
+				_ = mdl.runner.Start("verify", mdl.path, "", "verify", "--progress=json", mdl.path)
 			}
 			if unpackBtn.Clicked(gtx) && mdl.kind == "miniscram" && !mdl.runner.Running() {
 				mdl.toast = nil
@@ -802,7 +802,7 @@ func loop(w *app.Window, mdl *model) error {
 						}
 						return
 					}
-					_ = mdl.runner.Start("unpack", srcPath, out, "unpack", srcPath, "-o", out)
+					_ = mdl.runner.Start("unpack", srcPath, out, "unpack", "--progress=json", srcPath, "-o", out)
 				}()
 			}
 			if toastDismissBtn.Clicked(gtx) && mdl.toast != nil {
@@ -814,7 +814,7 @@ func loop(w *app.Window, mdl *model) error {
 			if packBtn.Clicked(gtx) && mdl.kind == "cue" && !mdl.runner.Running() {
 				mdl.toast = nil
 				out := strings.TrimSuffix(mdl.path, filepath.Ext(mdl.path)) + ".miniscram"
-				args := []string{"pack", mdl.path}
+				args := []string{"pack", "--progress=json", mdl.path}
 				if !deleteScramCB.Value {
 					args = append(args, "--keep-source")
 				}

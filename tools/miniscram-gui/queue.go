@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -154,4 +155,63 @@ func (q *queueModel) addPaths(mdl *model, paths []string) {
 		q.nextID++
 	}
 	// TODO(Task 4): if !q.workerRunning && q.hasReady() { go q.drain(mdl) }
+}
+
+// progressEvent is the wire shape emitted by `miniscram --progress=json`.
+// Mirrors the struct in reporter.go; redefined here because the GUI is its
+// own Go module and cannot import the main package.
+type progressEvent struct {
+	Type  string `json:"type"`
+	Label string `json:"label,omitempty"`
+	Msg   string `json:"msg,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// prettyProgressLine renders a stderr line for human display. NDJSON
+// events from --progress=json get a friendly form; non-JSON falls
+// through unchanged so the strip keeps working in any future mode.
+func prettyProgressLine(s string) string {
+	var ev progressEvent
+	if err := json.Unmarshal([]byte(s), &ev); err != nil {
+		return s
+	}
+	switch ev.Type {
+	case "step":
+		return "step: " + ev.Label + "…"
+	case "done":
+		return "done: " + ev.Label + " ✓"
+	case "info", "warn":
+		return ev.Msg
+	case "fail":
+		if ev.Error != "" {
+			return ev.Error
+		}
+		return ev.Label + " failed"
+	}
+	return s
+}
+
+// packPhases maps known pack-step label prefixes to a target fraction.
+// Order matters only for human readability; lookup is by prefix-match.
+// Labels and their order come from pack.go (see the spec for citations).
+var packPhases = []struct {
+	Prefix   string
+	Fraction float64
+}{
+	{"resolving cue", 0.02},
+	{"detecting write offset", 0.05},
+	{"checking constant offset", 0.08}, // conditional
+	{"hashing tracks", 0.15},
+	{"hashing scram", 0.30},
+	{"building scram prediction + delta", 0.65},
+	{"writing container", 0.95},
+}
+
+func lookupFraction(label string) (float64, bool) {
+	for _, p := range packPhases {
+		if strings.HasPrefix(label, p.Prefix) {
+			return p.Fraction, true
+		}
+	}
+	return 0, false
 }
