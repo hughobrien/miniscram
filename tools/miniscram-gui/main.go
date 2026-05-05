@@ -2,7 +2,11 @@ package main
 
 import (
 	"bufio"
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -280,6 +284,11 @@ type cueTrack struct {
 	filename string
 	size     int64
 	exists   bool
+	// hashes is populated asynchronously by hashCueBins. Keys are
+	// "md5"/"sha1"/"sha256". Read/write under model.redumpMu.
+	hashes map[string]string
+	// state is "" (no hash run started), "hashing", "done", or "fail".
+	state string
 }
 
 // ---------------- redump lookup ----------------
@@ -386,11 +395,16 @@ func (m *model) load(p string) {
 	m.err = ""
 	m.meta = nil
 	m.miniscramOnDisk = 0
-	m.cueTracks = nil
 	m.cueText = ""
+	// cueTracks may be read by an in-flight hashCueBins goroutine from
+	// a previous load(). Take the redump mutex so the reset and any
+	// future reassignment serialize with that goroutine's access.
+	m.redumpMu.Lock()
+	m.cueTracks = nil
 	if m.redump == nil {
 		m.redump = map[string]*redumpEntry{}
 	}
+	m.redumpMu.Unlock()
 
 	switch strings.ToLower(filepath.Ext(p)) {
 	case ".miniscram":
@@ -424,7 +438,18 @@ func (m *model) load(p string) {
 			return
 		}
 		m.cueText = string(b)
-		m.cueTracks = parseCueLines(m.cueText, m.dir)
+		tracks := parseCueLines(m.cueText, m.dir)
+		// Pre-resolve full bin paths so hashCueBins never reads m.dir
+		// asynchronously — load() may run again and mutate m.dir before
+		// the goroutine finishes.
+		fullPaths := make([]string, len(tracks))
+		for i, t := range tracks {
+			fullPaths[i] = filepath.Join(m.dir, t.filename)
+		}
+		m.redumpMu.Lock()
+		m.cueTracks = tracks
+		m.redumpMu.Unlock()
+		go m.hashCueBins(tracks, fullPaths)
 	default:
 		m.err = "drop a .miniscram or a .cue"
 	}
@@ -591,6 +616,88 @@ func parseCueLines(s, baseDir string) []cueTrack {
 		}
 	}
 	return out
+}
+
+// hashCueBin streams a bin file through MD5/SHA-1/SHA-256 in one
+// pass via io.MultiWriter and returns hex digests. Per-track redump
+// hashes use the SHA-1 of the raw 2352-byte bin, so this matches
+// what redump's per-track hash columns store.
+func hashCueBin(path string) (md5h, sha1h, sha256h string, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", "", "", err
+	}
+	defer f.Close()
+	mh := md5.New()
+	s1 := sha1.New()
+	s256 := sha256.New()
+	if _, err = io.Copy(io.MultiWriter(mh, s1, s256), f); err != nil {
+		return "", "", "", err
+	}
+	return hex.EncodeToString(mh.Sum(nil)),
+		hex.EncodeToString(s1.Sum(nil)),
+		hex.EncodeToString(s256.Sum(nil)),
+		nil
+}
+
+// hashCueBins fans out one goroutine per existing bin file, computes
+// md5/sha1/sha256 in parallel, and feeds each SHA-1 into the existing
+// redump-lookup pipeline so cue rows show the same green-row + Open ↗
+// link as miniscram view rows.
+//
+// Takes `tracks` and `fullPaths` by reference rather than reading
+// m.cueTracks / m.dir asynchronously. If load() runs again before the
+// goroutine finishes, m.cueTracks will point at a different slice and
+// our writes harmlessly land in the discarded one — UI reads m.cueTracks
+// (under m.redumpMu) and sees the new state.
+func (m *model) hashCueBins(tracks []cueTrack, fullPaths []string) {
+	type job struct {
+		idx  int
+		full string
+	}
+	var jobs []job
+	m.redumpMu.Lock()
+	for i := range tracks {
+		if !tracks[i].exists {
+			continue
+		}
+		tracks[i].state = "hashing"
+		jobs = append(jobs, job{idx: i, full: fullPaths[i]})
+	}
+	m.redumpMu.Unlock()
+	if m.invalidate != nil {
+		m.invalidate()
+	}
+
+	var wg sync.WaitGroup
+	for _, j := range jobs {
+		j := j
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			md5h, sha1h, sha256h, err := hashCueBin(j.full)
+			m.redumpMu.Lock()
+			if err != nil {
+				tracks[j.idx].state = "fail"
+			} else {
+				tracks[j.idx].hashes = map[string]string{
+					"md5":    md5h,
+					"sha1":   sha1h,
+					"sha256": sha256h,
+				}
+				tracks[j.idx].state = "done"
+			}
+			m.redumpMu.Unlock()
+			if m.invalidate != nil {
+				m.invalidate()
+			}
+			if err == nil && sha1h != "" {
+				// lookup() handles its own redump cache + dedup.
+				m.lookup([]string{sha1h})
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // ---------------- helpers ----------------
@@ -1237,7 +1344,7 @@ func body(gtx layout.Context, th *material.Theme,
 	case "miniscram":
 		return miniscramView(gtx, th, mdl, verifyBtn, unpackBtn, getCopy, getLink)
 	case "cue":
-		return cueView(gtx, th, mdl, packBtn, deleteScram)
+		return cueView(gtx, th, mdl, packBtn, deleteScram, getCopy, getLink)
 	default:
 		return emptyView(gtx, th, mdl)
 	}
@@ -1261,7 +1368,10 @@ func miniscramView(gtx layout.Context, th *material.Theme, mdl *model,
 	)
 }
 
-func cueView(gtx layout.Context, th *material.Theme, mdl *model, packBtn *widget.Clickable, deleteScram *widget.Bool) layout.Dimensions {
+func cueView(gtx layout.Context, th *material.Theme, mdl *model, packBtn *widget.Clickable, deleteScram *widget.Bool,
+	getCopy func(string) *widget.Clickable,
+	getLink func(string, string) *linkEntry,
+) layout.Dimensions {
 	scramPath := strings.TrimSuffix(mdl.path, filepath.Ext(mdl.path)) + ".scram"
 	hasScram := false
 	if st, err := os.Stat(scramPath); err == nil && st.Size() > 0 {
@@ -1336,7 +1446,7 @@ func cueView(gtx layout.Context, th *material.Theme, mdl *model, packBtn *widget
 			})
 		}),
 		layout.Rigid(spacer(0, 16)),
-		layout.Rigid(cueTracksCard(th, mdl)),
+		layout.Rigid(cueTracksCard(th, mdl, getCopy, getLink)),
 	)
 }
 
@@ -1722,6 +1832,32 @@ func statTile(th *material.Theme, label, value string) layout.Widget {
 	})
 }
 
+// hashPendingRow renders a muted "hashing…" placeholder under a cue
+// track row while the SHA-1/MD5/SHA-256 stream is in flight.
+func hashPendingRow(th *material.Theme) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(8), Left: unit.Dp(30)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			l := material.Label(th, unit.Sp(11), "hashing…")
+			l.Color = text3
+			l.Font.Typeface = "Go Mono"
+			return l.Layout(gtx)
+		})
+	}
+}
+
+// hashFailRow renders a muted error placeholder if the bin file
+// couldn't be opened or read.
+func hashFailRow(th *material.Theme) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(8), Left: unit.Dp(30)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			l := material.Label(th, unit.Sp(11), "hash failed (read error)")
+			l.Color = bad
+			l.Font.Typeface = "Go Mono"
+			return l.Layout(gtx)
+		})
+	}
+}
+
 func tracksCard(th *material.Theme, mdl *model,
 	getCopy func(string) *widget.Clickable,
 	getLink func(string, string) *linkEntry,
@@ -1909,10 +2045,28 @@ func scramHashRow(th *material.Theme, algo, value string, copyBtn *widget.Clicka
 	}
 }
 
-func cueTracksCard(th *material.Theme, mdl *model) layout.Widget {
+func cueTracksCard(th *material.Theme, mdl *model,
+	getCopy func(string) *widget.Clickable,
+	getLink func(string, string) *linkEntry,
+) layout.Widget {
 	return card(func(gtx layout.Context) layout.Dimensions {
+		// Snapshot async-mutated fields under the model's redump mutex
+		// so the layout never reads partially-written hash maps.
+		mdl.redumpMu.Lock()
+		snap := make([]cueTrack, len(mdl.cueTracks))
+		copy(snap, mdl.cueTracks)
+		// Snapshot the relevant redump entries too so the lock is held
+		// briefly and the layout can read freely from local state.
+		entries := make(map[string]*redumpEntry, len(snap))
+		for _, ct := range snap {
+			if h := ct.hashes["sha1"]; h != "" {
+				entries[h] = mdl.redump[h]
+			}
+		}
+		mdl.redumpMu.Unlock()
+
 		var children []layout.FlexChild
-		children = append(children, layout.Rigid(sectionHeader(th, fmt.Sprintf("Tracks in cue (%d)", len(mdl.cueTracks)))))
+		children = append(children, layout.Rigid(sectionHeader(th, fmt.Sprintf("Tracks in cue (%d)", len(snap)))))
 		children = append(children, layout.Rigid(spacer(0, 12)))
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{}.Layout(gtx,
@@ -1923,7 +2077,7 @@ func cueTracksCard(th *material.Theme, mdl *model) layout.Widget {
 			)
 		}))
 		children = append(children, layout.Rigid(thinDivider))
-		for i, ct := range mdl.cueTracks {
+		for i, ct := range snap {
 			i := i
 			ct := ct
 			if i > 0 {
@@ -1956,6 +2110,30 @@ func cueTracksCard(th *material.Theme, mdl *model) layout.Widget {
 					)
 				})
 			}))
+
+			// Hash sub-rows mirror miniscram view: SHA-1 (with redump
+			// chip + Open ↗ link), then MD5. Collapse to a "hashing…"
+			// placeholder while the goroutine is mid-stream.
+			if ct.exists && (ct.state == "hashing" || ct.state == "") && len(ct.hashes) == 0 {
+				children = append(children, layout.Rigid(hashPendingRow(th)))
+			}
+			if ct.state == "fail" {
+				children = append(children, layout.Rigid(hashFailRow(th)))
+			}
+			for _, algo := range []string{"sha1", "md5"} {
+				v, ok := ct.hashes[algo]
+				if !ok || v == "" {
+					continue
+				}
+				var entry *redumpEntry
+				if algo == "sha1" {
+					entry = entries[v]
+				}
+				children = append(children, layout.Rigid(hashSubRow(th, algo, v, entry,
+					getCopy(fmt.Sprintf("cue-t%d-%s", ct.num, algo)),
+					getLink(fmt.Sprintf("cue-t%d-%s-link", ct.num, algo), entryURL(entry)),
+				)))
+			}
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
