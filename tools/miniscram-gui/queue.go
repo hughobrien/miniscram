@@ -391,6 +391,16 @@ func (q *queueModel) drain(mdl *model) {
 			eventInsert(mdl.db, ev)
 			mdl.refreshStats()
 		}
+		// Mirror the single-file flow's post-pack auto-load: switch the
+		// right pane onto the freshly written .miniscram. For the last
+		// item this is the final view the user sees; mid-queue this
+		// briefly shows the result before the next iteration's
+		// mdl.load(nextCue) at the top of the loop replaces it.
+		// Gated on autoFollow because the user may have taken control
+		// of the right pane mid-queue and we don't want to yank it.
+		if autoFollow && res.Status == "success" && mdl != nil {
+			mdl.load(out)
+		}
 		if mdl != nil && mdl.invalidate != nil {
 			mdl.invalidate()
 		}
