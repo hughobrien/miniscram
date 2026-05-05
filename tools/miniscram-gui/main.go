@@ -199,6 +199,9 @@ type model struct {
 
 	// per-row delete buttons for stats events
 	deleteBtns map[int64]*widget.Clickable
+
+	runner    *actionRunner
+	lastEvent eventRec // populated in onDone; used by Task 3's toast
 }
 
 func (m *model) load(p string) {
@@ -290,58 +293,6 @@ func (m *model) refreshStats() {
 	m.stats = eventsAggregate(m.db)
 	m.recent = eventsRecent(m.db, 25)
 	m.statsLoaded = true
-}
-
-// record an event for an action that ran via the GUI
-func (m *model) recordPackEvent(input, output string, keepSource bool) {
-	t0 := time.Now()
-	args := []string{"pack", input}
-	if keepSource {
-		args = append(args, "--keep-source")
-	}
-	out, err := exec.Command("miniscram", args...).CombinedOutput()
-	dur := time.Since(t0).Milliseconds()
-	ev := eventRec{TS: time.Now(), Action: "pack", InputPath: input, OutputPath: output, DurationMs: dur, Status: "success"}
-	if err != nil {
-		ev.Status = "fail"
-		ev.Error = lastNonEmptyLine(string(out))
-	} else if mscm := output; mscm != "" {
-		// fill in metrics from inspect
-		if raw, ierr := exec.Command("miniscram", "inspect", mscm, "--json").Output(); ierr == nil {
-			var meta inspectJSON
-			if json.Unmarshal(raw, &meta) == nil {
-				ev.ScramSize = meta.Scram.Size
-				ev.OverrideRecords = len(meta.DeltaRecords)
-				ev.WriteOffset = meta.WriteOffsetBytes
-				if st, sterr := os.Stat(mscm); sterr == nil {
-					ev.MiniscramSize = st.Size()
-				}
-			}
-		}
-		// resolve title via redump on first track sha1
-		if m.meta != nil && len(m.meta.Tracks) > 0 {
-			h := m.meta.Tracks[0].Hashes["sha1"]
-			if e, ok := redumpGet(m.db, h); ok && e.State == "found" {
-				ev.Title = e.Title
-			}
-		}
-	}
-	eventInsert(m.db, ev)
-}
-
-func (m *model) recordVerifyEvent(path string) {
-	t0 := time.Now()
-	_, err := exec.Command("miniscram", "verify", path).CombinedOutput()
-	ev := eventRec{TS: time.Now(), Action: "verify", InputPath: path, DurationMs: time.Since(t0).Milliseconds(), Status: "success"}
-	if err != nil {
-		ev.Status = "fail"
-		ev.Error = err.Error()
-	}
-	if m.meta != nil {
-		ev.ScramSize = m.meta.Scram.Size
-		ev.MiniscramSize = m.miniscramOnDisk
-	}
-	eventInsert(m.db, ev)
 }
 
 func lastNonEmptyLine(s string) string {
@@ -514,6 +465,76 @@ func main() {
 		mdl.refreshStats()
 	}
 
+	mdl.runner = newActionRunner(
+		func() {
+			if mdl.invalidate != nil {
+				mdl.invalidate()
+			}
+		},
+		func(res actionResult) {
+			// Translate actionResult into an event row.
+			ev := eventRec{
+				TS:         time.Now(),
+				Action:     res.Action,
+				InputPath:  res.Input,
+				OutputPath: res.Output,
+				DurationMs: res.DurationMs,
+				Status:     res.Status,
+				Error:      res.Error,
+			}
+			fillTitle := func(meta *inspectJSON) {
+				if meta == nil || len(meta.Tracks) == 0 {
+					return
+				}
+				if e, ok := redumpGet(mdl.db, meta.Tracks[0].Hashes["sha1"]); ok && e.State == "found" {
+					ev.Title = e.Title
+				}
+			}
+			if res.Status == "success" {
+				switch res.Action {
+				case "pack":
+					if res.Output != "" {
+						if st, err := os.Stat(res.Output); err == nil {
+							ev.MiniscramSize = st.Size()
+						}
+						if raw, err := exec.Command("miniscram", "inspect", res.Output, "--json").Output(); err == nil {
+							var meta inspectJSON
+							if json.Unmarshal(raw, &meta) == nil {
+								ev.ScramSize = meta.Scram.Size
+								ev.OverrideRecords = len(meta.DeltaRecords)
+								ev.WriteOffset = meta.WriteOffsetBytes
+								fillTitle(&meta)
+							}
+						}
+					}
+				case "unpack":
+					if res.Output != "" {
+						if st, err := os.Stat(res.Output); err == nil {
+							ev.ScramSize = st.Size()
+						}
+					}
+					if mdl.meta != nil {
+						ev.MiniscramSize = mdl.miniscramOnDisk
+						ev.OverrideRecords = len(mdl.meta.DeltaRecords)
+						ev.WriteOffset = mdl.meta.WriteOffsetBytes
+						fillTitle(mdl.meta)
+					}
+				case "verify":
+					if mdl.meta != nil {
+						ev.ScramSize = mdl.meta.Scram.Size
+						ev.MiniscramSize = mdl.miniscramOnDisk
+						ev.OverrideRecords = len(mdl.meta.DeltaRecords)
+						ev.WriteOffset = mdl.meta.WriteOffsetBytes
+						fillTitle(mdl.meta)
+					}
+				}
+			}
+			eventInsert(mdl.db, ev)
+			mdl.refreshStats()
+			mdl.lastEvent = ev
+		},
+	)
+
 	go func() {
 		w := new(app.Window)
 		w.Option(app.Title("miniscram-gui"), app.Size(unit.Dp(1000), unit.Dp(820)))
@@ -545,6 +566,7 @@ func loop(w *app.Window, mdl *model) error {
 		verifyBtn     widget.Clickable
 		unpackBtn     widget.Clickable
 		packBtn       widget.Clickable
+		cancelBtn     widget.Clickable
 		deleteScramCB = widget.Bool{Value: true} // default: consume scram on success
 		mockHoverCB   widget.Bool                // for screenshots
 		copyBtns      = make(map[string]*widget.Clickable)
@@ -575,6 +597,13 @@ func loop(w *app.Window, mdl *model) error {
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
+			if mdl.runner != nil && mdl.runner.Running() {
+				mdl.runner.Cancel()
+				deadline := time.Now().Add(5 * time.Second)
+				for mdl.runner.Running() && time.Now().Before(deadline) {
+					time.Sleep(50 * time.Millisecond)
+				}
+			}
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
@@ -598,14 +627,20 @@ func loop(w *app.Window, mdl *model) error {
 					}
 				}()
 			}
-			if verifyBtn.Clicked(gtx) && mdl.kind == "miniscram" {
-				go func() { mdl.recordVerifyEvent(mdl.path); mdl.invalidate() }()
+			if cancelBtn.Clicked(gtx) {
+				mdl.runner.Cancel()
 			}
-			_ = unpackBtn.Clicked(gtx)
-			if packBtn.Clicked(gtx) && mdl.kind == "cue" {
+			if verifyBtn.Clicked(gtx) && mdl.kind == "miniscram" && !mdl.runner.Running() {
+				_ = mdl.runner.Start("verify", mdl.path, "", "verify", mdl.path)
+			}
+			_ = unpackBtn.Clicked(gtx) // wired in Task 3
+			if packBtn.Clicked(gtx) && mdl.kind == "cue" && !mdl.runner.Running() {
 				out := strings.TrimSuffix(mdl.path, filepath.Ext(mdl.path)) + ".miniscram"
-				keepSource := !deleteScramCB.Value
-				go func() { mdl.recordPackEvent(mdl.path, out, keepSource); mdl.invalidate() }()
+				args := []string{"pack", mdl.path}
+				if !deleteScramCB.Value {
+					args = append(args, "--keep-source")
+				}
+				_ = mdl.runner.Start("pack", mdl.path, out, args...)
 			}
 			for _, le := range linkBtns {
 				if le.click.Clicked(gtx) && le.url != "" {
@@ -628,6 +663,7 @@ func loop(w *app.Window, mdl *model) error {
 					return topBar(th, mdl, &openBtn, &statsBtn, &fileBtn).Layout(gtx)
 				}),
 				layout.Rigid(divider),
+				layout.Rigid(runningStripWidget(th, mdl.runner.Snapshot(), &cancelBtn)),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return material.List(th, &listScroll).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
 						return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -788,7 +824,7 @@ func cueView(gtx layout.Context, th *material.Theme, mdl *model, packBtn *widget
 				}),
 				layout.Rigid(spacer(16, 0)),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !hasScram || !allBinsExist {
+					if !hasScram || !allBinsExist || mdl.runner.Running() {
 						gtx = gtx.Disabled()
 					}
 					btn := material.Button(th, packBtn, "Pack")
@@ -798,7 +834,7 @@ func cueView(gtx layout.Context, th *material.Theme, mdl *model, packBtn *widget
 					btn.TextSize = unit.Sp(14)
 					btn.Inset = layout.Inset{Top: 10, Bottom: 10, Left: 22, Right: 22}
 					btn.Font.Weight = font.SemiBold
-					if !hasScram || !allBinsExist {
+					if !hasScram || !allBinsExist || mdl.runner.Running() {
 						btn.Background = surface2
 						btn.Color = text3
 					}
@@ -981,9 +1017,13 @@ func eventRow(th *material.Theme, ev eventRec, deleteBtn *widget.Clickable) layo
 		}
 		statusCol := good
 		statusLabel := "PASS"
-		if ev.Status != "success" {
+		switch ev.Status {
+		case "fail":
 			statusCol = bad
 			statusLabel = "FAIL"
+		case "cancelled":
+			statusCol = text3
+			statusLabel = "CANCELLED"
 		}
 		return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
@@ -1131,6 +1171,9 @@ func heroRow(th *material.Theme, mdl *model, verifyBtn, unpackBtn *widget.Clicka
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if mdl.runner.Running() {
+							gtx = gtx.Disabled()
+						}
 						btn := material.Button(th, verifyBtn, "Verify")
 						btn.Background = accent
 						btn.Color = accentFg
@@ -1142,6 +1185,9 @@ func heroRow(th *material.Theme, mdl *model, verifyBtn, unpackBtn *widget.Clicka
 					}),
 					layout.Rigid(spacer(8, 0)),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if mdl.runner.Running() {
+							gtx = gtx.Disabled()
+						}
 						btn := material.Button(th, unpackBtn, "Unpack…")
 						btn.Background = surface2
 						btn.Color = text1
