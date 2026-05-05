@@ -20,17 +20,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so a user who has manually loaded a different file mid-queue
   isn't yanked.
 
-### Changed
-
-- README hero is now an inline demo video
-  (`tools/miniscram-gui/screenshots/miniscram-demo.mp4`) instead of
-  a static screenshot. The video is checked in via Git LFS (new
-  `.gitattributes` entry: `tools/miniscram-gui/screenshots/*.mp4
-  filter=lfs`), so cloning without `git lfs` will leave a pointer
-  file in place of the .mp4 — the README's `<video>` tag falls back
-  to the original `01-miniscram.png` as `poster`, and a plain text
-  link is the inner content for clients that don't render `<video>`.
-
 ## [1.2.3] - 2026-05-05
 
 ### Fixed
