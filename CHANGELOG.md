@@ -4,14 +4,28 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.6] - 2026-05-05
+
+### Changed
+
+- **Each platform ships as a single archive** containing both
+  binaries pre-paired (`miniscram` next to `miniscram-gui`), plus
+  `LICENSE` and `README.md`. `miniscram-vX.Y.Z-linux-amd64.tar.gz`
+  for Linux, `.zip` for Windows. The GUI's `resolveMiniscram()`
+  picks the CLI up from the sibling slot on first launch — one
+  download, working install, no "miniscram CLI not found" banner.
+  Loose per-binary downloads are no longer published.
+
 ## [1.2.5] - 2026-05-05
 
 ### Changed
 
 - **Releases now ship miniscram-gui binaries alongside the CLI** for
-  linux/darwin/windows on amd64. The release workflow gained a
+  linux and windows on amd64. The release workflow gained a
   per-platform native-runner matrix for the GUI build (Gio + CGO
-  rules out the cross-compile path the CLI uses).
+  rules out the cross-compile path the CLI uses). darwin/amd64 was
+  dropped from the matrix when the macos-13 GUI runner hung on the
+  first attempt; arm64 not yet wired up.
 - **Only the latest release carries downloadable assets.** Older
   release tags + notes remain so changelog and issue links stay
   anchored, but binaries are auto-pruned by the release workflow on

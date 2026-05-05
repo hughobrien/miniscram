@@ -121,10 +121,38 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Generate SHA256SUMS
-        working-directory: dist
+      - name: Stage per-platform bundles
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
-          sha256sum miniscram-* > SHA256SUMS
+          # The GUI's resolveMiniscram() looks for the CLI as a sibling
+          # of the GUI binary first, so a tarball with both side-by-side
+          # gives the user a working install on extract. Bundle LICENSE
+          # (GPL-3.0 redistribution requirement) and README.md so the
+          # archive is self-contained.
+          mkdir -p archives
+          for platform in linux-amd64 windows-amd64; do
+            goos="${platform%-*}"
+            ext=""
+            [ "$goos" = "windows" ] && ext=".exe"
+            stage="miniscram-${VERSION}-${platform}"
+            mkdir -p "staged/${stage}"
+            cp "dist/miniscram-${VERSION}-${platform}${ext}"     "staged/${stage}/miniscram${ext}"
+            cp "dist/miniscram-gui-${VERSION}-${platform}${ext}" "staged/${stage}/miniscram-gui${ext}"
+            cp LICENSE README.md                                 "staged/${stage}/"
+            chmod +x "staged/${stage}/miniscram${ext}" "staged/${stage}/miniscram-gui${ext}"
+            if [ "$goos" = "windows" ]; then
+              (cd staged && zip -qr "../archives/${stage}.zip" "${stage}")
+            else
+              tar -C staged -czf "archives/${stage}.tar.gz" "${stage}"
+            fi
+          done
+          ls -la archives/
+
+      - name: Generate SHA256SUMS
+        working-directory: archives
+        run: |
+          sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create GitHub Release
@@ -143,12 +171,10 @@ jobs:
               printing { print }
             ' CHANGELOG.md > "$NOTES_FILE"
           fi
-          # dist/miniscram-* picks up both CLI (miniscram-vX.Y.Z-...)
-          # and GUI (miniscram-gui-vX.Y.Z-...) binaries.
           if [ -s "$NOTES_FILE" ]; then
-            gh release create "$VERSION" --title "$VERSION" --notes-file "$NOTES_FILE" dist/miniscram-* dist/SHA256SUMS
+            gh release create "$VERSION" --title "$VERSION" --notes-file "$NOTES_FILE" archives/*
           else
-            gh release create "$VERSION" --title "$VERSION" --generate-notes dist/miniscram-* dist/SHA256SUMS
+            gh release create "$VERSION" --title "$VERSION" --generate-notes archives/*
           fi
 
       - name: Strip assets from previous releases
