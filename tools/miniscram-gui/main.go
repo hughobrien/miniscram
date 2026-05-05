@@ -1341,18 +1341,15 @@ func cueView(gtx layout.Context, th *material.Theme, mdl *model, packBtn *widget
 }
 
 func emptyView(gtx layout.Context, th *material.Theme, mdl *model) layout.Dimensions {
-	msg := "Drop a .miniscram or .cue here, or use Open file…"
-	if mdl.err != "" {
-		msg = "error: " + mdl.err
+	// The queue panel on the left already advertises drag-drop. The right
+	// pane just needs to acknowledge that it's empty (or surface an error).
+	if mdl.err == "" {
+		return layout.Dimensions{}
 	}
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				l := material.Label(th, unit.Sp(15), msg)
-				l.Color = text2
-				return l.Layout(gtx)
-			}),
-		)
+		l := material.Label(th, unit.Sp(15), "error: "+mdl.err)
+		l.Color = text2
+		return l.Layout(gtx)
 	})
 }
 
