@@ -125,9 +125,9 @@ func (q *queueModel) hasPath(abs string) bool {
 // mdl may be nil in tests (no .miniscram inspect-load triggered).
 func (q *queueModel) addPaths(mdl *model, paths []string) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 
 	var cues []string
+	var miniscramPaths []string // .miniscram files to load after releasing the lock
 	for _, p := range paths {
 		abs, err := filepath.Abs(p)
 		if err != nil {
@@ -145,10 +145,8 @@ func (q *queueModel) addPaths(mdl *model, paths []string) {
 			cues = append(cues, abs)
 		case strings.EqualFold(filepath.Ext(abs), ".miniscram"):
 			// Single-file flow: load into inspect. Disengages autoFollow.
-			if mdl != nil {
-				mdl.load(abs)
-				q.autoFollow = false
-			}
+			miniscramPaths = append(miniscramPaths, abs)
+			q.autoFollow = false
 		}
 	}
 	for _, cue := range cues {
@@ -158,7 +156,15 @@ func (q *queueModel) addPaths(mdl *model, paths []string) {
 		q.items = append(q.items, classify(cue, q.nextID))
 		q.nextID++
 	}
-	if !q.workerRunning && q.hasReady() && mdl != nil {
+	needWorker := !q.workerRunning && q.hasReady() && mdl != nil
+	q.mu.Unlock()
+
+	// Load .miniscram files into the inspect pane without holding the queue lock.
+	if mdl != nil && len(miniscramPaths) > 0 {
+		mdl.load(miniscramPaths[len(miniscramPaths)-1])
+	}
+
+	if needWorker {
 		go q.drain(mdl)
 	}
 }
@@ -372,6 +378,19 @@ type queueSnapshot struct {
 	WorkerRunning bool
 	ReadyCount    int
 	SkippedCount  int
+}
+
+// removeByID removes the item with the given ID from the queue.
+// Safe to call from the UI goroutine.
+func (q *queueModel) removeByID(id int64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i, it := range q.items {
+		if it.ID == id {
+			q.items = append(q.items[:i], q.items[i+1:]...)
+			return
+		}
+	}
 }
 
 // Snapshot builds a queueSnapshot under the mutex. Call from the UI goroutine

@@ -815,6 +815,11 @@ func loop(w *app.Window, mdl *model) error {
 	)
 	_ = mockHoverCB
 	listScroll.Axis = layout.Vertical
+
+	qBtns := newQueuePanelButtons()
+	qBtns.DeleteScramCB.Value = true // mirror queue-level default (deleteScram: true)
+	var qListScroll widget.List
+	qListScroll.Axis = layout.Vertical
 	getCopy := func(key string) *widget.Clickable {
 		if c, ok := copyBtns[key]; ok {
 			return c
@@ -837,6 +842,11 @@ func loop(w *app.Window, mdl *model) error {
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
+			if mdl.queue != nil {
+				mdl.queue.mu.Lock()
+				mdl.queue.stopped = true
+				mdl.queue.mu.Unlock()
+			}
 			if mdl.runner != nil && mdl.runner.Running() {
 				mdl.runner.Cancel()
 				deadline := time.Now().Add(5 * time.Second)
@@ -848,13 +858,25 @@ func loop(w *app.Window, mdl *model) error {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 
+			// qWorker reports whether the queue's background drain goroutine
+			// currently owns the runner. When true, single-file buttons are
+			// disabled and the done-channel drain is skipped.
+			qWorker := func() bool {
+				mdl.queue.mu.Lock()
+				defer mdl.queue.mu.Unlock()
+				return mdl.queue.workerRunning
+			}
+
 			// Drain any completed action onto the UI goroutine. Single-flight
 			// + cap-1 channel + r.invalidate() in wait() means at most one
 			// result is ever pending, so a single non-blocking receive suffices.
-			select {
-			case res := <-mdl.runner.done:
-				mdl.handleActionResult(res)
-			default:
+			// Skip when the queue worker owns the done channel.
+			if !qWorker() {
+				select {
+				case res := <-mdl.runner.done:
+					mdl.handleActionResult(res)
+				default:
+				}
 			}
 
 			if statsBtn.Clicked(gtx) {
@@ -879,11 +901,11 @@ func loop(w *app.Window, mdl *model) error {
 			if cancelBtn.Clicked(gtx) {
 				mdl.runner.Cancel()
 			}
-			if verifyBtn.Clicked(gtx) && mdl.kind == "miniscram" && !mdl.runner.Running() {
+			if verifyBtn.Clicked(gtx) && !qWorker() && mdl.kind == "miniscram" && !mdl.runner.Running() {
 				mdl.toast = nil
 				_ = mdl.runner.Start("verify", mdl.path, "", "verify", "--progress=json", mdl.path)
 			}
-			if unpackBtn.Clicked(gtx) && mdl.kind == "miniscram" && !mdl.runner.Running() {
+			if unpackBtn.Clicked(gtx) && !qWorker() && mdl.kind == "miniscram" && !mdl.runner.Running() {
 				mdl.toast = nil
 				srcPath := mdl.path
 				defaultName := strings.TrimSuffix(mdl.basename, filepath.Ext(mdl.basename)) + ".scram"
@@ -916,7 +938,7 @@ func loop(w *app.Window, mdl *model) error {
 			if toastRevealBtn.Clicked(gtx) && mdl.toast != nil && mdl.toast.Output != "" {
 				revealInFolder(mdl.toast.Output)
 			}
-			if packBtn.Clicked(gtx) && mdl.kind == "cue" && !mdl.runner.Running() {
+			if packBtn.Clicked(gtx) && !qWorker() && mdl.kind == "cue" && !mdl.runner.Running() {
 				mdl.toast = nil
 				out := strings.TrimSuffix(mdl.path, filepath.Ext(mdl.path)) + ".miniscram"
 				args := []string{"pack", "--progress=json", mdl.path}
@@ -924,6 +946,60 @@ func loop(w *app.Window, mdl *model) error {
 					args = append(args, "--keep-source")
 				}
 				_ = mdl.runner.Start("pack", mdl.path, out, args...)
+			}
+			// Queue panel button handlers.
+			if qBtns.AddFiles.Clicked(gtx) {
+				go func() {
+					paths, err := pickFiles()
+					if err != nil || len(paths) == 0 {
+						return
+					}
+					mdl.queue.addPaths(mdl, paths)
+					if mdl.invalidate != nil {
+						mdl.invalidate()
+					}
+				}()
+			}
+			if qBtns.AddDir.Clicked(gtx) {
+				go func() {
+					p, err := pickDir()
+					if err != nil || p == "" {
+						return
+					}
+					mdl.queue.addPaths(mdl, []string{p})
+					if mdl.invalidate != nil {
+						mdl.invalidate()
+					}
+				}()
+			}
+			if qBtns.DeleteScramCB.Update(gtx) {
+				mdl.queue.mu.Lock()
+				mdl.queue.deleteScram = qBtns.DeleteScramCB.Value
+				mdl.queue.mu.Unlock()
+			}
+			if qBtns.Stop.Clicked(gtx) {
+				mdl.queue.mu.Lock()
+				mdl.queue.stopped = true
+				mdl.queue.mu.Unlock()
+				mdl.runner.Cancel()
+			}
+			// Per-row click: auto-follow + row actions (× / ⏹).
+			snapForClicks := mdl.queue.Snapshot()
+			for _, it := range snapForClicks.Items {
+				if qBtns.RowClick(it.ID).Clicked(gtx) {
+					mdl.load(it.CuePath)
+					mdl.queue.mu.Lock()
+					mdl.queue.autoFollow = (it.State == qRunning)
+					mdl.queue.mu.Unlock()
+				}
+				if qBtns.RowAction(it.ID).Clicked(gtx) {
+					switch it.State {
+					case qReady:
+						mdl.queue.removeByID(it.ID)
+					case qRunning:
+						mdl.runner.Cancel()
+					}
+				}
 			}
 			for _, le := range linkBtns {
 				if le.click.Clicked(gtx) && le.url != "" {
@@ -948,16 +1024,23 @@ func loop(w *app.Window, mdl *model) error {
 				layout.Rigid(divider),
 				layout.Rigid(runningStripWidget(th, mdl.runner.Snapshot(), &cancelBtn)),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return material.List(th, &listScroll).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
-						return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							switch mdl.view {
-							case "stats":
-								return statsView(gtx, th, mdl)
-							default:
-								return body(gtx, th, mdl, &verifyBtn, &unpackBtn, &packBtn, &deleteScramCB, getCopy, getLink)
-							}
-						})
-					})
+					snap := mdl.queue.Snapshot()
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Rigid(queuePanel(th, snap, qBtns, &qListScroll)),
+						layout.Rigid(verticalDivider),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return material.List(th, &listScroll).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+								return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									switch mdl.view {
+									case "stats":
+										return statsView(gtx, th, mdl)
+									default:
+										return body(gtx, th, mdl, &verifyBtn, &unpackBtn, &packBtn, &deleteScramCB, getCopy, getLink)
+									}
+								})
+							})
+						}),
+					)
 				}),
 				layout.Rigid(toastWidget(th, mdl.toast, &toastDismissBtn, &toastRevealBtn)),
 				layout.Rigid(divider),
@@ -1798,6 +1881,13 @@ func divider(gtx layout.Context) layout.Dimensions {
 	paint.ColorOp{Color: line}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	return layout.Dimensions{Size: rect.Size()}
+}
+
+func verticalDivider(gtx layout.Context) layout.Dimensions {
+	w := gtx.Dp(unit.Dp(1))
+	h := gtx.Constraints.Min.Y
+	paint.FillShape(gtx.Ops, line, clip.Rect{Max: image.Pt(w, h)}.Op())
+	return layout.Dimensions{Size: image.Pt(w, h)}
 }
 
 func thinDivider(gtx layout.Context) layout.Dimensions {
