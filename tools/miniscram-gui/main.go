@@ -419,8 +419,11 @@ func (m *model) load(p string) {
 
 	switch strings.ToLower(filepath.Ext(p)) {
 	case ".miniscram":
-		m.kind = "miniscram"
-		raw, err := exec.Command("miniscram", "inspect", p, "--json").Output()
+		// Defer setting m.kind until after a successful inspect+parse —
+		// body() dispatches by kind, and miniscramView dereferences
+		// m.meta unconditionally, so a half-loaded state ("miniscram"
+		// kind + nil meta) would crash the UI thread.
+		raw, err := exec.Command(m.cliBinary, "inspect", p, "--json").Output()
 		if err != nil {
 			m.err = err.Error()
 			return
@@ -431,6 +434,7 @@ func (m *model) load(p string) {
 			return
 		}
 		m.meta = &meta
+		m.kind = "miniscram"
 		if st, err := os.Stat(p); err == nil {
 			m.miniscramOnDisk = st.Size()
 		}
@@ -442,12 +446,12 @@ func (m *model) load(p string) {
 		}
 		go m.lookup(hashes)
 	case ".cue":
-		m.kind = "cue"
 		b, err := os.ReadFile(p)
 		if err != nil {
 			m.err = err.Error()
 			return
 		}
+		m.kind = "cue"
 		m.cueText = string(b)
 		tracks := parseCueLines(m.cueText, m.dir)
 		// Pre-resolve full bin paths so hashCueBins never reads m.dir
@@ -537,7 +541,7 @@ func buildEventRec(m *model, action, input, output string, res actionResult) eve
 			if st, err := os.Stat(output); err == nil {
 				ev.MiniscramSize = st.Size()
 			}
-			if raw, err := exec.Command("miniscram", "inspect", output, "--json").Output(); err == nil {
+			if raw, err := exec.Command(m.cliBinary, "inspect", output, "--json").Output(); err == nil {
 				var meta inspectJSON
 				if json.Unmarshal(raw, &meta) == nil {
 					ev.ScramSize = meta.Scram.Size
