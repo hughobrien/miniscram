@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+  build-cli:
+    name: build CLI (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -47,14 +47,75 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: miniscram-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: cli-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/miniscram-*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-gui:
+    # GUI uses CGO + native windowing (Gio), so each target builds on
+    # its own native runner — cross-compilation would need an osxcross
+    # / mingw toolchain we don't want to maintain.
+    name: build GUI (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: macos-13
+            goos: darwin
+            goarch: amd64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/miniscram-gui/go.mod
+          cache: true
+          cache-dependency-path: tools/miniscram-gui/go.sum
+
+      - name: Install GUI build deps (X11 + GL + Wayland + Vulkan)
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libx11-xcb-dev libxcursor-dev libxrandr-dev \
+            libxinerama-dev libxi-dev libxxf86vm-dev libxfixes-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libgl1-mesa-dev libegl-dev libwayland-dev libvulkan-dev \
+            pkg-config
+
+      - name: Build
+        working-directory: tools/miniscram-gui
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p ../../dist
+          BIN_NAME="miniscram-gui-${VERSION}-${GOOS}-${GOARCH}"
+          if [ "$GOOS" = "windows" ]; then
+            BIN_NAME="${BIN_NAME}.exe"
+          fi
+          go build -trimpath -ldflags="-s -w" -o "../../dist/${BIN_NAME}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/miniscram-gui-*
           if-no-files-found: error
           retention-days: 1
 
   release:
     name: publish GitHub Release
-    needs: build
+    needs: [build-cli, build-gui]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,8 +148,29 @@ jobs:
               printing { print }
             ' CHANGELOG.md > "$NOTES_FILE"
           fi
+          # dist/miniscram-* picks up both CLI (miniscram-vX.Y.Z-...)
+          # and GUI (miniscram-gui-vX.Y.Z-...) binaries.
           if [ -s "$NOTES_FILE" ]; then
             gh release create "$VERSION" --title "$VERSION" --notes-file "$NOTES_FILE" dist/miniscram-* dist/SHA256SUMS
           else
             gh release create "$VERSION" --title "$VERSION" --generate-notes dist/miniscram-* dist/SHA256SUMS
           fi
+
+      - name: Strip assets from previous releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          # Policy: only the latest release carries downloadable assets.
+          # Older releases keep their tag + notes (so changelog links
+          # remain anchored), but the binaries get cleaned up here so we
+          # don't accumulate stale downloads. Self-maintaining via this
+          # step on every release.
+          gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | grep -vx "$VERSION" \
+            | while read -r tag; do
+              for asset in $(gh release view "$tag" --json assets --jq '.assets[].name'); do
+                echo "deleting $tag :: $asset"
+                gh release delete-asset "$tag" "$asset" --yes || true
+              done
+            done
