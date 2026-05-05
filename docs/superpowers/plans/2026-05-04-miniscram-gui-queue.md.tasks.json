@@ -1,0 +1,75 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-04-miniscram-gui-queue.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Extract buildEventRec helper",
+      "status": "pending",
+      "description": "**Goal:** Pull the actionResult → eventRec translation into a standalone helper so the queue worker can reuse it.\n\n**Files:**\n- Modify: `tools/miniscram-gui/main.go`\n- Modify: `tools/miniscram-gui/result_handler_test.go`\n\n**Acceptance Criteria:**\n- [ ] `buildEventRec(mdl, action, input, output, res)` exists and is unit-tested.\n- [ ] `handleActionResult` delegates row-building to it.\n- [ ] Existing 6 tests in `result_handler_test.go` pass unchanged.\n\n**Verify:** `cd tools/miniscram-gui && go test -run 'TestHandleActionResult|TestBuildEventRec' ./...` → 7 pass\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/main.go\", \"tools/miniscram-gui/result_handler_test.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go test -run 'TestHandleActionResult|TestBuildEventRec' ./...\", \"acceptanceCriteria\": [\"buildEventRec exists and is unit-tested\", \"handleActionResult delegates to it\", \"existing tests pass unchanged\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: queueModel data layer (types, classify, walk, addPaths)",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Pure data layer — no UI, no goroutines yet. Adds `queue *queueModel` field to `model`.\n\n**Files:**\n- Create: `tools/miniscram-gui/queue.go`\n- Create: `tools/miniscram-gui/queue_test.go`\n- Modify: `tools/miniscram-gui/main.go` (add queue field, init in main())\n\n**Acceptance Criteria:**\n- [ ] `queueModel`, `queueItem`, `queueState` defined per spec\n- [ ] `classify`, `walkForCues`, `addPaths` implemented\n- [ ] `addPaths` dedups via `filepath.Abs+Clean`\n- [ ] `model.queue` field added and initialised\n- [ ] Worker kick is TODO'd (Task 8 uncomments)\n\n**Verify:** `cd tools/miniscram-gui && go test -run 'TestClassify|TestWalkForCues|TestAddPaths' ./...` → 5 pass\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/queue.go\", \"tools/miniscram-gui/queue_test.go\", \"tools/miniscram-gui/main.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go test ./...\", \"acceptanceCriteria\": [\"queueModel/queueItem/queueState per spec\", \"classify/walkForCues/addPaths implemented\", \"dedup works\", \"model.queue field added and initialised\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: --progress=json plumbing (prettyProgressLine, packPhases)",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Add NDJSON parser, packPhases lookup, prettify the running-strip line, and pass --progress=json from existing single-file callers.\n\n**Files:**\n- Modify: `tools/miniscram-gui/queue.go`\n- Modify: `tools/miniscram-gui/queue_test.go`\n- Modify: `tools/miniscram-gui/widgets.go`\n- Modify: `tools/miniscram-gui/main.go`\n\n**Acceptance Criteria:**\n- [ ] `prettyProgressLine` returns friendly output for NDJSON, falls through for plain text\n- [ ] `lookupFraction` does prefix-match against `packPhases`\n- [ ] All single-file Pack/Verify/Unpack callers pass `--progress=json`\n- [ ] Strip widget calls `prettyProgressLine` on `state.LastLine`\n\n**Verify:** `cd tools/miniscram-gui && go test -run 'TestPrettyProgressLine|TestLookupFraction' ./... && go build ./...`\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/queue.go\", \"tools/miniscram-gui/queue_test.go\", \"tools/miniscram-gui/widgets.go\", \"tools/miniscram-gui/main.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go test ./... && go build ./...\", \"acceptanceCriteria\": [\"prettyProgressLine works\", \"lookupFraction prefix-matches\", \"all single-file callers pass --progress=json\", \"strip uses prettyProgressLine\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Queue worker (drain) with done-channel ownership",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** Worker goroutine that processes ready items sequentially via the existing actionRunner.\n\n**Files:**\n- Modify: `tools/miniscram-gui/queue.go`\n- Modify: `tools/miniscram-gui/runner_test.go` (add NDJSON fake modes)\n- Modify: `tools/miniscram-gui/queue_test.go`\n\n**Acceptance Criteria:**\n- [ ] Worker drains qReady items via runner.Start(\"pack\", ..., --progress=json)\n- [ ] State transitions: qReady → qRunning → qDone/qFailed/qCancelled\n- [ ] Toast NOT set by worker (suppression)\n- [ ] On stop: in-flight cancelled, remaining qReady → qCancelled, only one event row\n- [ ] On cancel-current: worker advances to next ready\n\n**Verify:** `cd tools/miniscram-gui && go test -run 'TestDrain|TestStopQueue|TestCancelCurrent' ./...` → 3 pass\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/queue.go\", \"tools/miniscram-gui/queue_test.go\", \"tools/miniscram-gui/runner_test.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go test ./...\", \"acceptanceCriteria\": [\"drain processes qReady sequentially\", \"state transitions correct\", \"toast suppression\", \"stop drains remaining to cancelled\", \"cancel-current advances\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: TestPackPhasesCoverage (live miniscram check)",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** Lock packPhases against silent label drift in pack.go.\n\n**Files:**\n- Modify: `tools/miniscram-gui/queue_test.go`\n\n**Acceptance Criteria:**\n- [ ] Test runs real `miniscram pack --progress=json` against a fixture\n- [ ] Asserts every step.Label matches a packPhases prefix\n- [ ] Skips cleanly if no `miniscram` on PATH or no fixture\n\n**Verify:** `cd tools/miniscram-gui && go test -run TestPackPhasesCoverage ./... -v` → PASS or SKIP\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/queue_test.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go test -run TestPackPhasesCoverage ./... -v\", \"acceptanceCriteria\": [\"runs real miniscram pack\", \"asserts label coverage\", \"skips cleanly when no fixture\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Native pickers (pickFiles, pickDir)",
+      "status": "pending",
+      "blockedBy": [5],
+      "description": "**Goal:** Add multi-select and directory pickers for Linux/macOS/Windows.\n\n**Files:**\n- Modify: `tools/miniscram-gui/main.go`\n\n**Acceptance Criteria:**\n- [ ] `pickFiles()` returns []string from native multi-select dialog\n- [ ] `pickDir()` returns one absolute path or empty\n- [ ] Build clean on Linux\n\n**Verify:** `cd tools/miniscram-gui && go build ./...` → clean\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/main.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go build ./...\", \"acceptanceCriteria\": [\"pickFiles multi-select\", \"pickDir directory\", \"clean Linux build\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: Queue panel + row widgets",
+      "status": "pending",
+      "blockedBy": [6],
+      "description": "**Goal:** Render the queue panel (header, buttons, items, stop) and rows with state-driven visuals including the green progress fill.\n\n**Files:**\n- Create: `tools/miniscram-gui/queue_widget.go`\n\n**Acceptance Criteria:**\n- [ ] `queuePanel` callable from loop()\n- [ ] Empty state shows drop-target hint\n- [ ] All 6 queueState values render distinctly\n- [ ] Green fill = panel_w × it.Fraction\n- [ ] Per-row click + action (×/⏹) buttons keyed by ID\n- [ ] Stop button only shows while workerRunning\n\n**Verify:** `cd tools/miniscram-gui && go build ./...` → clean\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/queue_widget.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go build ./...\", \"acceptanceCriteria\": [\"queuePanel callable\", \"empty state\", \"6 row visuals\", \"progress fill\", \"row buttons keyed by ID\", \"stop button conditional\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: main.go integration (Hflex, auto-follow, button wiring)",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Wire the queue into loop() — Hflex layout, auto-follow rule, button-disable, stop/cancel handlers, addPaths kick in queue.go.\n\n**Files:**\n- Modify: `tools/miniscram-gui/main.go`\n- Modify: `tools/miniscram-gui/queue.go` (uncomment worker kick)\n\n**Acceptance Criteria:**\n- [ ] Body is Hflex: queue panel | divider | inspect-or-stats list\n- [ ] Single-file buttons disable while q.workerRunning\n- [ ] FrameEvent drain skips runner.done while workerRunning\n- [ ] Add files / Add dir buttons spawn pickers in goroutines\n- [ ] Row click triggers auto-follow per spec rule\n- [ ] ×/⏹ buttons remove pending / cancel current\n- [ ] Stop queue button sets stopped=true + cancels\n- [ ] DestroyEvent sets stopped=true before grace\n\n**Verify:** `cd tools/miniscram-gui && go vet ./... && go test ./... && go build ./...`\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/main.go\", \"tools/miniscram-gui/queue.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go vet ./... && go test ./... && go build ./...\", \"acceptanceCriteria\": [\"Hflex body\", \"single-file buttons disabled while queue runs\", \"FrameEvent drain skip\", \"add buttons wired\", \"auto-follow rule\", \"row buttons wired\", \"stop queue\", \"DestroyEvent\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: Drag-and-drop wiring (text/uri-list)",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** Accept dropped files and dirs via Gio's transfer.TargetFilter.\n\n**Files:**\n- Modify: `tools/miniscram-gui/main.go`\n\n**Acceptance Criteria:**\n- [ ] Window registers `text/uri-list` target\n- [ ] DataEvent body parsed line-by-line as file:// URIs\n- [ ] Paths fed to q.addPaths\n- [ ] Linux build clean\n\n**Verify:** `cd tools/miniscram-gui && go build ./...` → clean. Manual smoke (Linux): drop a dir, observe queue populate.\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/main.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go build ./...\", \"acceptanceCriteria\": [\"text/uri-list target registered\", \"DataEvent parsed\", \"paths feed addPaths\", \"clean build\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: Smoke verification + screenshot refresh",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** Walk the spec's manual smoke checklist on a real fixture; update screenshots if needed.\n\n**Files:**\n- Possibly: `tools/miniscram-gui/screenshots/`\n- Possibly: `tools/miniscram-gui/README.md`\n\n**Acceptance Criteria:**\n- [ ] Drop directory → queue populates and runs\n- [ ] Click done row → loads in inspect\n- [ ] Click row mid-run → auto-follow toggles correctly\n- [ ] Stop queue mid-pack → no orphans, all remaining cancelled\n- [ ] Add files / Add dir buttons feed queue\n- [ ] Drop .miniscram → loads inspect, autoFollow disengages\n- [ ] No orphan miniscram processes after stop\n\n**Verify:** Walk each bullet manually; record any deviations.\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/\"], \"verifyCommand\": \"manual smoke\", \"acceptanceCriteria\": [\"directory drop\", \"row interaction\", \"stop queue clean\", \"native pickers\", \"miniscram drop\", \"no orphans\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-04T00:00:00Z"
+}

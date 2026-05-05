@@ -34,7 +34,7 @@ func runningStripWidget(th *material.Theme, state *runningState, cancelBtn *widg
 		}
 		basename := filepath.Base(state.Input)
 		elapsed := time.Since(state.StartedAt).Truncate(time.Second)
-		stepText := state.LastLine
+		stepText := prettyProgressLine(state.LastLine)
 		if stepText == "" {
 			stepText = "Starting…"
 		}

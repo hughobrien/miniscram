@@ -47,6 +47,40 @@ func TestMain(m *testing.M) {
 		case <-time.After(5 * time.Second):
 			os.Exit(0)
 		}
+	case "json_happy":
+		// emit one step + done per known phase, then exit 0
+		phases := []string{
+			"resolving cue /test/in.cue",
+			"detecting write offset",
+			"hashing tracks",
+			"hashing scram",
+			"building scram prediction + delta",
+			"writing container",
+		}
+		enc := func(t, label, msg string) {
+			line := `{"type":"` + t + `","label":"` + label + `"`
+			if msg != "" {
+				line += `,"msg":"` + msg + `"`
+			}
+			line += "}"
+			fmt.Fprintln(os.Stderr, line)
+		}
+		for _, p := range phases {
+			enc("step", p, "")
+			time.Sleep(10 * time.Millisecond)
+			enc("done", p, "ok")
+		}
+		os.Exit(0)
+	case "json_long":
+		fmt.Fprintln(os.Stderr, `{"type":"step","label":"writing container"}`)
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGTERM)
+		select {
+		case <-sig:
+			os.Exit(130)
+		case <-time.After(5 * time.Second):
+			os.Exit(0)
+		}
 	default:
 		fmt.Fprintln(os.Stderr, "unknown FAKE_MODE")
 		os.Exit(2)

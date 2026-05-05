@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,7 @@ import (
 	"gioui.org/font/gofont"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
+	"gioui.org/io/transfer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -142,6 +144,111 @@ func pickSave(defaultName, defaultDir string) (string, error) {
 	return "", fmt.Errorf("no save dialog for %s", runtime.GOOS)
 }
 
+// pickFiles shells out to the platform's native multi-select file dialog.
+func pickFiles() ([]string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		if p, err := exec.LookPath("zenity"); err == nil {
+			out, err := exec.Command(p, "--file-selection", "--multiple",
+				"--separator=\n",
+				"--title=Add cue files to queue",
+				"--file-filter=cuesheets | *.cue",
+				"--file-filter=all files | *").Output()
+			if err != nil {
+				return nil, err
+			}
+			return splitLines(strings.TrimSpace(string(out))), nil
+		}
+		if p, err := exec.LookPath("kdialog"); err == nil {
+			// kdialog has no native multi mode; fall back to single-select.
+			out, err := exec.Command(p, "--getopenfilename", "", "*.cue|cuesheets\n*|all files").Output()
+			if err != nil {
+				return nil, err
+			}
+			return splitLines(strings.TrimSpace(string(out))), nil
+		}
+		return nil, errors.New("install zenity or kdialog for the native multi picker")
+	case "darwin":
+		out, err := exec.Command("osascript", "-e",
+			`set fs to choose file with prompt "Add cue files to queue" of type {"cue"} with multiple selections allowed`+"\n"+
+				`set lst to ""`+"\n"+
+				`repeat with f in fs`+"\n"+
+				`set lst to lst & POSIX path of f & linefeed`+"\n"+
+				`end repeat`+"\n"+
+				`return lst`).Output()
+		if err != nil {
+			return nil, err
+		}
+		return splitLines(strings.TrimSpace(string(out))), nil
+	case "windows":
+		ps := `Add-Type -AssemblyName System.Windows.Forms;` +
+			`$f = New-Object System.Windows.Forms.OpenFileDialog;` +
+			`$f.Filter = "cuesheets|*.cue|All|*";` +
+			`$f.Multiselect = $true;` +
+			`if ($f.ShowDialog() -eq 'OK') { $f.FileNames -join "` + "`n" + `" }`
+		out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).Output()
+		if err != nil {
+			return nil, err
+		}
+		return splitLines(strings.TrimSpace(string(out))), nil
+	}
+	return nil, fmt.Errorf("no multi picker for %s", runtime.GOOS)
+}
+
+// pickDir shells out to the platform's native directory picker dialog.
+func pickDir() (string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		if p, err := exec.LookPath("zenity"); err == nil {
+			out, err := exec.Command(p, "--file-selection", "--directory",
+				"--title=Add directory to queue").Output()
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(string(out)), nil
+		}
+		if p, err := exec.LookPath("kdialog"); err == nil {
+			out, err := exec.Command(p, "--getexistingdirectory").Output()
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(string(out)), nil
+		}
+		return "", errors.New("install zenity or kdialog for the native directory picker")
+	case "darwin":
+		out, err := exec.Command("osascript", "-e",
+			`POSIX path of (choose folder with prompt "Add directory to queue")`).Output()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	case "windows":
+		ps := `Add-Type -AssemblyName System.Windows.Forms;` +
+			`$f = New-Object System.Windows.Forms.FolderBrowserDialog;` +
+			`if ($f.ShowDialog() -eq 'OK') { $f.SelectedPath }`
+		out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).Output()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	return "", fmt.Errorf("no directory picker for %s", runtime.GOOS)
+}
+
+// splitLines splits on newline, trims whitespace from each line, and drops empty lines.
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
 const guiVersion = "0.1"
 const userAgent = "miniscram-gui/" + guiVersion + " (+https://github.com/hughobrien/miniscram) Go-http-client/1.1"
 
@@ -185,6 +292,10 @@ type redumpEntry struct {
 }
 
 var titleRe = regexp.MustCompile(`<title>redump\.org\s*&bull;\s*([^<]+?)\s*</title>`)
+
+// dropTag is the unique event tag used to register the window as a
+// drag-and-drop target for text/uri-list payloads.
+var dropTag = new(int)
 
 func redumpFetch(hash string) *redumpEntry {
 	now := time.Now().Unix()
@@ -253,7 +364,7 @@ type model struct {
 	invalidate func()
 
 	stats       statsAgg
-	recent []eventRec
+	recent      []eventRec
 	statsLoaded bool
 
 	// per-row hover state for mode chips (track row 0..N)
@@ -264,6 +375,7 @@ type model struct {
 
 	runner *actionRunner
 	toast  *toastState
+	queue  *queueModel
 }
 
 func (m *model) load(p string) {
@@ -360,12 +472,14 @@ func (m *model) refreshStats() {
 // handleActionResult translates a runner actionResult into an event row,
 // persists it, and refreshes the stats view. Runs on the UI goroutine
 // (called from the FrameEvent drain).
-func (m *model) handleActionResult(res actionResult) {
+// buildEventRec turns an actionResult into a populated eventRec.
+// Pure (no DB writes, no toast); shared by handleActionResult and the queue worker.
+func buildEventRec(m *model, action, input, output string, res actionResult) eventRec {
 	ev := eventRec{
 		TS:         time.Now(),
-		Action:     res.Action,
-		InputPath:  res.Input,
-		OutputPath: res.Output,
+		Action:     action,
+		InputPath:  input,
+		OutputPath: output,
 		DurationMs: res.DurationMs,
 		Status:     res.Status,
 		Error:      res.Error,
@@ -378,45 +492,51 @@ func (m *model) handleActionResult(res actionResult) {
 			ev.Title = e.Title
 		}
 	}
-	if res.Status == "success" {
-		switch res.Action {
-		case "pack":
-			if res.Output != "" {
-				if st, err := os.Stat(res.Output); err == nil {
-					ev.MiniscramSize = st.Size()
-				}
-				if raw, err := exec.Command("miniscram", "inspect", res.Output, "--json").Output(); err == nil {
-					var meta inspectJSON
-					if json.Unmarshal(raw, &meta) == nil {
-						ev.ScramSize = meta.Scram.Size
-						ev.OverrideRecords = len(meta.DeltaRecords)
-						ev.WriteOffset = meta.WriteOffsetBytes
-						fillTitle(&meta)
-					}
-				}
+	if res.Status != "success" {
+		return ev
+	}
+	switch action {
+	case "pack":
+		if output != "" {
+			if st, err := os.Stat(output); err == nil {
+				ev.MiniscramSize = st.Size()
 			}
-		case "unpack":
-			if res.Output != "" {
-				if st, err := os.Stat(res.Output); err == nil {
-					ev.ScramSize = st.Size()
+			if raw, err := exec.Command("miniscram", "inspect", output, "--json").Output(); err == nil {
+				var meta inspectJSON
+				if json.Unmarshal(raw, &meta) == nil {
+					ev.ScramSize = meta.Scram.Size
+					ev.OverrideRecords = len(meta.DeltaRecords)
+					ev.WriteOffset = meta.WriteOffsetBytes
+					fillTitle(&meta)
 				}
-			}
-			if m.meta != nil {
-				ev.MiniscramSize = m.miniscramOnDisk
-				ev.OverrideRecords = len(m.meta.DeltaRecords)
-				ev.WriteOffset = m.meta.WriteOffsetBytes
-				fillTitle(m.meta)
-			}
-		case "verify":
-			if m.meta != nil {
-				ev.ScramSize = m.meta.Scram.Size
-				ev.MiniscramSize = m.miniscramOnDisk
-				ev.OverrideRecords = len(m.meta.DeltaRecords)
-				ev.WriteOffset = m.meta.WriteOffsetBytes
-				fillTitle(m.meta)
 			}
 		}
+	case "unpack":
+		if output != "" {
+			if st, err := os.Stat(output); err == nil {
+				ev.ScramSize = st.Size()
+			}
+		}
+		if m.meta != nil {
+			ev.MiniscramSize = m.miniscramOnDisk
+			ev.OverrideRecords = len(m.meta.DeltaRecords)
+			ev.WriteOffset = m.meta.WriteOffsetBytes
+			fillTitle(m.meta)
+		}
+	case "verify":
+		if m.meta != nil {
+			ev.ScramSize = m.meta.Scram.Size
+			ev.MiniscramSize = m.miniscramOnDisk
+			ev.OverrideRecords = len(m.meta.DeltaRecords)
+			ev.WriteOffset = m.meta.WriteOffsetBytes
+			fillTitle(m.meta)
+		}
 	}
+	return ev
+}
+
+func (m *model) handleActionResult(res actionResult) {
+	ev := buildEventRec(m, res.Action, res.Input, res.Output, res)
 	eventInsert(m.db, ev)
 	m.refreshStats()
 
@@ -589,6 +709,7 @@ func main() {
 	doSeed := flag.Bool("seed", false, "seed events table with example data and exit")
 	mockRunning := flag.String("mock-running", "", "screenshot-only: inject a fake in-flight action ('pack'|'unpack'|'verify')")
 	mockToast := flag.String("mock-toast", "", "screenshot-only: inject a fake success toast ('pack'|'unpack'|'verify')")
+	mockQueue := flag.String("mock-queue", "", "screenshot-only: stage a queue with synthetic items in mixed states")
 	flag.Parse()
 
 	db, err := dbOpen()
@@ -623,6 +744,8 @@ func main() {
 		}
 	})
 
+	mdl.queue = newQueueModel()
+
 	// Screenshot-only state injection. Same package, so direct field access.
 	if *mockRunning != "" {
 		mdl.runner.state = &runningState{
@@ -656,6 +779,40 @@ func main() {
 			ExpiresAt:  time.Now().Add(1 * time.Hour),
 		}
 	}
+	if *mockQueue != "" {
+		// Stage synthetic queue items spanning the visible states. Paths
+		// don't need to exist; classify() is bypassed and States are set
+		// directly. The worker is NOT started.
+		mockBasenames := []struct {
+			Name  string
+			State queueState
+			Frac  float64
+			Reason string
+			DurationMs int64
+		}{
+			{"freelancer.cue", qDone, 1.0, "", 5400},
+			{"deus-ex.cue", qRunning, 0.55, "", 0},
+			{"half-life.cue", qReady, 0, "", 0},
+			{"mp2-play.cue", qReady, 0, "", 0},
+			{"oddworld.cue", qSkipped, 0, "no sibling .scram", 0},
+			{"baldurs-gate.cue", qSkipped, 0, "already packed", 0},
+		}
+		mdl.queue.mu.Lock()
+		for _, m := range mockBasenames {
+			mdl.queue.items = append(mdl.queue.items, queueItem{
+				ID:         mdl.queue.nextID,
+				CuePath:    "/" + *mockQueue + "/" + m.Name,
+				Basename:   m.Name,
+				State:      m.State,
+				Fraction:   m.Frac,
+				Reason:     m.Reason,
+				DurationMs: m.DurationMs,
+			})
+			mdl.queue.nextID++
+		}
+		mdl.queue.workerRunning = true // so Stop button renders
+		mdl.queue.mu.Unlock()
+	}
 
 	go func() {
 		w := new(app.Window)
@@ -682,23 +839,28 @@ func loop(w *app.Window, mdl *model) error {
 	th.Palette.Fg = text1
 
 	var (
-		openBtn       widget.Clickable
-		statsBtn      widget.Clickable
-		fileBtn       widget.Clickable
-		verifyBtn     widget.Clickable
-		unpackBtn     widget.Clickable
-		packBtn       widget.Clickable
+		openBtn         widget.Clickable
+		statsBtn        widget.Clickable
+		fileBtn         widget.Clickable
+		verifyBtn       widget.Clickable
+		unpackBtn       widget.Clickable
+		packBtn         widget.Clickable
 		cancelBtn       widget.Clickable
 		toastDismissBtn widget.Clickable
 		toastRevealBtn  widget.Clickable
 		deleteScramCB   = widget.Bool{Value: true} // default: consume scram on success
-		mockHoverCB   widget.Bool                // for screenshots
-		copyBtns      = make(map[string]*widget.Clickable)
-		linkBtns      = make(map[string]*linkEntry)
-		listScroll    widget.List
+		mockHoverCB     widget.Bool                // for screenshots
+		copyBtns        = make(map[string]*widget.Clickable)
+		linkBtns        = make(map[string]*linkEntry)
+		listScroll      widget.List
 	)
 	_ = mockHoverCB
 	listScroll.Axis = layout.Vertical
+
+	qBtns := newQueuePanelButtons()
+	qBtns.DeleteScramCB.Value = true // mirror queue-level default (deleteScram: true)
+	var qListScroll widget.List
+	qListScroll.Axis = layout.Vertical
 	getCopy := func(key string) *widget.Clickable {
 		if c, ok := copyBtns[key]; ok {
 			return c
@@ -721,6 +883,11 @@ func loop(w *app.Window, mdl *model) error {
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
+			if mdl.queue != nil {
+				mdl.queue.mu.Lock()
+				mdl.queue.stopped = true
+				mdl.queue.mu.Unlock()
+			}
 			if mdl.runner != nil && mdl.runner.Running() {
 				mdl.runner.Cancel()
 				deadline := time.Now().Add(5 * time.Second)
@@ -732,13 +899,68 @@ func loop(w *app.Window, mdl *model) error {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 
+			// Register the entire window area as a drag-and-drop target for
+			// text/uri-list (file:// URIs). The clip.Rect establishes the
+			// hit area; event.Op binds dropTag to that area so transfer
+			// events are routed to it.
+			//
+			// IMPORTANT: Pop the clip stack within this same frame. A `defer
+			// ...Pop()` inside the for-loop in loop() defers to function exit
+			// (loop runs for the lifetime of the GUI), not loop-iteration exit,
+			// which would leak op-stack tokens every frame.
+			dropClip := clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops)
+			event.Op(gtx.Ops, dropTag)
+			for {
+				ev, ok := gtx.Event(transfer.TargetFilter{Target: dropTag, Type: "text/uri-list"})
+				if !ok {
+					break
+				}
+				if dev, ok := ev.(transfer.DataEvent); ok {
+					rc := dev.Open()
+					paths := readURIList(rc)
+					rc.Close()
+					if len(paths) > 0 {
+						mdl.queue.addPaths(mdl, paths)
+						if mdl.invalidate != nil {
+							mdl.invalidate()
+						}
+					}
+				}
+			}
+			dropClip.Pop()
+
+			// Drive per-row progress fills off the runner's last NDJSON step.
+			// While a queue item is running, the runner's stderr reader updates
+			// state.LastLine to the latest NDJSON event. We parse it here and
+			// advance the running queue row's Fraction via lookupFraction.
+			if rs := mdl.runner.Snapshot(); rs != nil {
+				var ev progressEvent
+				if json.Unmarshal([]byte(rs.LastLine), &ev) == nil && ev.Type == "step" && ev.Label != "" {
+					if frac, ok := lookupFraction(ev.Label); ok {
+						mdl.queue.UpdateRunningProgress(ev.Label, frac)
+					}
+				}
+			}
+
+			// qWorker reports whether the queue's background drain goroutine
+			// currently owns the runner. When true, single-file buttons are
+			// disabled and the done-channel drain is skipped.
+			qWorker := func() bool {
+				mdl.queue.mu.Lock()
+				defer mdl.queue.mu.Unlock()
+				return mdl.queue.workerRunning
+			}
+
 			// Drain any completed action onto the UI goroutine. Single-flight
 			// + cap-1 channel + r.invalidate() in wait() means at most one
 			// result is ever pending, so a single non-blocking receive suffices.
-			select {
-			case res := <-mdl.runner.done:
-				mdl.handleActionResult(res)
-			default:
+			// Skip when the queue worker owns the done channel.
+			if !qWorker() {
+				select {
+				case res := <-mdl.runner.done:
+					mdl.handleActionResult(res)
+				default:
+				}
 			}
 
 			if statsBtn.Clicked(gtx) {
@@ -749,6 +971,12 @@ func loop(w *app.Window, mdl *model) error {
 				mdl.view = "file"
 			}
 			if openBtn.Clicked(gtx) {
+				// Manual file open is a "user took control" signal — disengage
+				// queue auto-follow so the worker doesn't yank the right pane
+				// back to the next queue item.
+				mdl.queue.mu.Lock()
+				mdl.queue.autoFollow = false
+				mdl.queue.mu.Unlock()
 				go func() {
 					p, err := pickFile()
 					if err != nil || p == "" {
@@ -763,11 +991,11 @@ func loop(w *app.Window, mdl *model) error {
 			if cancelBtn.Clicked(gtx) {
 				mdl.runner.Cancel()
 			}
-			if verifyBtn.Clicked(gtx) && mdl.kind == "miniscram" && !mdl.runner.Running() {
+			if verifyBtn.Clicked(gtx) && !qWorker() && mdl.kind == "miniscram" && !mdl.runner.Running() {
 				mdl.toast = nil
-				_ = mdl.runner.Start("verify", mdl.path, "", "verify", mdl.path)
+				_ = mdl.runner.Start("verify", mdl.path, "", "verify", "--progress=json", mdl.path)
 			}
-			if unpackBtn.Clicked(gtx) && mdl.kind == "miniscram" && !mdl.runner.Running() {
+			if unpackBtn.Clicked(gtx) && !qWorker() && mdl.kind == "miniscram" && !mdl.runner.Running() {
 				mdl.toast = nil
 				srcPath := mdl.path
 				defaultName := strings.TrimSuffix(mdl.basename, filepath.Ext(mdl.basename)) + ".scram"
@@ -791,7 +1019,7 @@ func loop(w *app.Window, mdl *model) error {
 						}
 						return
 					}
-					_ = mdl.runner.Start("unpack", srcPath, out, "unpack", srcPath, "-o", out)
+					_ = mdl.runner.Start("unpack", srcPath, out, "unpack", "--progress=json", srcPath, "-o", out)
 				}()
 			}
 			if toastDismissBtn.Clicked(gtx) && mdl.toast != nil {
@@ -800,14 +1028,68 @@ func loop(w *app.Window, mdl *model) error {
 			if toastRevealBtn.Clicked(gtx) && mdl.toast != nil && mdl.toast.Output != "" {
 				revealInFolder(mdl.toast.Output)
 			}
-			if packBtn.Clicked(gtx) && mdl.kind == "cue" && !mdl.runner.Running() {
+			if packBtn.Clicked(gtx) && !qWorker() && mdl.kind == "cue" && !mdl.runner.Running() {
 				mdl.toast = nil
 				out := strings.TrimSuffix(mdl.path, filepath.Ext(mdl.path)) + ".miniscram"
-				args := []string{"pack", mdl.path}
+				args := []string{"pack", "--progress=json", mdl.path}
 				if !deleteScramCB.Value {
 					args = append(args, "--keep-source")
 				}
 				_ = mdl.runner.Start("pack", mdl.path, out, args...)
+			}
+			// Queue panel button handlers.
+			if qBtns.AddFiles.Clicked(gtx) {
+				go func() {
+					paths, err := pickFiles()
+					if err != nil || len(paths) == 0 {
+						return
+					}
+					mdl.queue.addPaths(mdl, paths)
+					if mdl.invalidate != nil {
+						mdl.invalidate()
+					}
+				}()
+			}
+			if qBtns.AddDir.Clicked(gtx) {
+				go func() {
+					p, err := pickDir()
+					if err != nil || p == "" {
+						return
+					}
+					mdl.queue.addPaths(mdl, []string{p})
+					if mdl.invalidate != nil {
+						mdl.invalidate()
+					}
+				}()
+			}
+			if qBtns.DeleteScramCB.Update(gtx) {
+				mdl.queue.mu.Lock()
+				mdl.queue.deleteScram = qBtns.DeleteScramCB.Value
+				mdl.queue.mu.Unlock()
+			}
+			if qBtns.Stop.Clicked(gtx) {
+				mdl.queue.mu.Lock()
+				mdl.queue.stopped = true
+				mdl.queue.mu.Unlock()
+				mdl.runner.Cancel()
+			}
+			// Per-row click: auto-follow + row actions (× / ⏹).
+			snapForClicks := mdl.queue.Snapshot()
+			for _, it := range snapForClicks.Items {
+				if qBtns.RowClick(it.ID).Clicked(gtx) {
+					mdl.load(it.CuePath)
+					mdl.queue.mu.Lock()
+					mdl.queue.autoFollow = (it.State == qRunning)
+					mdl.queue.mu.Unlock()
+				}
+				if qBtns.RowAction(it.ID).Clicked(gtx) {
+					switch it.State {
+					case qReady:
+						mdl.queue.removeByID(it.ID)
+					case qRunning:
+						mdl.runner.Cancel()
+					}
+				}
 			}
 			for _, le := range linkBtns {
 				if le.click.Clicked(gtx) && le.url != "" {
@@ -832,16 +1114,23 @@ func loop(w *app.Window, mdl *model) error {
 				layout.Rigid(divider),
 				layout.Rigid(runningStripWidget(th, mdl.runner.Snapshot(), &cancelBtn)),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return material.List(th, &listScroll).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
-						return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							switch mdl.view {
-							case "stats":
-								return statsView(gtx, th, mdl)
-							default:
-								return body(gtx, th, mdl, &verifyBtn, &unpackBtn, &packBtn, &deleteScramCB, getCopy, getLink)
-							}
-						})
-					})
+					snap := mdl.queue.Snapshot()
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Rigid(queuePanel(th, snap, qBtns, &qListScroll)),
+						layout.Rigid(verticalDivider),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return material.List(th, &listScroll).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+								return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									switch mdl.view {
+									case "stats":
+										return statsView(gtx, th, mdl)
+									default:
+										return body(gtx, th, mdl, &verifyBtn, &unpackBtn, &packBtn, &deleteScramCB, getCopy, getLink)
+									}
+								})
+							})
+						}),
+					)
 				}),
 				layout.Rigid(toastWidget(th, mdl.toast, &toastDismissBtn, &toastRevealBtn)),
 				layout.Rigid(divider),
@@ -853,6 +1142,31 @@ func loop(w *app.Window, mdl *model) error {
 	}
 }
 
+// ---------------- drag-and-drop helpers ----------------
+
+// readURIList parses a text/uri-list body (RFC 2483) into local paths.
+// Lines starting with '#' are comments. Only file:// URIs are extracted.
+func readURIList(r io.Reader) []string {
+	var paths []string
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		u, err := url.Parse(line)
+		if err != nil || u.Scheme != "file" {
+			continue
+		}
+		p, err := url.QueryUnescape(u.Path)
+		if err != nil {
+			continue
+		}
+		paths = append(paths, p)
+	}
+	return paths
+}
+
 // ---------------- top bar ----------------
 
 func topBar(th *material.Theme, mdl *model, openBtn, statsBtn, fileBtn *widget.Clickable) topBarStyle {
@@ -860,8 +1174,8 @@ func topBar(th *material.Theme, mdl *model, openBtn, statsBtn, fileBtn *widget.C
 }
 
 type topBarStyle struct {
-	th                          *material.Theme
-	mdl                         *model
+	th                         *material.Theme
+	mdl                        *model
 	openBtn, statsBtn, fileBtn *widget.Clickable
 }
 
@@ -1027,18 +1341,15 @@ func cueView(gtx layout.Context, th *material.Theme, mdl *model, packBtn *widget
 }
 
 func emptyView(gtx layout.Context, th *material.Theme, mdl *model) layout.Dimensions {
-	msg := "Drop a .miniscram or .cue here, or use Open file…"
-	if mdl.err != "" {
-		msg = "error: " + mdl.err
+	// The queue panel on the left already advertises drag-drop. The right
+	// pane just needs to acknowledge that it's empty (or surface an error).
+	if mdl.err == "" {
+		return layout.Dimensions{}
 	}
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				l := material.Label(th, unit.Sp(15), msg)
-				l.Color = text2
-				return l.Layout(gtx)
-			}),
-		)
+		l := material.Label(th, unit.Sp(15), "error: "+mdl.err)
+		l.Color = text2
+		return l.Layout(gtx)
 	})
 }
 
@@ -1682,6 +1993,15 @@ func divider(gtx layout.Context) layout.Dimensions {
 	paint.ColorOp{Color: line}.Add(gtx.Ops)
 	paint.PaintOp{}.Add(gtx.Ops)
 	return layout.Dimensions{Size: rect.Size()}
+}
+
+func verticalDivider(gtx layout.Context) layout.Dimensions {
+	w := gtx.Dp(unit.Dp(1))
+	// Use Max.Y: as a Rigid child in a horizontal Flex, Min.Y is 0 but
+	// Max.Y is the row height. Min.Y would render an invisible 1×0 rect.
+	h := gtx.Constraints.Max.Y
+	paint.FillShape(gtx.Ops, line, clip.Rect{Max: image.Pt(w, h)}.Op())
+	return layout.Dimensions{Size: image.Pt(w, h)}
 }
 
 func thinDivider(gtx layout.Context) layout.Dimensions {
