@@ -426,3 +426,59 @@ func TestPackPhasesCoverage(t *testing.T) {
 		t.Error("no step events captured — did --progress=json work?")
 	}
 }
+
+// TestAddPathsResetsStopped confirms that adding new ready items reopens
+// a previously-stopped queue. Without this, a Stop click would leave
+// q.stopped=true forever and subsequent drops silently no-op.
+func TestAddPathsResetsStopped(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.cue"), []byte(""))
+	writeFile(t, filepath.Join(dir, "a.scram"), []byte(""))
+
+	q := newQueueModel()
+	q.stopped = true // simulate a prior Stop queue click
+
+	q.addPaths(nil, []string{dir})
+
+	if q.stopped {
+		t.Error("q.stopped should reset to false when addPaths brings new ready items")
+	}
+	if !q.hasReady() {
+		t.Error("expected at least one qReady item")
+	}
+}
+
+// TestUpdateRunningProgress confirms the per-row Fraction advances and
+// never moves backwards.
+func TestUpdateRunningProgress(t *testing.T) {
+	q := newQueueModel()
+	q.items = []queueItem{
+		{ID: 1, State: qRunning, Fraction: 0.0},
+		{ID: 2, State: qReady, Fraction: 0.0},
+	}
+
+	q.UpdateRunningProgress("hashing scram", 0.30)
+	if q.items[0].Fraction != 0.30 {
+		t.Errorf("Fraction = %v, want 0.30", q.items[0].Fraction)
+	}
+	if q.items[0].Label != "hashing scram" {
+		t.Errorf("Label = %q, want 'hashing scram'", q.items[0].Label)
+	}
+
+	// Forward step advances.
+	q.UpdateRunningProgress("writing container", 0.95)
+	if q.items[0].Fraction != 0.95 {
+		t.Errorf("Fraction = %v, want 0.95", q.items[0].Fraction)
+	}
+
+	// Backward step (never expected from real data) should not regress.
+	q.UpdateRunningProgress("hashing scram", 0.30)
+	if q.items[0].Fraction != 0.95 {
+		t.Errorf("Fraction = %v, want 0.95 (no regression)", q.items[0].Fraction)
+	}
+
+	// Non-running item is untouched.
+	if q.items[1].Fraction != 0.0 {
+		t.Errorf("non-running item Fraction = %v, want 0.0", q.items[1].Fraction)
+	}
+}

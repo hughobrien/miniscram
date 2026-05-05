@@ -149,12 +149,20 @@ func (q *queueModel) addPaths(mdl *model, paths []string) {
 			q.autoFollow = false
 		}
 	}
+	added := 0
 	for _, cue := range cues {
 		if q.hasPath(cue) {
 			continue
 		}
 		q.items = append(q.items, classify(cue, q.nextID))
 		q.nextID++
+		added++
+	}
+	// Adding new ready items reopens a stopped queue. Without this, a Stop
+	// click leaves q.stopped=true forever and subsequent drops silently
+	// no-op because nextReadyIndex always returns -1.
+	if added > 0 && q.hasReady() {
+		q.stopped = false
 	}
 	needWorker := !q.workerRunning && q.hasReady() && mdl != nil
 	q.mu.Unlock()
@@ -279,6 +287,25 @@ func (q *queueModel) markRunning(idx int) {
 func (q *queueModel) markFailed(idx int, reason string) {
 	q.items[idx].State = qFailed
 	q.items[idx].Reason = reason
+}
+
+// UpdateRunningProgress advances the currently-running item's Label and
+// Fraction. The running-strip already shows the latest line; this drives
+// the per-row green progress fill in the queue panel. Called from the
+// FrameEvent loop on each frame; cheap no-op if no item is qRunning or
+// the new fraction would not be a forward step.
+func (q *queueModel) UpdateRunningProgress(label string, frac float64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i := range q.items {
+		if q.items[i].State == qRunning {
+			q.items[i].Label = label
+			if frac > q.items[i].Fraction {
+				q.items[i].Fraction = frac
+			}
+			return
+		}
+	}
 }
 
 // recordResult flips the row state + records duration based on the

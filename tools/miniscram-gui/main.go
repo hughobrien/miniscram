@@ -868,24 +868,41 @@ func loop(w *app.Window, mdl *model) error {
 			// text/uri-list (file:// URIs). The clip.Rect establishes the
 			// hit area; event.Op binds dropTag to that area so transfer
 			// events are routed to it.
-			{
-				defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
-				event.Op(gtx.Ops, dropTag)
-				for {
-					ev, ok := gtx.Event(transfer.TargetFilter{Target: dropTag, Type: "text/uri-list"})
-					if !ok {
-						break
-					}
-					if dev, ok := ev.(transfer.DataEvent); ok {
-						rc := dev.Open()
-						paths := readURIList(rc)
-						rc.Close()
-						if len(paths) > 0 {
-							mdl.queue.addPaths(mdl, paths)
-							if mdl.invalidate != nil {
-								mdl.invalidate()
-							}
+			//
+			// IMPORTANT: Pop the clip stack within this same frame. A `defer
+			// ...Pop()` inside the for-loop in loop() defers to function exit
+			// (loop runs for the lifetime of the GUI), not loop-iteration exit,
+			// which would leak op-stack tokens every frame.
+			dropClip := clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops)
+			event.Op(gtx.Ops, dropTag)
+			for {
+				ev, ok := gtx.Event(transfer.TargetFilter{Target: dropTag, Type: "text/uri-list"})
+				if !ok {
+					break
+				}
+				if dev, ok := ev.(transfer.DataEvent); ok {
+					rc := dev.Open()
+					paths := readURIList(rc)
+					rc.Close()
+					if len(paths) > 0 {
+						mdl.queue.addPaths(mdl, paths)
+						if mdl.invalidate != nil {
+							mdl.invalidate()
 						}
+					}
+				}
+			}
+			dropClip.Pop()
+
+			// Drive per-row progress fills off the runner's last NDJSON step.
+			// While a queue item is running, the runner's stderr reader updates
+			// state.LastLine to the latest NDJSON event. We parse it here and
+			// advance the running queue row's Fraction via lookupFraction.
+			if rs := mdl.runner.Snapshot(); rs != nil {
+				var ev progressEvent
+				if json.Unmarshal([]byte(rs.LastLine), &ev) == nil && ev.Type == "step" && ev.Label != "" {
+					if frac, ok := lookupFraction(ev.Label); ok {
+						mdl.queue.UpdateRunningProgress(ev.Label, frac)
 					}
 				}
 			}
@@ -919,6 +936,12 @@ func loop(w *app.Window, mdl *model) error {
 				mdl.view = "file"
 			}
 			if openBtn.Clicked(gtx) {
+				// Manual file open is a "user took control" signal — disengage
+				// queue auto-follow so the worker doesn't yank the right pane
+				// back to the next queue item.
+				mdl.queue.mu.Lock()
+				mdl.queue.autoFollow = false
+				mdl.queue.mu.Unlock()
 				go func() {
 					p, err := pickFile()
 					if err != nil || p == "" {
@@ -1942,7 +1965,9 @@ func divider(gtx layout.Context) layout.Dimensions {
 
 func verticalDivider(gtx layout.Context) layout.Dimensions {
 	w := gtx.Dp(unit.Dp(1))
-	h := gtx.Constraints.Min.Y
+	// Use Max.Y: as a Rigid child in a horizontal Flex, Min.Y is 0 but
+	// Max.Y is the row height. Min.Y would render an invisible 1×0 rect.
+	h := gtx.Constraints.Max.Y
 	paint.FillShape(gtx.Ops, line, clip.Rect{Max: image.Pt(w, h)}.Op())
 	return layout.Dimensions{Size: image.Pt(w, h)}
 }
