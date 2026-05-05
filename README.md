@@ -12,6 +12,10 @@ source `.scram` is only deleted after `unpack` reproduces it exactly.
 
 ## Demonstrations
 
+![miniscram-gui showing a packed Half-Life container](tools/miniscram-gui/screenshots/01-miniscram.png)
+
+More screenshots in [`tools/miniscram-gui/README.md#screenshots`](tools/miniscram-gui/README.md#screenshots).
+
 ### Freelancer — SafeDisc 2.70.030
 
 - **Copy protection:** SafeDisc 2.70.030 + Macrovision Security
