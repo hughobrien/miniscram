@@ -596,6 +596,14 @@ func (m *model) handleActionResult(res actionResult) {
 			DurationMs: res.DurationMs,
 			ExpiresAt:  time.Now().Add(6 * time.Second),
 		}
+		// After a successful pack, switch the right pane onto the
+		// freshly written .miniscram. Otherwise we'd stay on the cue
+		// view, which has now lost its sibling .scram (consumed by
+		// pack unless --keep-source) and renders "missing scram —
+		// pack can't run" right after a successful pack.
+		if res.Action == "pack" && res.Output != "" {
+			m.load(res.Output)
+		}
 	} else {
 		m.toast = nil
 	}
