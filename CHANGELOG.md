@@ -4,6 +4,33 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-05-05
+
+### Fixed
+
+- **Queue worker left the right pane on the source cue after each
+  pack.** The single-file flow already auto-loaded the result
+  `.miniscram` (v1.2.3), but `queue.runWorker` did not — so a queue
+  drain ended on the last item's stale "missing scram" cue view even
+  though the pack had succeeded. Mirrored the single-file behaviour:
+  on `success + autoFollow` the worker now calls `mdl.load(out)`
+  after recording the result. For the last item this is the final
+  view; mid-queue it briefly shows the result before the next
+  iteration's `mdl.load(nextCue)` replaces it. Gated on autoFollow
+  so a user who has manually loaded a different file mid-queue
+  isn't yanked.
+
+### Changed
+
+- README hero is now an inline demo video
+  (`tools/miniscram-gui/screenshots/miniscram-demo.mp4`) instead of
+  a static screenshot. The video is checked in via Git LFS (new
+  `.gitattributes` entry: `tools/miniscram-gui/screenshots/*.mp4
+  filter=lfs`), so cloning without `git lfs` will leave a pointer
+  file in place of the .mp4 — the README's `<video>` tag falls back
+  to the original `01-miniscram.png` as `poster`, and a plain text
+  link is the inner content for clients that don't render `<video>`.
+
 ## [1.2.3] - 2026-05-05
 
 ### Fixed
