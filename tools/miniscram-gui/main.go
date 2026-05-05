@@ -266,9 +266,8 @@ type model struct {
 	// per-row delete buttons for stats events
 	deleteBtns map[int64]*widget.Clickable
 
-	runner    *actionRunner
-	lastEvent eventRec // populated in handleActionResult; used by Task 3's toast
-	toast     *toastState
+	runner *actionRunner
+	toast  *toastState
 }
 
 func (m *model) load(p string) {
@@ -424,7 +423,6 @@ func (m *model) handleActionResult(res actionResult) {
 	}
 	eventInsert(m.db, ev)
 	m.refreshStats()
-	m.lastEvent = ev
 
 	// Populate or clear the toast based on outcome.
 	if res.Status == "success" {

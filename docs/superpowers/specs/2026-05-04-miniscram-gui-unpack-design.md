@@ -132,6 +132,13 @@ Bottom-attached strip. Layout: action verb + output basename + size
 w.Invalidate)` schedule; the layout function checks elapsed and
 returns zero dimensions when expired.
 
+For `verify` (which has no output file) the toast still shows — a
+"Verified · 1.8s" confirmation without size or Reveal button.
+That's a small spec-vs-implementation drift that landed because a
+silent verify felt worse than a brief acknowledgement; the widget
+naturally collapses the size segment (`OutputSize == 0`) and the
+Reveal button (`Output == ""`).
+
 ### `pickSave` in `tools/miniscram-gui/main.go`
 
 Companion to existing `pickFile`. Native save dialog with overwrite

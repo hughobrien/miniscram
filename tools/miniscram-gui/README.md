@@ -15,9 +15,12 @@ own `go.mod` (matching the pattern of `scripts/sweep`) so the main
   with an "Open ↗" link when matched. Cached per-hash in SQLite.
 - For cuesheets: shows referenced bin sizes and warns if any are
   missing or if the sibling `.scram` is absent.
-- Records every successful pack/unpack/verify in a local SQLite,
-  surfaced in a Stats tab — totals, best ratio, recent operations
-  with a per-row delete.
+- Records every pack/unpack/verify (success, fail, or cancelled) in
+  a local SQLite, surfaced in a Stats tab — totals, best ratio,
+  recent operations with a per-row delete.
+- Pack / Verify / Unpack run as cancellable subprocesses with a
+  running-state strip showing the current step + elapsed time, and
+  a 6-second success toast with a Reveal-in-folder button.
 
 The GUI talks to `miniscram` strictly by shelling out (`miniscram
 inspect --json` for metadata, `miniscram pack/unpack/verify` for

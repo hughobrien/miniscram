@@ -104,7 +104,7 @@ type eventRec struct {
 	OverrideRecords int
 	WriteOffset     int
 	DurationMs      int64
-	Status          string // "success" | "fail"
+	Status          string // "success" | "fail" | "cancelled"
 	Error           string
 }
 
