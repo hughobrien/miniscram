@@ -1,0 +1,33 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-04-miniscram-gui-unpack.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: actionRunner core + unit tests",
+      "status": "pending",
+      "description": "**Goal:** A self-contained, mutex-safe goroutine-orchestrator that runs miniscram as a subprocess with line-tailed stderr, SIGTERM cancel, and single-flight enforcement. Full unit-test coverage via TestMain re-exec as a fake binary.\n\n**Files:**\n- Create: tools/miniscram-gui/runner.go\n- Create: tools/miniscram-gui/runner_test.go\n\n**Acceptance Criteria:**\n- [ ] go test ./... passes (happy, fail, cancel, single-flight, invalidate-tick)\n- [ ] No goroutine leak per runtime.NumGoroutine\n- [ ] go vet ./... clean\n\n**Verify:** `cd tools/miniscram-gui && go test -race -count=1 ./...`\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/runner.go\", \"tools/miniscram-gui/runner_test.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go test -race -count=1 ./...\", \"acceptanceCriteria\": [\"all five tests pass\", \"no goroutine leak\", \"go vet clean\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: runningStrip widget + Pack/Verify migration + window-close cleanup",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Render the running-state visually and migrate the existing synchronous Pack/Verify handlers to use actionRunner. Window close cancels any in-flight subprocess. Adds the cancelled status branch to the events status chip.\n\n**Files:**\n- Modify: tools/miniscram-gui/runner.go (append runningStripWidget)\n- Modify: tools/miniscram-gui/main.go (model.runner field, replace handlers, render strip in layout, cancelled chip palette, app.DestroyEvent cleanup, remove dead recordPackEvent/recordVerifyEvent)\n\n**Acceptance Criteria:**\n- [ ] Pack/Verify run async via runner; UI doesn't freeze\n- [ ] Strip shows action verb, current stderr line, elapsed seconds, Cancel\n- [ ] Cancel mid-pack records a 'cancelled' event row with grey CANCELLED chip\n- [ ] Closing window during action leaves no orphan miniscram process within 5s\n- [ ] go vet ./... clean; existing tests still pass\n\n**Verify:** Manual smoke per plan steps 6 + 7; `cd tools/miniscram-gui && go vet ./... && go test -race -count=1 ./...`\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/runner.go\", \"tools/miniscram-gui/main.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go vet ./... && go test -race -count=1 ./...\", \"acceptanceCriteria\": [\"Pack/Verify async via runner\", \"strip renders correctly\", \"Cancel produces cancelled status\", \"no orphan subprocess on window close\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: toast widget + Unpack handler with pickSave + revealInFolder",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Wire the Unpack… button end-to-end: native save dialog (pickSave per platform), shell out via runner, success toast with Reveal-in-folder. Toast applies to all three actions on success; cleared on fail/cancel.\n\n**Files:**\n- Modify: tools/miniscram-gui/runner.go (append toastState + toastWidget)\n- Modify: tools/miniscram-gui/main.go (pickSave, revealInFolder, model.toast, Unpack click handler with self-overwrite refusal, toast button handlers, layout integration)\n\n**Acceptance Criteria:**\n- [ ] Unpack opens native save dialog (zenity on Linux dev box) with default name and dir\n- [ ] Cancel of dialog = no-op\n- [ ] Picking source path as output = refused with clear fail event\n- [ ] Successful unpack/pack shows toast with size + duration + Reveal in folder\n- [ ] Toast self-dismisses after 6s; ✕ dismisses immediately\n- [ ] Reveal in folder opens OS file manager at output dir\n- [ ] go vet ./... clean; existing tests still pass\n\n**Verify:** Manual smoke per plan steps 6 + 7; `cd tools/miniscram-gui && go vet ./... && go test -race -count=1 ./...`\n\n```json:metadata\n{\"files\": [\"tools/miniscram-gui/runner.go\", \"tools/miniscram-gui/main.go\"], \"verifyCommand\": \"cd tools/miniscram-gui && go vet ./... && go test -race -count=1 ./...\", \"acceptanceCriteria\": [\"Unpack runs with native save dialog\", \"self-overwrite refused\", \"toast appears + reveal works\", \"toast self-dismisses\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: CI — run go test for the GUI module",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Extend the existing build miniscram-gui CI job to run go test ./... so Task 1's unit tests run on every push.\n\n**Files:**\n- Modify: .github/workflows/ci.yml (add Test step under the gui job)\n\n**Acceptance Criteria:**\n- [ ] Push to PR branch shows both 'build + test' and 'build miniscram-gui' jobs SUCCESS\n- [ ] The new Test step actually runs (visible in job logs)\n\n**Verify:** `git push && gh run watch <id> --exit-status`\n\n```json:metadata\n{\"files\": [\".github/workflows/ci.yml\"], \"verifyCommand\": \"git push && gh run watch <latest> --exit-status\", \"acceptanceCriteria\": [\"CI green on PR branch\", \"Test step in gui job logs\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-04T20:55:00Z"
+}
