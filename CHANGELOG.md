@@ -4,6 +4,25 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-05-05
+
+### Fixed
+
+- **Cue view stuck on "missing scram" right after a successful pack.**
+  `model.handleActionResult` left the right pane on the source cue
+  view after pack returned. Pack consumes the sibling `.scram` by
+  default, so the cue view immediately re-rendered as
+  `Missing .scram next to cue — pack can't run` even though the
+  operation had just succeeded. After wiring up the success toast,
+  the handler now calls `m.load(res.Output)` to flip the right pane
+  onto the freshly written `.miniscram`, so the user lands on the
+  inspect view of the result they just produced. The success toast
+  survives the reload (`load()` does not touch `m.toast`). Queue
+  worker path is unchanged: `queue.runWorker` already invokes
+  `mdl.load(item.CuePath)` per item under autoFollow, and the
+  single-file `handleActionResult` is only reached when no queue
+  worker owns the done channel.
+
 ## [1.2.2] - 2026-05-04
 
 ### Fixed
