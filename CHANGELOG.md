@@ -4,6 +4,21 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - 2026-05-05
+
+### Changed
+
+- **Releases now ship miniscram-gui binaries alongside the CLI** for
+  linux/darwin/windows on amd64. The release workflow gained a
+  per-platform native-runner matrix for the GUI build (Gio + CGO
+  rules out the cross-compile path the CLI uses).
+- **Only the latest release carries downloadable assets.** Older
+  release tags + notes remain so changelog and issue links stay
+  anchored, but binaries are auto-pruned by the release workflow on
+  every new tag. The v1.0.0 - v1.2.3 sweep that prompted the new
+  policy was done by hand; v1.2.4's CLI assets get pruned by this
+  release.
+
 ## [1.2.4] - 2026-05-05
 
 ### Fixed
