@@ -92,7 +92,12 @@ func runningStripWidget(th *material.Theme, state *runningState, cancelBtn *widg
 	}
 }
 
-// toastState is set by handleActionResult on a successful action.
+// toastState drives the bottom-attached strip. Default (Status == ""
+// or "success") renders the green confirmation toast set by
+// handleActionResult on a successful action. Status == "fail" renders
+// the red error toast used to surface immediate Start() failures
+// (e.g., miniscram CLI not found) — without it the click would
+// disappear into the void because the running-strip never appeared.
 // The widget hides itself when ExpiresAt < now or Hide is true.
 type toastState struct {
 	Action     string // "pack" | "unpack" | "verify"
@@ -101,6 +106,11 @@ type toastState struct {
 	DurationMs int64
 	ExpiresAt  time.Time
 	Hide       bool // set when user clicks the ✕
+
+	// Status == "fail" turns the toast red and replaces the success
+	// summary with FailMsg. Empty status renders as success.
+	Status  string
+	FailMsg string
 }
 
 func toastWidget(th *material.Theme, ts *toastState, dismissBtn, revealBtn *widget.Clickable) layout.Widget {
@@ -108,30 +118,49 @@ func toastWidget(th *material.Theme, ts *toastState, dismissBtn, revealBtn *widg
 		if ts == nil || ts.Hide || time.Now().After(ts.ExpiresAt) {
 			return layout.Dimensions{}
 		}
-		verb := map[string]string{
-			"pack":   "Packed",
-			"unpack": "Unpacked",
-			"verify": "Verified",
-		}[ts.Action]
-		if verb == "" {
-			verb = "Done"
+
+		isFail := ts.Status == "fail"
+		var summary string
+		var dotColor = good
+		var bgColor = mustRGB("17392d")
+		if isFail {
+			dotColor = bad
+			bgColor = mustRGB("3a1414")
+			verb := map[string]string{
+				"pack":   "Pack failed",
+				"unpack": "Unpack failed",
+				"verify": "Verify failed",
+			}[ts.Action]
+			if verb == "" {
+				verb = "Failed"
+			}
+			summary = verb + ": " + ts.FailMsg
+		} else {
+			verb := map[string]string{
+				"pack":   "Packed",
+				"unpack": "Unpacked",
+				"verify": "Verified",
+			}[ts.Action]
+			if verb == "" {
+				verb = "Done"
+			}
+			basename := filepath.Base(ts.Output)
+			if basename == "." || basename == "" {
+				basename = ts.Action + " complete"
+			}
+			summary = verb + "  " + basename
+			if ts.OutputSize > 0 {
+				summary += "  ·  " + humanBytes(ts.OutputSize)
+			}
+			summary += "  ·  " + fmt.Sprintf("%.1fs", float64(ts.DurationMs)/1000)
 		}
-		basename := filepath.Base(ts.Output)
-		if basename == "." || basename == "" {
-			basename = ts.Action + " complete"
-		}
-		summary := verb + "  " + basename
-		if ts.OutputSize > 0 {
-			summary += "  ·  " + humanBytes(ts.OutputSize)
-		}
-		summary += "  ·  " + fmt.Sprintf("%.1fs", float64(ts.DurationMs)/1000)
 
 		macro := op.Record(gtx.Ops)
 		dims := layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(24), Right: unit.Dp(24)}.Layout(gtx,
 			func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return statusDot(gtx, good)
+						return statusDot(gtx, dotColor)
 					}),
 					layout.Rigid(spacer(10, 0)),
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -140,7 +169,7 @@ func toastWidget(th *material.Theme, ts *toastState, dismissBtn, revealBtn *widg
 						return lb.Layout(gtx)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if ts.Output == "" {
+						if isFail || ts.Output == "" {
 							return layout.Dimensions{}
 						}
 						btn := material.Button(th, revealBtn, "Reveal in folder")
@@ -164,7 +193,7 @@ func toastWidget(th *material.Theme, ts *toastState, dismissBtn, revealBtn *widg
 				)
 			})
 		call := macro.Stop()
-		paint.FillShape(gtx.Ops, mustRGB("17392d"), clip.Rect{Max: dims.Size}.Op())
+		paint.FillShape(gtx.Ops, bgColor, clip.Rect{Max: dims.Size}.Op())
 		call.Add(gtx.Ops)
 		// Tick at 250ms so the toast self-expires within ~the second it should.
 		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(250 * time.Millisecond)})
