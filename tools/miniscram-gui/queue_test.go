@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeFile(t *testing.T, path string, content []byte) {
@@ -178,5 +179,184 @@ func TestLookupFraction_KnownLabels(t *testing.T) {
 func TestLookupFraction_UnknownLabel(t *testing.T) {
 	if _, ok := lookupFraction("frobnicating"); ok {
 		t.Error("lookupFraction unknown label returned ok=true")
+	}
+}
+
+func setupQueueTest(t *testing.T, fakeMode string) (*model, *queueModel) {
+	t.Helper()
+	m := newTestModel(t)
+	m.queue = newQueueModel()
+	m.runner = &actionRunner{
+		binary:     os.Args[0],
+		done:       make(chan actionResult, 1),
+		invalidate: func() {},
+	}
+	t.Setenv("FAKE_MODE", fakeMode)
+	return m, m.queue
+}
+
+func TestDrainHappyPath(t *testing.T) {
+	m, q := setupQueueTest(t, "json_happy")
+
+	// Fake three ready cues + one skipped (no scram).
+	dir := t.TempDir()
+	for _, n := range []string{"a", "b", "c"} {
+		writeFile(t, filepath.Join(dir, n+".cue"), []byte(""))
+		writeFile(t, filepath.Join(dir, n+".scram"), []byte(""))
+	}
+	writeFile(t, filepath.Join(dir, "d.cue"), []byte("")) // no scram → skipped
+	// Use nil model to suppress the automatic worker kick from addPaths;
+	// we drive drain synchronously below.
+	q.addPaths(nil, []string{dir})
+
+	if got := len(q.items); got != 4 {
+		t.Fatalf("len(items) = %d, want 4", got)
+	}
+
+	// Run the drain synchronously in this test (no goroutine).
+	q.drain(m)
+
+	states := make(map[queueState]int)
+	for _, it := range q.items {
+		states[it.State]++
+	}
+	if states[qDone] != 3 {
+		t.Errorf("qDone = %d, want 3", states[qDone])
+	}
+	if states[qSkipped] != 1 {
+		t.Errorf("qSkipped = %d, want 1", states[qSkipped])
+	}
+	// 3 event rows written, all pack/success.
+	if rows := eventsRecent(m.db, 10); len(rows) != 3 {
+		t.Errorf("event rows = %d, want 3", len(rows))
+	}
+	// No toast — queue suppresses.
+	if m.toast != nil {
+		t.Errorf("toast = %+v, want nil (queue suppresses)", m.toast)
+	}
+}
+
+func TestStopQueue(t *testing.T) {
+	m, q := setupQueueTest(t, "json_long")
+
+	dir := t.TempDir()
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		writeFile(t, filepath.Join(dir, n+".cue"), []byte(""))
+		writeFile(t, filepath.Join(dir, n+".scram"), []byte(""))
+	}
+	// Use nil model to suppress the automatic worker kick from addPaths;
+	// we kick drain explicitly below.
+	q.addPaths(nil, []string{dir})
+
+	// Run drain on a goroutine; stop after the first item starts.
+	go q.drain(m)
+	// Wait for first item to start running.
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		q.mu.Lock()
+		running := false
+		for _, it := range q.items {
+			if it.State == qRunning {
+				running = true
+			}
+		}
+		q.mu.Unlock()
+		if running {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Trigger Stop queue.
+	q.mu.Lock()
+	q.stopped = true
+	q.mu.Unlock()
+	m.runner.Cancel()
+
+	// Wait for worker to exit.
+	deadline = time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		q.mu.Lock()
+		wr := q.workerRunning
+		q.mu.Unlock()
+		if !wr {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// First item cancelled, rest also cancelled.
+	states := make(map[queueState]int)
+	for _, it := range q.items {
+		states[it.State]++
+	}
+	if states[qCancelled] != 5 {
+		t.Errorf("qCancelled = %d, want 5; items = %+v", states[qCancelled], q.items)
+	}
+	// Only one event row (the in-flight item).
+	if rows := eventsRecent(m.db, 10); len(rows) != 1 {
+		t.Errorf("event rows = %d, want 1 (only the in-flight)", len(rows))
+	} else if rows[0].Status != "cancelled" {
+		t.Errorf("event row status = %q, want cancelled", rows[0].Status)
+	}
+}
+
+func TestCancelCurrent(t *testing.T) {
+	// First item hits the long fake; subsequent items hit happy.
+	// We approximate by running with json_long, cancelling, then flipping FAKE_MODE.
+	// Simpler approach: run with json_long, cancel, then verify item 0 is cancelled
+	// and the remaining items are still qReady (worker waiting on Start).
+	m, q := setupQueueTest(t, "json_long")
+	dir := t.TempDir()
+	for _, n := range []string{"a", "b", "c"} {
+		writeFile(t, filepath.Join(dir, n+".cue"), []byte(""))
+		writeFile(t, filepath.Join(dir, n+".scram"), []byte(""))
+	}
+	// Use nil model to suppress the automatic worker kick from addPaths;
+	// we kick drain explicitly below.
+	q.addPaths(nil, []string{dir})
+
+	go q.drain(m)
+	// Wait for item 0 to start.
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		q.mu.Lock()
+		s := q.items[0].State
+		q.mu.Unlock()
+		if s == qRunning {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Cancel current ONLY (do NOT set q.stopped).
+	m.runner.Cancel()
+
+	// Worker should advance to item 1, which will also be json_long. To avoid
+	// running the full test forever, set q.stopped after a short window so the
+	// remaining items go to cancelled cleanly.
+	time.Sleep(200 * time.Millisecond)
+	q.mu.Lock()
+	q.stopped = true
+	q.mu.Unlock()
+	m.runner.Cancel()
+
+	// Wait for worker exit.
+	deadline = time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		q.mu.Lock()
+		wr := q.workerRunning
+		q.mu.Unlock()
+		if !wr {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if q.items[0].State != qCancelled {
+		t.Errorf("items[0].State = %q, want %q", q.items[0].State, qCancelled)
+	}
+	// Item 0 produced one event row, item 1 (also cancelled mid-run) produced
+	// another. Item 2 was never spawned (q.stopped). So 2 event rows.
+	if rows := eventsRecent(m.db, 10); len(rows) != 2 {
+		t.Errorf("event rows = %d, want 2", len(rows))
 	}
 }

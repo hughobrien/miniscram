@@ -154,7 +154,9 @@ func (q *queueModel) addPaths(mdl *model, paths []string) {
 		q.items = append(q.items, classify(cue, q.nextID))
 		q.nextID++
 	}
-	// TODO(Task 4): if !q.workerRunning && q.hasReady() { go q.drain(mdl) }
+	if !q.workerRunning && q.hasReady() && mdl != nil {
+		go q.drain(mdl)
+	}
 }
 
 // progressEvent is the wire shape emitted by `miniscram --progress=json`.
@@ -214,4 +216,137 @@ func lookupFraction(label string) (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func (q *queueModel) hasReady() bool {
+	for _, it := range q.items {
+		if it.State == qReady {
+			return true
+		}
+	}
+	return false
+}
+
+// nextReadyIndex returns the index of the first qReady item, or -1 if none
+// exist or if the queue is stopped.
+func (q *queueModel) nextReadyIndex() int {
+	if q.stopped {
+		return -1
+	}
+	for i, it := range q.items {
+		if it.State == qReady {
+			return i
+		}
+	}
+	return -1
+}
+
+// cancelRemainingReady flips all qReady items to qCancelled without spawning
+// subprocesses. Called by drain's deferred cleanup.
+func (q *queueModel) cancelRemainingReady() {
+	for i, it := range q.items {
+		if it.State == qReady {
+			q.items[i].State = qCancelled
+			_ = it
+		}
+	}
+}
+
+func (q *queueModel) markRunning(idx int) {
+	q.items[idx].State = qRunning
+	q.items[idx].StartedAt = time.Now()
+}
+
+func (q *queueModel) markFailed(idx int, reason string) {
+	q.items[idx].State = qFailed
+	q.items[idx].Reason = reason
+}
+
+// recordResult flips the row state + records duration based on the
+// runner's actionResult classification.
+func (q *queueModel) recordResult(idx int, res actionResult) {
+	it := &q.items[idx]
+	it.DurationMs = res.DurationMs
+	switch res.Status {
+	case "success":
+		it.State = qDone
+		it.Fraction = 1.0
+	case "fail":
+		it.State = qFailed
+		it.Reason = res.Error
+	case "cancelled":
+		it.State = qCancelled
+	}
+}
+
+// drain processes qReady items sequentially. The single-flight invariant
+// in actionRunner means only one subprocess runs at a time. The worker
+// owns mdl.runner.done while workerRunning == true.
+func (q *queueModel) drain(mdl *model) {
+	q.mu.Lock()
+	if q.workerRunning {
+		q.mu.Unlock()
+		return
+	}
+	q.workerRunning = true
+	q.mu.Unlock()
+	defer func() {
+		q.mu.Lock()
+		q.cancelRemainingReady() // flush any qReady left after stop / loop exit
+		q.workerRunning = false
+		q.mu.Unlock()
+		if mdl != nil && mdl.invalidate != nil {
+			mdl.invalidate()
+		}
+	}()
+
+	for {
+		q.mu.Lock()
+		idx := q.nextReadyIndex()
+		if idx == -1 {
+			q.mu.Unlock()
+			return
+		}
+		q.markRunning(idx)
+		item := q.items[idx]
+		autoFollow := q.autoFollow
+		deleteScram := q.deleteScram
+		q.mu.Unlock()
+
+		if autoFollow && mdl != nil {
+			mdl.load(item.CuePath)
+		}
+		if mdl != nil && mdl.invalidate != nil {
+			mdl.invalidate()
+		}
+
+		out := strings.TrimSuffix(item.CuePath, filepath.Ext(item.CuePath)) + ".miniscram"
+		args := []string{"pack", "--progress=json", item.CuePath}
+		if !deleteScram {
+			args = append(args, "--keep-source")
+		}
+
+		if err := mdl.runner.Start("pack", item.CuePath, out, args...); err != nil {
+			q.mu.Lock()
+			q.markFailed(idx, err.Error())
+			q.mu.Unlock()
+			continue
+		}
+
+		res := <-mdl.runner.done
+
+		q.mu.Lock()
+		q.recordResult(idx, res)
+		item = q.items[idx] // refresh for buildEventRec
+		q.mu.Unlock()
+
+		if mdl != nil && mdl.db != nil {
+			ev := buildEventRec(mdl, "pack", item.CuePath, out, res)
+			eventInsert(mdl.db, ev)
+			mdl.refreshStats()
+		}
+		if mdl != nil && mdl.invalidate != nil {
+			mdl.invalidate()
+		}
+	}
 }
