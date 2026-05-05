@@ -6,6 +6,7 @@
 
 # Go build artefacts
 /miniscram
+/tools/miniscram-gui/miniscram-gui
 /bin/
 /dist/
 *.exe
