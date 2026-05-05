@@ -21,6 +21,12 @@ own `go.mod` (matching the pattern of `scripts/sweep`) so the main
 - Pack / Verify / Unpack run as cancellable subprocesses with a
   running-state strip showing the current step + elapsed time, and
   a 6-second success toast with a Reveal-in-folder button.
+- Drop a folder of cues (or multiple cues) onto the window — or use
+  the queue panel's `+ Add files…` / `+ Add dir…` buttons — and they
+  pack sequentially in a left-hand queue. Per-row green progress fill,
+  per-row remove (`×`), cancel-current (`⏹`), and Stop queue. The
+  right pane auto-follows the running cue unless you click somewhere
+  else; clicking the running row re-engages auto-follow.
 
 The GUI talks to `miniscram` strictly by shelling out (`miniscram
 inspect --json` for metadata, `miniscram pack/unpack/verify` for
