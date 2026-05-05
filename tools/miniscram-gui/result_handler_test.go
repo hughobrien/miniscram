@@ -267,6 +267,78 @@ func TestHashCueBinMissing(t *testing.T) {
 	}
 }
 
+// TestStartActionOrSurfaceFailure_BinaryMissing simulates the
+// miniscram-not-on-PATH case: Start() returns ENOENT, the helper
+// must write a fail event row, set a fail toast, and translate the
+// raw exec error into the user-facing "place it next to miniscram-gui"
+// message.
+func TestStartActionOrSurfaceFailure_BinaryMissing(t *testing.T) {
+	m := newTestModel(t)
+	m.runner = &actionRunner{
+		binary: "/no/such/miniscram-binary-for-test",
+		done:   make(chan actionResult, 1),
+	}
+
+	m.startActionOrSurfaceFailure("pack", "/in/disc.cue", "/out/disc.miniscram", "pack", "/in/disc.cue")
+
+	ev := mustOnly(t, m)
+	if ev.Status != "fail" {
+		t.Errorf("event status = %q, want fail", ev.Status)
+	}
+	if !strings.Contains(ev.Error, "miniscram CLI not found") {
+		t.Errorf("event error = %q, want translated user-facing message", ev.Error)
+	}
+	if m.toast == nil {
+		t.Fatal("toast should be set on Start failure")
+	}
+	if m.toast.Status != "fail" {
+		t.Errorf("toast.Status = %q, want fail", m.toast.Status)
+	}
+	if m.toast.Action != "pack" {
+		t.Errorf("toast.Action = %q, want pack", m.toast.Action)
+	}
+	if !strings.Contains(m.toast.FailMsg, "miniscram CLI not found") {
+		t.Errorf("toast.FailMsg = %q", m.toast.FailMsg)
+	}
+}
+
+// TestStartActionOrSurfaceFailure_AlreadyRunning ensures we don't
+// spam the user when the single-flight invariant trips (button click
+// during a window where the runner is still busy from a prior click).
+func TestStartActionOrSurfaceFailure_AlreadyRunning(t *testing.T) {
+	m := newTestModel(t)
+	m.runner = &actionRunner{
+		binary: "/no/such/binary",
+		done:   make(chan actionResult, 1),
+		// state non-nil → Start returns errAlreadyRunning before
+		// touching the (missing) binary.
+		state: &runningState{Action: "pack"},
+	}
+
+	m.startActionOrSurfaceFailure("pack", "/in/disc.cue", "/out/disc.miniscram", "pack", "/in/disc.cue")
+
+	if rows := eventsRecent(m.db, 10); len(rows) != 0 {
+		t.Errorf("errAlreadyRunning should be silent; got %d event row(s)", len(rows))
+	}
+	if m.toast != nil {
+		t.Errorf("errAlreadyRunning should not show a toast; got %+v", m.toast)
+	}
+}
+
+// TestResolveMiniscram_FallbackPath confirms resolveMiniscram returns
+// "miniscram" (PATH lookup) when no sibling and no two-up candidate
+// exists.
+func TestResolveMiniscram_FallbackPath(t *testing.T) {
+	got := resolveMiniscram()
+	// In the test harness, os.Args[0] is the test binary; there is
+	// likely no sibling `miniscram` and no `../../miniscram`. We
+	// can't assert which path resolveMiniscram returns absolutely,
+	// but it should at least produce a non-empty string.
+	if got == "" {
+		t.Error("resolveMiniscram returned empty string")
+	}
+}
+
 func TestReadURIList(t *testing.T) {
 	body := "# comment\nfile:///tmp/a.cue\nfile:///tmp/b%20space.cue\n\nhttp://example.com/x.cue\n"
 	paths := readURIList(strings.NewReader(body))

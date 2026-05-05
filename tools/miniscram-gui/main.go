@@ -586,6 +586,47 @@ func (m *model) handleActionResult(res actionResult) {
 	}
 }
 
+// startActionOrSurfaceFailure wraps runner.Start. When Start succeeds,
+// the running-strip + wait-goroutine flow take it from there. When
+// Start fails (most often: miniscram CLI not on PATH and not next to
+// the GUI binary), the running-strip never appears — without explicit
+// error surfacing the click would disappear into the void. We write a
+// fail event row + show a red fail toast so the user sees what
+// happened.
+func (m *model) startActionOrSurfaceFailure(action, input, output string, args ...string) {
+	if err := m.runner.Start(action, input, output, args...); err != nil {
+		// errAlreadyRunning is a UI-state race (button should have been
+		// disabled). Don't spam the user about it; the existing guards
+		// will let the next click through normally.
+		if errors.Is(err, errAlreadyRunning) {
+			return
+		}
+		msg := err.Error()
+		// PATH lookup miss: "exec: \"miniscram\": executable file not found in $PATH"
+		// Resolved absolute path miss: "fork/exec /path: no such file or directory"
+		// Both indicate the user just needs to install or place the CLI.
+		if strings.Contains(msg, "executable file not found") ||
+			strings.Contains(msg, "no such file or directory") {
+			msg = "miniscram CLI not found. Place it next to miniscram-gui or add it to PATH."
+		}
+		ev := buildEventRec(m, action, input, output, actionResult{
+			Action: action, Input: input, Output: output,
+			Status: "fail", Error: msg,
+		})
+		eventInsert(m.db, ev)
+		m.refreshStats()
+		m.toast = &toastState{
+			Action:    action,
+			Status:    "fail",
+			FailMsg:   msg,
+			ExpiresAt: time.Now().Add(10 * time.Second),
+		}
+		if m.invalidate != nil {
+			m.invalidate()
+		}
+	}
+}
+
 func parseCueLines(s, baseDir string) []cueTrack {
 	var out []cueTrack
 	var pending string
@@ -816,6 +857,7 @@ func main() {
 	doSeed := flag.Bool("seed", false, "seed events table with example data and exit")
 	mockRunning := flag.String("mock-running", "", "screenshot-only: inject a fake in-flight action ('pack'|'unpack'|'verify')")
 	mockToast := flag.String("mock-toast", "", "screenshot-only: inject a fake success toast ('pack'|'unpack'|'verify')")
+	mockToastFail := flag.String("mock-toast-fail", "", "screenshot-only: inject a fake fail toast ('pack'|'unpack'|'verify')")
 	mockQueue := flag.String("mock-queue", "", "screenshot-only: stage a queue with synthetic items in mixed states")
 	flag.Parse()
 
@@ -884,6 +926,14 @@ func main() {
 			OutputSize: size,
 			DurationMs: 5230,
 			ExpiresAt:  time.Now().Add(1 * time.Hour),
+		}
+	}
+	if *mockToastFail != "" {
+		mdl.toast = &toastState{
+			Action:    *mockToastFail,
+			Status:    "fail",
+			FailMsg:   "miniscram CLI not found. Place it next to miniscram-gui or add it to PATH.",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
 		}
 	}
 	if *mockQueue != "" {
@@ -1100,7 +1150,7 @@ func loop(w *app.Window, mdl *model) error {
 			}
 			if verifyBtn.Clicked(gtx) && !qWorker() && mdl.kind == "miniscram" && !mdl.runner.Running() {
 				mdl.toast = nil
-				_ = mdl.runner.Start("verify", mdl.path, "", "verify", "--progress=json", mdl.path)
+				mdl.startActionOrSurfaceFailure("verify", mdl.path, "", "verify", "--progress=json", mdl.path)
 			}
 			if unpackBtn.Clicked(gtx) && !qWorker() && mdl.kind == "miniscram" && !mdl.runner.Running() {
 				mdl.toast = nil
@@ -1126,7 +1176,7 @@ func loop(w *app.Window, mdl *model) error {
 						}
 						return
 					}
-					_ = mdl.runner.Start("unpack", srcPath, out, "unpack", "--progress=json", srcPath, "-o", out)
+					mdl.startActionOrSurfaceFailure("unpack", srcPath, out, "unpack", "--progress=json", srcPath, "-o", out)
 				}()
 			}
 			if toastDismissBtn.Clicked(gtx) && mdl.toast != nil {
@@ -1142,7 +1192,7 @@ func loop(w *app.Window, mdl *model) error {
 				if !deleteScramCB.Value {
 					args = append(args, "--keep-source")
 				}
-				_ = mdl.runner.Start("pack", mdl.path, out, args...)
+				mdl.startActionOrSurfaceFailure("pack", mdl.path, out, args...)
 			}
 			// Queue panel button handlers.
 			if qBtns.AddFiles.Clicked(gtx) {

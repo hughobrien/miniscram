@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -47,10 +49,45 @@ type actionRunner struct {
 
 func newActionRunner(invalidate func()) *actionRunner {
 	return &actionRunner{
-		binary:     "miniscram",
+		binary:     resolveMiniscram(),
 		invalidate: invalidate,
 		done:       make(chan actionResult, 1),
 	}
+}
+
+// resolveMiniscram returns the path to the miniscram CLI. Looks first
+// next to the running miniscram-gui binary (matches the nix package
+// layout where both binaries live in the same bin/), then two
+// directories up (matches the local-dev layout where `go build` at
+// repo root produces ./miniscram and `go build` in tools/miniscram-gui
+// produces ./tools/miniscram-gui/miniscram-gui). Falls back to plain
+// "miniscram" so PATH lookup happens at exec time.
+func resolveMiniscram() string {
+	name := "miniscram"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return name
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	dir := filepath.Dir(exe)
+	for _, candidate := range []string{
+		filepath.Join(dir, name),                  // sibling (nix package)
+		filepath.Join(dir, "..", "..", name),      // local-dev (tools/miniscram-gui/ → repo root)
+	} {
+		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+			abs, err := filepath.Abs(candidate)
+			if err != nil {
+				return candidate
+			}
+			return abs
+		}
+	}
+	return name // PATH lookup at exec time
 }
 
 // Snapshot returns a copy of the current state, or nil when idle.
