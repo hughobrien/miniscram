@@ -253,7 +253,7 @@ type model struct {
 	invalidate func()
 
 	stats       statsAgg
-	recent []eventRec
+	recent      []eventRec
 	statsLoaded bool
 
 	// per-row hover state for mode chips (track row 0..N)
@@ -360,12 +360,14 @@ func (m *model) refreshStats() {
 // handleActionResult translates a runner actionResult into an event row,
 // persists it, and refreshes the stats view. Runs on the UI goroutine
 // (called from the FrameEvent drain).
-func (m *model) handleActionResult(res actionResult) {
+// buildEventRec turns an actionResult into a populated eventRec.
+// Pure (no DB writes, no toast); shared by handleActionResult and the queue worker.
+func buildEventRec(m *model, action, input, output string, res actionResult) eventRec {
 	ev := eventRec{
 		TS:         time.Now(),
-		Action:     res.Action,
-		InputPath:  res.Input,
-		OutputPath: res.Output,
+		Action:     action,
+		InputPath:  input,
+		OutputPath: output,
 		DurationMs: res.DurationMs,
 		Status:     res.Status,
 		Error:      res.Error,
@@ -378,45 +380,51 @@ func (m *model) handleActionResult(res actionResult) {
 			ev.Title = e.Title
 		}
 	}
-	if res.Status == "success" {
-		switch res.Action {
-		case "pack":
-			if res.Output != "" {
-				if st, err := os.Stat(res.Output); err == nil {
-					ev.MiniscramSize = st.Size()
-				}
-				if raw, err := exec.Command("miniscram", "inspect", res.Output, "--json").Output(); err == nil {
-					var meta inspectJSON
-					if json.Unmarshal(raw, &meta) == nil {
-						ev.ScramSize = meta.Scram.Size
-						ev.OverrideRecords = len(meta.DeltaRecords)
-						ev.WriteOffset = meta.WriteOffsetBytes
-						fillTitle(&meta)
-					}
-				}
+	if res.Status != "success" {
+		return ev
+	}
+	switch action {
+	case "pack":
+		if output != "" {
+			if st, err := os.Stat(output); err == nil {
+				ev.MiniscramSize = st.Size()
 			}
-		case "unpack":
-			if res.Output != "" {
-				if st, err := os.Stat(res.Output); err == nil {
-					ev.ScramSize = st.Size()
+			if raw, err := exec.Command("miniscram", "inspect", output, "--json").Output(); err == nil {
+				var meta inspectJSON
+				if json.Unmarshal(raw, &meta) == nil {
+					ev.ScramSize = meta.Scram.Size
+					ev.OverrideRecords = len(meta.DeltaRecords)
+					ev.WriteOffset = meta.WriteOffsetBytes
+					fillTitle(&meta)
 				}
-			}
-			if m.meta != nil {
-				ev.MiniscramSize = m.miniscramOnDisk
-				ev.OverrideRecords = len(m.meta.DeltaRecords)
-				ev.WriteOffset = m.meta.WriteOffsetBytes
-				fillTitle(m.meta)
-			}
-		case "verify":
-			if m.meta != nil {
-				ev.ScramSize = m.meta.Scram.Size
-				ev.MiniscramSize = m.miniscramOnDisk
-				ev.OverrideRecords = len(m.meta.DeltaRecords)
-				ev.WriteOffset = m.meta.WriteOffsetBytes
-				fillTitle(m.meta)
 			}
 		}
+	case "unpack":
+		if output != "" {
+			if st, err := os.Stat(output); err == nil {
+				ev.ScramSize = st.Size()
+			}
+		}
+		if m.meta != nil {
+			ev.MiniscramSize = m.miniscramOnDisk
+			ev.OverrideRecords = len(m.meta.DeltaRecords)
+			ev.WriteOffset = m.meta.WriteOffsetBytes
+			fillTitle(m.meta)
+		}
+	case "verify":
+		if m.meta != nil {
+			ev.ScramSize = m.meta.Scram.Size
+			ev.MiniscramSize = m.miniscramOnDisk
+			ev.OverrideRecords = len(m.meta.DeltaRecords)
+			ev.WriteOffset = m.meta.WriteOffsetBytes
+			fillTitle(m.meta)
+		}
 	}
+	return ev
+}
+
+func (m *model) handleActionResult(res actionResult) {
+	ev := buildEventRec(m, res.Action, res.Input, res.Output, res)
 	eventInsert(m.db, ev)
 	m.refreshStats()
 
@@ -682,20 +690,20 @@ func loop(w *app.Window, mdl *model) error {
 	th.Palette.Fg = text1
 
 	var (
-		openBtn       widget.Clickable
-		statsBtn      widget.Clickable
-		fileBtn       widget.Clickable
-		verifyBtn     widget.Clickable
-		unpackBtn     widget.Clickable
-		packBtn       widget.Clickable
+		openBtn         widget.Clickable
+		statsBtn        widget.Clickable
+		fileBtn         widget.Clickable
+		verifyBtn       widget.Clickable
+		unpackBtn       widget.Clickable
+		packBtn         widget.Clickable
 		cancelBtn       widget.Clickable
 		toastDismissBtn widget.Clickable
 		toastRevealBtn  widget.Clickable
 		deleteScramCB   = widget.Bool{Value: true} // default: consume scram on success
-		mockHoverCB   widget.Bool                // for screenshots
-		copyBtns      = make(map[string]*widget.Clickable)
-		linkBtns      = make(map[string]*linkEntry)
-		listScroll    widget.List
+		mockHoverCB     widget.Bool                // for screenshots
+		copyBtns        = make(map[string]*widget.Clickable)
+		linkBtns        = make(map[string]*linkEntry)
+		listScroll      widget.List
 	)
 	_ = mockHoverCB
 	listScroll.Axis = layout.Vertical
@@ -860,8 +868,8 @@ func topBar(th *material.Theme, mdl *model, openBtn, statsBtn, fileBtn *widget.C
 }
 
 type topBarStyle struct {
-	th                          *material.Theme
-	mdl                         *model
+	th                         *material.Theme
+	mdl                        *model
 	openBtn, statsBtn, fileBtn *widget.Clickable
 }
 
