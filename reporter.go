@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -126,6 +127,66 @@ func runStep(r Reporter, label string, fn func() (string, error)) error {
 	}
 	st.Done("%s", msg)
 	return nil
+}
+
+// progressEvent is the wire shape for --progress=json output. Field
+// order in the struct = field order in emitted JSON (with omitempty
+// collapsing absent fields).
+type progressEvent struct {
+	Type  string `json:"type"`
+	Label string `json:"label,omitempty"`
+	Msg   string `json:"msg,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// jsonReporter emits one NDJSON event per Reporter API call. Used
+// when --progress=json is set; replaces text on stderr.
+type jsonReporter struct {
+	enc *json.Encoder
+}
+
+// NewJSONReporter returns a Reporter that emits one NDJSON event per
+// call. Writes go to w; errors from w (e.g. broken pipe) are silently
+// swallowed, matching the textReporter's behavior on closed stderr.
+func NewJSONReporter(w io.Writer) Reporter {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false) // labels never contain HTML; cleaner output
+	return &jsonReporter{enc: enc}
+}
+
+func (r *jsonReporter) Step(label string) StepHandle {
+	_ = r.enc.Encode(progressEvent{Type: "step", Label: label})
+	return &jsonStep{enc: r.enc, label: label}
+}
+
+func (r *jsonReporter) Info(format string, args ...any) {
+	_ = r.enc.Encode(progressEvent{Type: "info", Msg: fmt.Sprintf(format, args...)})
+}
+
+func (r *jsonReporter) Warn(format string, args ...any) {
+	_ = r.enc.Encode(progressEvent{Type: "warn", Msg: fmt.Sprintf(format, args...)})
+}
+
+type jsonStep struct {
+	enc   *json.Encoder
+	label string
+	done  bool
+}
+
+func (s *jsonStep) Done(format string, args ...any) {
+	if s.done {
+		return
+	}
+	s.done = true
+	_ = s.enc.Encode(progressEvent{Type: "done", Label: s.label, Msg: fmt.Sprintf(format, args...)})
+}
+
+func (s *jsonStep) Fail(err error) {
+	if s.done {
+		return
+	}
+	s.done = true
+	_ = s.enc.Encode(progressEvent{Type: "fail", Label: s.label, Error: err.Error()})
 }
 
 // isStderrTTY returns true when w is the same fd as os.Stderr and that

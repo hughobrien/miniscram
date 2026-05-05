@@ -1,0 +1,26 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-04-progress-json.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: jsonReporter + unit test",
+      "status": "pending",
+      "description": "**Goal:** New Reporter implementation emitting NDJSON events; full unit-test coverage. Lands without touching the CLI.\n\n**Files:**\n- Modify: reporter.go\n- Modify: reporter_test.go\n\n**Acceptance Criteria:**\n- [ ] progressEvent struct with type/label/msg/error fields, omitempty on optionals\n- [ ] NewJSONReporter(w io.Writer) Reporter exists\n- [ ] TestJSONReporter covers Step/Done(msg), Step/Done(empty), Step/Fail, Info, Warn — exact byte assertion\n- [ ] go vet clean; existing tests pass\n\n**Verify:** `go vet ./... && go test -race -count=1 -run TestJSONReporter -v ./...`\n\n```json:metadata\n{\"files\": [\"reporter.go\", \"reporter_test.go\"], \"verifyCommand\": \"go vet ./... && go test -race -count=1 -run TestJSONReporter -v ./...\", \"acceptanceCriteria\": [\"progressEvent struct exists\", \"NewJSONReporter exists\", \"TestJSONReporter passes\", \"go vet clean\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Wire --progress=json through parseSubcommand + per-subcommand dispatch",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** CLI accepts --progress=json on pack/unpack/verify; uses NewJSONReporter when set; rejects --progress=json --quiet combo before run.\n\n**Files:**\n- Modify: main.go (commonFlags, parseSubcommand, runPack/runUnpack/runVerify dispatch)\n- Modify: help.go (three help texts)\n\n**Acceptance Criteria:**\n- [ ] commonFlags.progress field added\n- [ ] parseSubcommand validates --progress value (only \"\" or \"json\")\n- [ ] --progress=json + --quiet rejected with usage error\n- [ ] All three runFoo handlers select reporter via switch\n- [ ] Help texts updated\n- [ ] go vet clean; tests pass\n\n**Verify:** `go vet ./... && go test -race -count=1 ./...`\n\n```json:metadata\n{\"files\": [\"main.go\", \"help.go\"], \"verifyCommand\": \"go vet ./... && go test -race -count=1 ./...\", \"acceptanceCriteria\": [\"commonFlags has progress field\", \"invalid value rejected\", \"json+quiet rejected\", \"three reporter dispatches updated\", \"help texts mention --progress=json\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: End-to-end CLI tests",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Regression tests for pack --progress=json (event sequence) and the --progress=json --quiet rejection.\n\n**Files:**\n- Modify: cli_test.go\n\n**Acceptance Criteria:**\n- [ ] TestCLIPackProgressJSON runs pack against synthetic fixture, parses NDJSON, asserts step/done pairing + required step labels\n- [ ] TestCLIProgressJSONQuietConflict asserts exitUsage + 'mutually exclusive' in stderr\n- [ ] go vet clean; full suite passes\n\n**Verify:** `go test -race -count=1 -run 'TestCLIPackProgressJSON|TestCLIProgressJSONQuietConflict' -v ./...`\n\n```json:metadata\n{\"files\": [\"cli_test.go\"], \"verifyCommand\": \"go test -race -count=1 -run 'TestCLIPackProgressJSON|TestCLIProgressJSONQuietConflict' -v ./...\", \"acceptanceCriteria\": [\"happy-path event sequence assertion\", \"mutual-exclusivity rejection assertion\", \"all tests pass\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-04T22:30:00Z"
+}
