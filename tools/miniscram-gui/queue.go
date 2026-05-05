@@ -197,9 +197,9 @@ func prettyProgressLine(s string) string {
 	}
 	switch ev.Type {
 	case "step":
-		return "step: " + ev.Label + "…"
+		return ev.Label + "…"
 	case "done":
-		return "done: " + ev.Label + " ✓"
+		return ev.Label + " ✓"
 	case "info", "warn":
 		return ev.Msg
 	case "fail":

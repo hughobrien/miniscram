@@ -125,14 +125,14 @@ func TestAddPaths_NonCueNonDirIgnored(t *testing.T) {
 
 func TestPrettyProgressLine_Step(t *testing.T) {
 	got := prettyProgressLine(`{"type":"step","label":"writing miniscram"}`)
-	if got != "step: writing miniscram…" {
+	if got != "writing miniscram…" {
 		t.Errorf("got %q", got)
 	}
 }
 
 func TestPrettyProgressLine_Done(t *testing.T) {
 	got := prettyProgressLine(`{"type":"done","label":"writing miniscram","msg":"123 bytes"}`)
-	if got != "done: writing miniscram ✓" {
+	if got != "writing miniscram ✓" {
 		t.Errorf("got %q", got)
 	}
 }

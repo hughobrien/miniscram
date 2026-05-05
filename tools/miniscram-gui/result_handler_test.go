@@ -339,6 +339,19 @@ func TestResolveMiniscram_FallbackPath(t *testing.T) {
 	}
 }
 
+// TestProbeCLI_Missing confirms probeCLI returns a non-nil error
+// when the binary doesn't exist. The exact error string is OS-
+// dependent; we just assert err != nil and version is empty.
+func TestProbeCLI_Missing(t *testing.T) {
+	v, err := probeCLI("/no/such/miniscram-binary-for-test")
+	if err == nil {
+		t.Error("probeCLI on missing binary should return error")
+	}
+	if v != "" {
+		t.Errorf("version = %q on missing binary, want empty", v)
+	}
+}
+
 func TestReadURIList(t *testing.T) {
 	body := "# comment\nfile:///tmp/a.cue\nfile:///tmp/b%20space.cue\n\nhttp://example.com/x.cue\n"
 	paths := readURIList(strings.NewReader(body))
