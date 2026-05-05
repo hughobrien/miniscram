@@ -259,6 +259,11 @@ view (compression-ratio hero, tracks table, per-track redump.org
 lookups), and tracks pack/unpack/verify history in a local SQLite.
 Own `go.mod`, so the main build stays free of GUI dependencies.
 
+![miniscram-gui inspecting Half-Life](./tools/miniscram-gui/screenshots/01-miniscram.png)
+
+More screenshots — cue view, Stats tab, the running strip, and the
+success toast — in [`tools/miniscram-gui/README.md`](./tools/miniscram-gui/README.md#screenshots).
+
 ## Install
 
 ### Pre-built binary

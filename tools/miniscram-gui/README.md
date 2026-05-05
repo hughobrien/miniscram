@@ -41,8 +41,37 @@ the system X11/Wayland + GL + a C toolchain are sufficient.
 
 ## Flags
 
-| Flag           | Purpose                                                  |
-|----------------|----------------------------------------------------------|
-| `-load <path>` | Auto-load a file at startup (used in screenshots).       |
-| `-view stats`  | Open straight on the Stats tab.                          |
-| `-seed`        | Insert a small set of fixture events so Stats demo well. |
+| Flag                     | Purpose                                                                         |
+|--------------------------|---------------------------------------------------------------------------------|
+| `-load <path>`           | Auto-load a file at startup (used in screenshots).                              |
+| `-view stats`            | Open straight on the Stats tab.                                                 |
+| `-seed`                  | Insert a small set of fixture events so Stats demos well.                       |
+| `-mock-running <action>` | Screenshot-only: inject a fake in-flight action (`pack`/`unpack`/`verify`).     |
+| `-mock-toast <action>`   | Screenshot-only: inject a fake success toast (`pack`/`unpack`/`verify`).        |
+
+## Screenshots
+
+A `.miniscram` loaded — hero compression ratio, stat tiles, tracks
+with per-track hashes (each row green when matched on redump.org,
+linked to the disc page):
+
+![miniscram view](screenshots/01-miniscram.png)
+
+A `.cue` loaded — status banner, tracks parsed from the cue with bin
+sizes, default-on checkbox to delete `.scram` after a verified pack:
+
+![cue view](screenshots/02-cue.png)
+
+Stats tab — totals, best ratio, recent operations table with a
+per-row delete:
+
+![stats](screenshots/03-stats.png)
+
+Pack/unpack/verify run as cancellable subprocesses with a running
+strip showing the current step + elapsed time:
+
+![running strip](screenshots/04-running-strip.png)
+
+…and a 6 s success toast with a Reveal-in-folder button:
+
+![toast](screenshots/05-toast.png)
