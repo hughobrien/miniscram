@@ -368,6 +368,17 @@ type model struct {
 
 	miniscramVersion string
 
+	// CLI presence is probed at startup. cliMissing == true drives the
+	// red banner that warns Pack/Verify/Unpack will fail until the user
+	// installs the CLI. cliBinary is the resolved path the runner will
+	// invoke (next to miniscram-gui, two dirs up, or the bare name for
+	// PATH lookup) — surfaced in the banner so the user knows where the
+	// GUI looked. cliErr is the probe's error message, also surfaced.
+	cliMissing  bool
+	cliBinary   string
+	cliErr      string
+	cliBannerHidden bool // user dismissed the banner
+
 	redump     map[string]*redumpEntry
 	redumpMu   sync.Mutex
 	invalidate func()
@@ -815,14 +826,20 @@ func revealInFolder(path string) {
 	_ = cmd.Start()
 }
 
-func miniscramVersion() string {
-	out, err := exec.Command("miniscram", "--version").Output()
+// probeCLI runs `<binary> --version` to check whether the resolved
+// miniscram CLI is actually invocable. Returns the trimmed version
+// string ("dev", "0.4.0", …) on success, or an error describing why
+// the probe failed (binary missing, exec error, non-zero exit).
+//
+// The probe runs at startup; failure drives the CLI-missing banner.
+func probeCLI(binary string) (string, error) {
+	out, err := exec.Command(binary, "--version").Output()
 	if err != nil {
-		return "unknown"
+		return "", err
 	}
 	v := strings.TrimSpace(string(out))
 	v = strings.TrimPrefix(v, "miniscram ")
-	return v
+	return v, nil
 }
 
 // ---------------- palette ----------------
@@ -859,6 +876,7 @@ func main() {
 	mockToast := flag.String("mock-toast", "", "screenshot-only: inject a fake success toast ('pack'|'unpack'|'verify')")
 	mockToastFail := flag.String("mock-toast-fail", "", "screenshot-only: inject a fake fail toast ('pack'|'unpack'|'verify')")
 	mockQueue := flag.String("mock-queue", "", "screenshot-only: stage a queue with synthetic items in mixed states")
+	mockCLIMissing := flag.Bool("mock-cli-missing", false, "screenshot-only: pretend the miniscram CLI couldn't be probed at startup")
 	flag.Parse()
 
 	db, err := dbOpen()
@@ -874,17 +892,10 @@ func main() {
 	}
 
 	mdl := &model{
-		db:               db,
-		view:             *startView,
-		redump:           map[string]*redumpEntry{},
-		miniscramVersion: miniscramVersion(),
-		modeHover:        map[int]*modeHover{},
-	}
-	if *loadPath != "" {
-		mdl.load(*loadPath)
-	}
-	if mdl.view == "stats" {
-		mdl.refreshStats()
+		db:        db,
+		view:      *startView,
+		redump:    map[string]*redumpEntry{},
+		modeHover: map[int]*modeHover{},
 	}
 
 	mdl.runner = newActionRunner(func() {
@@ -892,6 +903,25 @@ func main() {
 			mdl.invalidate()
 		}
 	})
+
+	// Probe the resolved CLI at startup. If --version fails, the GUI
+	// can't run any pack/verify/unpack — surface this loudly via the
+	// CLI-missing banner instead of letting clicks fail silently.
+	mdl.cliBinary = mdl.runner.binary
+	if v, err := probeCLI(mdl.cliBinary); err != nil {
+		mdl.cliMissing = true
+		mdl.cliErr = err.Error()
+		mdl.miniscramVersion = "unknown"
+	} else {
+		mdl.miniscramVersion = v
+	}
+
+	if *loadPath != "" {
+		mdl.load(*loadPath)
+	}
+	if mdl.view == "stats" {
+		mdl.refreshStats()
+	}
 
 	mdl.queue = newQueueModel()
 
@@ -970,6 +1000,11 @@ func main() {
 		mdl.queue.workerRunning = true // so Stop button renders
 		mdl.queue.mu.Unlock()
 	}
+	if *mockCLIMissing {
+		mdl.cliMissing = true
+		mdl.cliBinary = "/usr/local/bin/miniscram"
+		mdl.cliErr = `exec: "miniscram": executable file not found in $PATH`
+	}
 
 	go func() {
 		w := new(app.Window)
@@ -1005,6 +1040,7 @@ func loop(w *app.Window, mdl *model) error {
 		cancelBtn       widget.Clickable
 		toastDismissBtn widget.Clickable
 		toastRevealBtn  widget.Clickable
+		cliBannerDismissBtn widget.Clickable
 		deleteScramCB   = widget.Bool{Value: true} // default: consume scram on success
 		mockHoverCB     widget.Bool                // for screenshots
 		copyBtns        = make(map[string]*widget.Clickable)
@@ -1145,6 +1181,9 @@ func loop(w *app.Window, mdl *model) error {
 					}
 				}()
 			}
+			if cliBannerDismissBtn.Clicked(gtx) {
+				mdl.cliBannerHidden = true
+			}
 			if cancelBtn.Clicked(gtx) {
 				mdl.runner.Cancel()
 			}
@@ -1269,6 +1308,7 @@ func loop(w *app.Window, mdl *model) error {
 					return topBar(th, mdl, &openBtn, &statsBtn, &fileBtn).Layout(gtx)
 				}),
 				layout.Rigid(divider),
+				layout.Rigid(cliMissingBanner(th, mdl, &cliBannerDismissBtn)),
 				layout.Rigid(runningStripWidget(th, mdl.runner.Snapshot(), &cancelBtn)),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					snap := mdl.queue.Snapshot()

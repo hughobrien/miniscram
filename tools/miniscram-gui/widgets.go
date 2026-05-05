@@ -200,3 +200,50 @@ func toastWidget(th *material.Theme, ts *toastState, dismissBtn, revealBtn *widg
 		return dims
 	}
 }
+
+// cliMissingBanner renders a persistent red strip when the miniscram
+// CLI couldn't be probed at startup. Pack/Verify/Unpack will fail
+// until the user installs the CLI; the banner makes that visible
+// instead of letting the user click silently-broken buttons.
+//
+// Dismissable via the ✕ button; re-appears on the next launch if the
+// CLI is still missing.
+func cliMissingBanner(th *material.Theme, mdl *model, dismissBtn *widget.Clickable) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		if !mdl.cliMissing || mdl.cliBannerHidden {
+			return layout.Dimensions{}
+		}
+		msg := "miniscram CLI not found at " + mdl.cliBinary +
+			" — Pack, Verify, and Unpack will fail. Place the binary next to miniscram-gui or add it to PATH."
+
+		macro := op.Record(gtx.Ops)
+		dims := layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(24), Right: unit.Dp(24)}.Layout(gtx,
+			func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return statusDot(gtx, bad)
+					}),
+					layout.Rigid(spacer(10, 0)),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						lb := material.Label(th, unit.Sp(13), msg)
+						lb.Color = text1
+						return lb.Layout(gtx)
+					}),
+					layout.Rigid(spacer(8, 0)),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						btn := material.Button(th, dismissBtn, "✕")
+						btn.Background = bg
+						btn.Color = text3
+						btn.CornerRadius = unit.Dp(4)
+						btn.TextSize = unit.Sp(13)
+						btn.Inset = layout.Inset{Top: 4, Bottom: 4, Left: 8, Right: 8}
+						return btn.Layout(gtx)
+					}),
+				)
+			})
+		call := macro.Stop()
+		paint.FillShape(gtx.Ops, mustRGB("3a1414"), clip.Rect{Max: dims.Size}.Op())
+		call.Add(gtx.Ops)
+		return dims
+	}
+}
