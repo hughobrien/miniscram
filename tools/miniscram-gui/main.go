@@ -201,7 +201,7 @@ type model struct {
 	deleteBtns map[int64]*widget.Clickable
 
 	runner    *actionRunner
-	lastEvent eventRec // populated in onDone; used by Task 3's toast
+	lastEvent eventRec // populated in handleActionResult; used by Task 3's toast
 }
 
 func (m *model) load(p string) {
@@ -295,15 +295,69 @@ func (m *model) refreshStats() {
 	m.statsLoaded = true
 }
 
-func lastNonEmptyLine(s string) string {
-	lines := strings.Split(s, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		t := strings.TrimSpace(lines[i])
-		if t != "" {
-			return t
+// handleActionResult translates a runner actionResult into an event row,
+// persists it, and refreshes the stats view. Runs on the UI goroutine
+// (called from the FrameEvent drain).
+func (m *model) handleActionResult(res actionResult) {
+	ev := eventRec{
+		TS:         time.Now(),
+		Action:     res.Action,
+		InputPath:  res.Input,
+		OutputPath: res.Output,
+		DurationMs: res.DurationMs,
+		Status:     res.Status,
+		Error:      res.Error,
+	}
+	fillTitle := func(meta *inspectJSON) {
+		if meta == nil || len(meta.Tracks) == 0 {
+			return
+		}
+		if e, ok := redumpGet(m.db, meta.Tracks[0].Hashes["sha1"]); ok && e.State == "found" {
+			ev.Title = e.Title
 		}
 	}
-	return ""
+	if res.Status == "success" {
+		switch res.Action {
+		case "pack":
+			if res.Output != "" {
+				if st, err := os.Stat(res.Output); err == nil {
+					ev.MiniscramSize = st.Size()
+				}
+				if raw, err := exec.Command("miniscram", "inspect", res.Output, "--json").Output(); err == nil {
+					var meta inspectJSON
+					if json.Unmarshal(raw, &meta) == nil {
+						ev.ScramSize = meta.Scram.Size
+						ev.OverrideRecords = len(meta.DeltaRecords)
+						ev.WriteOffset = meta.WriteOffsetBytes
+						fillTitle(&meta)
+					}
+				}
+			}
+		case "unpack":
+			if res.Output != "" {
+				if st, err := os.Stat(res.Output); err == nil {
+					ev.ScramSize = st.Size()
+				}
+			}
+			if m.meta != nil {
+				ev.MiniscramSize = m.miniscramOnDisk
+				ev.OverrideRecords = len(m.meta.DeltaRecords)
+				ev.WriteOffset = m.meta.WriteOffsetBytes
+				fillTitle(m.meta)
+			}
+		case "verify":
+			if m.meta != nil {
+				ev.ScramSize = m.meta.Scram.Size
+				ev.MiniscramSize = m.miniscramOnDisk
+				ev.OverrideRecords = len(m.meta.DeltaRecords)
+				ev.WriteOffset = m.meta.WriteOffsetBytes
+				fillTitle(m.meta)
+			}
+		}
+	}
+	eventInsert(m.db, ev)
+	m.refreshStats()
+	m.lastEvent = ev
 }
 
 func parseCueLines(s, baseDir string) []cueTrack {
@@ -465,75 +519,11 @@ func main() {
 		mdl.refreshStats()
 	}
 
-	mdl.runner = newActionRunner(
-		func() {
-			if mdl.invalidate != nil {
-				mdl.invalidate()
-			}
-		},
-		func(res actionResult) {
-			// Translate actionResult into an event row.
-			ev := eventRec{
-				TS:         time.Now(),
-				Action:     res.Action,
-				InputPath:  res.Input,
-				OutputPath: res.Output,
-				DurationMs: res.DurationMs,
-				Status:     res.Status,
-				Error:      res.Error,
-			}
-			fillTitle := func(meta *inspectJSON) {
-				if meta == nil || len(meta.Tracks) == 0 {
-					return
-				}
-				if e, ok := redumpGet(mdl.db, meta.Tracks[0].Hashes["sha1"]); ok && e.State == "found" {
-					ev.Title = e.Title
-				}
-			}
-			if res.Status == "success" {
-				switch res.Action {
-				case "pack":
-					if res.Output != "" {
-						if st, err := os.Stat(res.Output); err == nil {
-							ev.MiniscramSize = st.Size()
-						}
-						if raw, err := exec.Command("miniscram", "inspect", res.Output, "--json").Output(); err == nil {
-							var meta inspectJSON
-							if json.Unmarshal(raw, &meta) == nil {
-								ev.ScramSize = meta.Scram.Size
-								ev.OverrideRecords = len(meta.DeltaRecords)
-								ev.WriteOffset = meta.WriteOffsetBytes
-								fillTitle(&meta)
-							}
-						}
-					}
-				case "unpack":
-					if res.Output != "" {
-						if st, err := os.Stat(res.Output); err == nil {
-							ev.ScramSize = st.Size()
-						}
-					}
-					if mdl.meta != nil {
-						ev.MiniscramSize = mdl.miniscramOnDisk
-						ev.OverrideRecords = len(mdl.meta.DeltaRecords)
-						ev.WriteOffset = mdl.meta.WriteOffsetBytes
-						fillTitle(mdl.meta)
-					}
-				case "verify":
-					if mdl.meta != nil {
-						ev.ScramSize = mdl.meta.Scram.Size
-						ev.MiniscramSize = mdl.miniscramOnDisk
-						ev.OverrideRecords = len(mdl.meta.DeltaRecords)
-						ev.WriteOffset = mdl.meta.WriteOffsetBytes
-						fillTitle(mdl.meta)
-					}
-				}
-			}
-			eventInsert(mdl.db, ev)
-			mdl.refreshStats()
-			mdl.lastEvent = ev
-		},
-	)
+	mdl.runner = newActionRunner(func() {
+		if mdl.invalidate != nil {
+			mdl.invalidate()
+		}
+	})
 
 	go func() {
 		w := new(app.Window)
@@ -607,6 +597,15 @@ func loop(w *app.Window, mdl *model) error {
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
+
+			// Drain any completed action onto the UI goroutine. Single-flight
+			// + cap-1 channel + r.invalidate() in wait() means at most one
+			// result is ever pending, so a single non-blocking receive suffices.
+			select {
+			case res := <-mdl.runner.done:
+				mdl.handleActionResult(res)
+			default:
+			}
 
 			if statsBtn.Clicked(gtx) {
 				mdl.view = "stats"

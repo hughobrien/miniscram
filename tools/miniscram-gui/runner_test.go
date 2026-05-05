@@ -55,13 +55,12 @@ func TestMain(m *testing.M) {
 
 func newTestRunner(t *testing.T, fakeMode string) (*actionRunner, chan actionResult) {
 	t.Helper()
-	done := make(chan actionResult, 1)
 	r := &actionRunner{
 		binary: os.Args[0],
-		onDone: func(res actionResult) { done <- res },
+		done:   make(chan actionResult, 1),
 	}
 	t.Setenv("FAKE_MODE", fakeMode)
-	return r, done
+	return r, r.done
 }
 
 func TestActionRunner_Happy(t *testing.T) {
@@ -162,7 +161,7 @@ func waitFor(t *testing.T, done <-chan actionResult, timeout time.Duration) acti
 	case res := <-done:
 		return res
 	case <-time.After(timeout):
-		t.Fatalf("onDone did not fire within %v", timeout)
+		t.Fatalf("done channel did not fire within %v", timeout)
 		return actionResult{}
 	}
 }
