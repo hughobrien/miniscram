@@ -142,6 +142,111 @@ func pickSave(defaultName, defaultDir string) (string, error) {
 	return "", fmt.Errorf("no save dialog for %s", runtime.GOOS)
 }
 
+// pickFiles shells out to the platform's native multi-select file dialog.
+func pickFiles() ([]string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		if p, err := exec.LookPath("zenity"); err == nil {
+			out, err := exec.Command(p, "--file-selection", "--multiple",
+				"--separator=\n",
+				"--title=Add cue files to queue",
+				"--file-filter=cuesheets | *.cue",
+				"--file-filter=all files | *").Output()
+			if err != nil {
+				return nil, err
+			}
+			return splitLines(strings.TrimSpace(string(out))), nil
+		}
+		if p, err := exec.LookPath("kdialog"); err == nil {
+			// kdialog has no native multi mode; fall back to single-select.
+			out, err := exec.Command(p, "--getopenfilename", "", "*.cue|cuesheets\n*|all files").Output()
+			if err != nil {
+				return nil, err
+			}
+			return splitLines(strings.TrimSpace(string(out))), nil
+		}
+		return nil, errors.New("install zenity or kdialog for the native multi picker")
+	case "darwin":
+		out, err := exec.Command("osascript", "-e",
+			`set fs to choose file with prompt "Add cue files to queue" of type {"cue"} with multiple selections allowed`+"\n"+
+				`set lst to ""`+"\n"+
+				`repeat with f in fs`+"\n"+
+				`set lst to lst & POSIX path of f & linefeed`+"\n"+
+				`end repeat`+"\n"+
+				`return lst`).Output()
+		if err != nil {
+			return nil, err
+		}
+		return splitLines(strings.TrimSpace(string(out))), nil
+	case "windows":
+		ps := `Add-Type -AssemblyName System.Windows.Forms;` +
+			`$f = New-Object System.Windows.Forms.OpenFileDialog;` +
+			`$f.Filter = "cuesheets|*.cue|All|*";` +
+			`$f.Multiselect = $true;` +
+			`if ($f.ShowDialog() -eq 'OK') { $f.FileNames -join "` + "`n" + `" }`
+		out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).Output()
+		if err != nil {
+			return nil, err
+		}
+		return splitLines(strings.TrimSpace(string(out))), nil
+	}
+	return nil, fmt.Errorf("no multi picker for %s", runtime.GOOS)
+}
+
+// pickDir shells out to the platform's native directory picker dialog.
+func pickDir() (string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		if p, err := exec.LookPath("zenity"); err == nil {
+			out, err := exec.Command(p, "--file-selection", "--directory",
+				"--title=Add directory to queue").Output()
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(string(out)), nil
+		}
+		if p, err := exec.LookPath("kdialog"); err == nil {
+			out, err := exec.Command(p, "--getexistingdirectory").Output()
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(string(out)), nil
+		}
+		return "", errors.New("install zenity or kdialog for the native directory picker")
+	case "darwin":
+		out, err := exec.Command("osascript", "-e",
+			`POSIX path of (choose folder with prompt "Add directory to queue")`).Output()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	case "windows":
+		ps := `Add-Type -AssemblyName System.Windows.Forms;` +
+			`$f = New-Object System.Windows.Forms.FolderBrowserDialog;` +
+			`if ($f.ShowDialog() -eq 'OK') { $f.SelectedPath }`
+		out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).Output()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	return "", fmt.Errorf("no directory picker for %s", runtime.GOOS)
+}
+
+// splitLines splits on newline, trims whitespace from each line, and drops empty lines.
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
 const guiVersion = "0.1"
 const userAgent = "miniscram-gui/" + guiVersion + " (+https://github.com/hughobrien/miniscram) Go-http-client/1.1"
 
