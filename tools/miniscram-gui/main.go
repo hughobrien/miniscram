@@ -264,6 +264,7 @@ type model struct {
 
 	runner *actionRunner
 	toast  *toastState
+	queue  *queueModel
 }
 
 func (m *model) load(p string) {
@@ -630,6 +631,8 @@ func main() {
 			mdl.invalidate()
 		}
 	})
+
+	mdl.queue = newQueueModel()
 
 	// Screenshot-only state injection. Same package, so direct field access.
 	if *mockRunning != "" {
