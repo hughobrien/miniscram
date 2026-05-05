@@ -17,8 +17,6 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-          - goos: darwin
-            goarch: amd64
           - goos: windows
             goarch: amd64
     steps:
@@ -63,9 +61,6 @@ jobs:
         include:
           - os: ubuntu-latest
             goos: linux
-            goarch: amd64
-          - os: macos-13
-            goos: darwin
             goarch: amd64
           - os: windows-latest
             goos: windows
