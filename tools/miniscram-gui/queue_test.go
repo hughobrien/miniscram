@@ -390,7 +390,10 @@ func TestPackPhasesCoverage(t *testing.T) {
 	out := filepath.Join(tmp, "fixture.miniscram")
 	// Note: we run pack without --keep-source to allow it to complete without
 	// attempting to delete the .scram file. We just care about the emitted steps.
-	cmd := exec.Command(miniscramBin, "pack", "--progress=json", "-o", out, fixtureCue)
+	// --keep-source preserves the fixture's .scram file. Without it, a
+	// successful pack consumes the source scram (deleting it) and the
+	// next test run has no fixture left.
+	cmd := exec.Command(miniscramBin, "pack", "--progress=json", "--keep-source", "-o", out, fixtureCue)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	// We don't care if pack fails; we just want to check the step labels it emitted.
