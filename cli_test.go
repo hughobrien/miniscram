@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -237,5 +239,80 @@ func TestCLIVersion(t *testing.T) {
 	}
 	if !bytes.Contains(stderr.Bytes(), []byte("miniscram")) {
 		t.Fatalf("missing version: %s", stderr.String())
+	}
+}
+
+func TestCLIVerifyProgressJSON(t *testing.T) {
+	container := packSyntheticContainer(t)
+
+	var stderr bytes.Buffer
+	if code := run([]string{"verify", "--progress=json", container}, io.Discard, &stderr); code != exitOK {
+		t.Fatalf("verify exit %d; stderr:\n%s", code, stderr.String())
+	}
+
+	// Parse stderr line-by-line as progressEvent. Skip blank lines.
+	var events []progressEvent
+	for _, line := range strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev progressEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("non-JSON stderr line %q: %v\nfull stderr:\n%s", line, err, stderr.String())
+		}
+		events = append(events, ev)
+	}
+
+	// Each step must have a matching done; no fails on a happy-path run.
+	openSteps := map[string]bool{}
+	for _, ev := range events {
+		switch ev.Type {
+		case "step":
+			openSteps[ev.Label] = true
+		case "done":
+			if !openSteps[ev.Label] {
+				t.Errorf("done with no matching step: %q", ev.Label)
+			}
+			delete(openSteps, ev.Label)
+		case "fail":
+			t.Errorf("unexpected fail on happy path: %+v", ev)
+		case "info", "warn":
+			// fine; no assertions on contents
+		default:
+			t.Errorf("unknown event type %q in %+v", ev.Type, ev)
+		}
+	}
+	if len(openSteps) != 0 {
+		t.Errorf("steps opened but not closed: %v", openSteps)
+	}
+
+	// Sanity: verify emits these step substrings (substring because labels include paths).
+	requiredSubstrings := []string{
+		"verifying bin hashes",
+		"applying delta",
+		"verifying scram hashes",
+	}
+	for _, want := range requiredSubstrings {
+		found := false
+		for _, ev := range events {
+			if ev.Type == "step" && strings.Contains(ev.Label, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing required step matching %q in event stream:\n%s", want, stderr.String())
+		}
+	}
+}
+
+func TestCLIProgressJSONQuietConflict(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run([]string{"pack", "--progress=json", "--quiet", "/tmp/does-not-exist.cue"}, io.Discard, &stderr)
+	if code != exitUsage {
+		t.Errorf("exit = %d, want exitUsage (%d)", code, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), "mutually exclusive") {
+		t.Errorf("stderr missing 'mutually exclusive'; got:\n%s", stderr.String())
 	}
 }

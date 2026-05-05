@@ -69,7 +69,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // commonFlags is the set of flags every subcommand shares.
 type commonFlags struct {
-	quiet bool
+	quiet    bool
+	progress string // "" (default text) or "json"
 }
 
 // parseSubcommand registers help + quiet flags, parses args, and
@@ -87,6 +88,7 @@ func parseSubcommand(name, helpText string, args []string, stderr io.Writer, con
 	fs.SetOutput(stderr)
 	quiet := fs.Bool("q", false, "quiet")
 	quietLong := fs.Bool("quiet", false, "quiet")
+	progress := fs.String("progress", "", "machine-readable progress format; only 'json' is accepted")
 	help := fs.Bool("h", false, "help")
 	helpLong := fs.Bool("help", false, "help")
 	if configure != nil {
@@ -111,7 +113,18 @@ func parseSubcommand(name, helpText string, args []string, stderr io.Writer, con
 		fmt.Fprint(stderr, helpText)
 		return nil, commonFlags{}, exitOK, false
 	}
-	return positional, commonFlags{quiet: *quiet || *quietLong}, 0, true
+	isQuiet := *quiet || *quietLong
+	if *progress != "" && *progress != "json" {
+		fmt.Fprintf(stderr, "invalid --progress=%q (only 'json' is accepted)\n", *progress)
+		fmt.Fprint(stderr, helpText)
+		return nil, commonFlags{}, exitUsage, false
+	}
+	if *progress == "json" && isQuiet {
+		fmt.Fprintln(stderr, "--progress=json and --quiet are mutually exclusive")
+		fmt.Fprint(stderr, helpText)
+		return nil, commonFlags{}, exitUsage, false
+	}
+	return positional, commonFlags{quiet: isQuiet, progress: *progress}, 0, true
 }
 
 // requireOnePositional asserts exactly one positional and prints a
@@ -154,7 +167,13 @@ func runPack(args []string, stderr io.Writer) int {
 			return exitUsage
 		}
 	}
-	rep := NewReporter(stderr, common.quiet)
+	var rep Reporter
+	switch common.progress {
+	case "json":
+		rep = NewJSONReporter(stderr)
+	default:
+		rep = NewReporter(stderr, common.quiet)
+	}
 	err := Pack(PackOptions{
 		CuePath: cuePath, ScramPath: scramPath, OutputPath: out,
 		LeadinLBA: LBALeadinStart,
@@ -192,7 +211,13 @@ func runUnpack(args []string, stderr io.Writer) int {
 	if out == "" {
 		out = DefaultUnpackOutput(containerPath)
 	}
-	rep := NewReporter(stderr, common.quiet)
+	var rep Reporter
+	switch common.progress {
+	case "json":
+		rep = NewJSONReporter(stderr)
+	default:
+		rep = NewReporter(stderr, common.quiet)
+	}
 	if err := Unpack(UnpackOptions{
 		ContainerPath: containerPath, OutputPath: out,
 		Verify: true, Force: force || forceLong,
@@ -210,7 +235,13 @@ func runVerify(args []string, stderr io.Writer) int {
 	if !requireOnePositional(stderr, verifyHelpText, positional, "positional argument (container path)") {
 		return exitUsage
 	}
-	rep := NewReporter(stderr, common.quiet)
+	var rep Reporter
+	switch common.progress {
+	case "json":
+		rep = NewJSONReporter(stderr)
+	default:
+		rep = NewReporter(stderr, common.quiet)
+	}
 	if err := Verify(VerifyOptions{ContainerPath: positional[0]}, rep); err != nil {
 		return errToExit(err)
 	}

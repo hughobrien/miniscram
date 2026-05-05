@@ -54,6 +54,8 @@ OPTIONS:
                            default: <cue-stem>.miniscram next to <cue>.
     -f, --force            overwrite existing output.
     --keep-source          do not remove <scram> after verified pack.
+    --progress=json        emit NDJSON progress events on stderr
+                           (suppresses human text; for scripted consumers).
     -q, --quiet            suppress progress output.
     -h, --help             show this help.
 `
@@ -71,6 +73,8 @@ OPTIONS:
                            default: <miniscram-stem>.scram next to
                            <in.miniscram>.
     -f, --force            overwrite existing output.
+    --progress=json        emit NDJSON progress events on stderr
+                           (suppresses human text; for scripted consumers).
     -q, --quiet            suppress progress output.
     -h, --help             show this help.
 `
@@ -83,6 +87,8 @@ ARGUMENTS:
                       Track .bin files must exist in the same directory.
 
 OPTIONS:
+    --progress=json   emit NDJSON progress events on stderr
+                      (suppresses human text; for scripted consumers).
     -q, --quiet       suppress progress output.
     -h, --help        show this help.
 

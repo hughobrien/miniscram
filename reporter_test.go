@@ -72,3 +72,35 @@ func TestQuietReporterSilencesProgress(t *testing.T) {
 		t.Fatalf("quiet reporter wrote %q on Done/Info/Warn", buf.String())
 	}
 }
+
+func TestJSONReporter(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewJSONReporter(&buf)
+
+	s := r.Step("hashing scram")
+	s.Done("c98323550138")
+
+	s2 := r.Step("checking constant offset")
+	s2.Done("") // empty msg — Msg field is omitempty so it disappears from output
+
+	s3 := r.Step("layout sanity")
+	s3.Fail(errors.New("layout mismatch ratio 0.07 exceeds 0.05"))
+
+	r.Info("hello")
+	r.Warn("careful")
+
+	want := strings.Join([]string{
+		`{"type":"step","label":"hashing scram"}`,
+		`{"type":"done","label":"hashing scram","msg":"c98323550138"}`,
+		`{"type":"step","label":"checking constant offset"}`,
+		`{"type":"done","label":"checking constant offset"}`,
+		`{"type":"step","label":"layout sanity"}`,
+		`{"type":"fail","label":"layout sanity","error":"layout mismatch ratio 0.07 exceeds 0.05"}`,
+		`{"type":"info","msg":"hello"}`,
+		`{"type":"warn","msg":"careful"}`,
+		``, // trailing newline from the last Encode
+	}, "\n")
+	if got := buf.String(); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
