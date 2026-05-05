@@ -54,6 +54,7 @@ the system X11/Wayland + GL + a C toolchain are sufficient.
 | `-seed`                  | Insert a small set of fixture events so Stats demos well.                       |
 | `-mock-running <action>` | Screenshot-only: inject a fake in-flight action (`pack`/`unpack`/`verify`).     |
 | `-mock-toast <action>`   | Screenshot-only: inject a fake success toast (`pack`/`unpack`/`verify`).        |
+| `-mock-queue <label>`    | Screenshot-only: stage a queue with synthetic items in mixed states.            |
 
 ## Screenshots
 
@@ -81,3 +82,10 @@ strip showing the current step + elapsed time:
 …and a 6 s success toast with a Reveal-in-folder button:
 
 ![toast](screenshots/05-toast.png)
+
+Drop a folder of cues — or a mix of individual cues — onto the
+window, and they pack sequentially in the queue panel. Per-row green
+progress fill, Stop queue, and per-row remove (`×`) / cancel-current
+(`⏹`) controls:
+
+![queue](screenshots/06-queue.png)

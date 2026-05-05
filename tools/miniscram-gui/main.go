@@ -709,6 +709,7 @@ func main() {
 	doSeed := flag.Bool("seed", false, "seed events table with example data and exit")
 	mockRunning := flag.String("mock-running", "", "screenshot-only: inject a fake in-flight action ('pack'|'unpack'|'verify')")
 	mockToast := flag.String("mock-toast", "", "screenshot-only: inject a fake success toast ('pack'|'unpack'|'verify')")
+	mockQueue := flag.String("mock-queue", "", "screenshot-only: stage a queue with synthetic items in mixed states")
 	flag.Parse()
 
 	db, err := dbOpen()
@@ -777,6 +778,40 @@ func main() {
 			DurationMs: 5230,
 			ExpiresAt:  time.Now().Add(1 * time.Hour),
 		}
+	}
+	if *mockQueue != "" {
+		// Stage synthetic queue items spanning the visible states. Paths
+		// don't need to exist; classify() is bypassed and States are set
+		// directly. The worker is NOT started.
+		mockBasenames := []struct {
+			Name  string
+			State queueState
+			Frac  float64
+			Reason string
+			DurationMs int64
+		}{
+			{"freelancer.cue", qDone, 1.0, "", 5400},
+			{"deus-ex.cue", qRunning, 0.55, "", 0},
+			{"half-life.cue", qReady, 0, "", 0},
+			{"mp2-play.cue", qReady, 0, "", 0},
+			{"oddworld.cue", qSkipped, 0, "no sibling .scram", 0},
+			{"baldurs-gate.cue", qSkipped, 0, "already packed", 0},
+		}
+		mdl.queue.mu.Lock()
+		for _, m := range mockBasenames {
+			mdl.queue.items = append(mdl.queue.items, queueItem{
+				ID:         mdl.queue.nextID,
+				CuePath:    "/" + *mockQueue + "/" + m.Name,
+				Basename:   m.Name,
+				State:      m.State,
+				Fraction:   m.Frac,
+				Reason:     m.Reason,
+				DurationMs: m.DurationMs,
+			})
+			mdl.queue.nextID++
+		}
+		mdl.queue.workerRunning = true // so Stop button renders
+		mdl.queue.mu.Unlock()
 	}
 
 	go func() {
