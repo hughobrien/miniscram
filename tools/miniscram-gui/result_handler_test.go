@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -206,5 +207,49 @@ func TestHandleActionResult_TitleFromRedump(t *testing.T) {
 	ev := mustOnly(t, m)
 	if ev.Title != "Test Disc" {
 		t.Errorf("Title = %q, want %q", ev.Title, "Test Disc")
+	}
+}
+
+func TestBuildEventRec_PackSuccess(t *testing.T) {
+	m := newTestModel(t)
+	out := writeTempBytes(t, "disc.miniscram", 1500)
+
+	ev := buildEventRec(m, "pack", "/in/disc.cue", out, actionResult{
+		Action: "pack", Input: "/in/disc.cue", Output: out,
+		DurationMs: 1234, Status: "success",
+	})
+
+	if ev.Action != "pack" || ev.Status != "success" {
+		t.Errorf("row mismatch: %+v", ev)
+	}
+	if ev.MiniscramSize != 1500 {
+		t.Errorf("MiniscramSize = %d, want 1500", ev.MiniscramSize)
+	}
+	if ev.InputPath != "/in/disc.cue" {
+		t.Errorf("InputPath = %q, want /in/disc.cue", ev.InputPath)
+	}
+	if ev.DurationMs != 1234 {
+		t.Errorf("DurationMs = %d, want 1234", ev.DurationMs)
+	}
+	// helper must NOT have side effects:
+	if rows := eventsRecent(m.db, 10); len(rows) != 0 {
+		t.Errorf("buildEventRec must not insert; got %d rows", len(rows))
+	}
+	if m.toast != nil {
+		t.Errorf("buildEventRec must not set toast; got %+v", m.toast)
+	}
+}
+
+func TestReadURIList(t *testing.T) {
+	body := "# comment\nfile:///tmp/a.cue\nfile:///tmp/b%20space.cue\n\nhttp://example.com/x.cue\n"
+	paths := readURIList(strings.NewReader(body))
+	if len(paths) != 2 {
+		t.Fatalf("got %d paths, want 2: %v", len(paths), paths)
+	}
+	if paths[0] != "/tmp/a.cue" {
+		t.Errorf("paths[0] = %q", paths[0])
+	}
+	if paths[1] != "/tmp/b space.cue" {
+		t.Errorf("paths[1] = %q (percent-decoding broken?)", paths[1])
 	}
 }

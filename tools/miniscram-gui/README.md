@@ -21,6 +21,12 @@ own `go.mod` (matching the pattern of `scripts/sweep`) so the main
 - Pack / Verify / Unpack run as cancellable subprocesses with a
   running-state strip showing the current step + elapsed time, and
   a 6-second success toast with a Reveal-in-folder button.
+- Drop a folder of cues (or multiple cues) onto the window — or use
+  the queue panel's `+ Add files…` / `+ Add dir…` buttons — and they
+  pack sequentially in a left-hand queue. Per-row green progress fill,
+  per-row remove (`×`), cancel-current (`⏹`), and Stop queue. The
+  right pane auto-follows the running cue unless you click somewhere
+  else; clicking the running row re-engages auto-follow.
 
 The GUI talks to `miniscram` strictly by shelling out (`miniscram
 inspect --json` for metadata, `miniscram pack/unpack/verify` for
@@ -48,6 +54,7 @@ the system X11/Wayland + GL + a C toolchain are sufficient.
 | `-seed`                  | Insert a small set of fixture events so Stats demos well.                       |
 | `-mock-running <action>` | Screenshot-only: inject a fake in-flight action (`pack`/`unpack`/`verify`).     |
 | `-mock-toast <action>`   | Screenshot-only: inject a fake success toast (`pack`/`unpack`/`verify`).        |
+| `-mock-queue <label>`    | Screenshot-only: stage a queue with synthetic items in mixed states.            |
 
 ## Screenshots
 
@@ -75,3 +82,10 @@ strip showing the current step + elapsed time:
 …and a 6 s success toast with a Reveal-in-folder button:
 
 ![toast](screenshots/05-toast.png)
+
+Drop a folder of cues — or a mix of individual cues — onto the
+window, and they pack sequentially in the queue panel. Per-row green
+progress fill, Stop queue, and per-row remove (`×`) / cancel-current
+(`⏹`) controls:
+
+![queue](screenshots/06-queue.png)
