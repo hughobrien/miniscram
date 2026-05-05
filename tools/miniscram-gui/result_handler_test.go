@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -236,5 +237,19 @@ func TestBuildEventRec_PackSuccess(t *testing.T) {
 	}
 	if m.toast != nil {
 		t.Errorf("buildEventRec must not set toast; got %+v", m.toast)
+	}
+}
+
+func TestReadURIList(t *testing.T) {
+	body := "# comment\nfile:///tmp/a.cue\nfile:///tmp/b%20space.cue\n\nhttp://example.com/x.cue\n"
+	paths := readURIList(strings.NewReader(body))
+	if len(paths) != 2 {
+		t.Fatalf("got %d paths, want 2: %v", len(paths), paths)
+	}
+	if paths[0] != "/tmp/a.cue" {
+		t.Errorf("paths[0] = %q", paths[0])
+	}
+	if paths[1] != "/tmp/b space.cue" {
+		t.Errorf("paths[1] = %q (percent-decoding broken?)", paths[1])
 	}
 }

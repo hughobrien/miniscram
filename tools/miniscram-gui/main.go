@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,7 @@ import (
 	"gioui.org/font/gofont"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
+	"gioui.org/io/transfer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -290,6 +292,10 @@ type redumpEntry struct {
 }
 
 var titleRe = regexp.MustCompile(`<title>redump\.org\s*&bull;\s*([^<]+?)\s*</title>`)
+
+// dropTag is the unique event tag used to register the window as a
+// drag-and-drop target for text/uri-list payloads.
+var dropTag = new(int)
 
 func redumpFetch(hash string) *redumpEntry {
 	now := time.Now().Unix()
@@ -858,6 +864,32 @@ func loop(w *app.Window, mdl *model) error {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 
+			// Register the entire window area as a drag-and-drop target for
+			// text/uri-list (file:// URIs). The clip.Rect establishes the
+			// hit area; event.Op binds dropTag to that area so transfer
+			// events are routed to it.
+			{
+				defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+				event.Op(gtx.Ops, dropTag)
+				for {
+					ev, ok := gtx.Event(transfer.TargetFilter{Target: dropTag, Type: "text/uri-list"})
+					if !ok {
+						break
+					}
+					if dev, ok := ev.(transfer.DataEvent); ok {
+						rc := dev.Open()
+						paths := readURIList(rc)
+						rc.Close()
+						if len(paths) > 0 {
+							mdl.queue.addPaths(mdl, paths)
+							if mdl.invalidate != nil {
+								mdl.invalidate()
+							}
+						}
+					}
+				}
+			}
+
 			// qWorker reports whether the queue's background drain goroutine
 			// currently owns the runner. When true, single-file buttons are
 			// disabled and the done-channel drain is skipped.
@@ -1050,6 +1082,31 @@ func loop(w *app.Window, mdl *model) error {
 			e.Frame(gtx.Ops)
 		}
 	}
+}
+
+// ---------------- drag-and-drop helpers ----------------
+
+// readURIList parses a text/uri-list body (RFC 2483) into local paths.
+// Lines starting with '#' are comments. Only file:// URIs are extracted.
+func readURIList(r io.Reader) []string {
+	var paths []string
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		u, err := url.Parse(line)
+		if err != nil || u.Scheme != "file" {
+			continue
+		}
+		p, err := url.QueryUnescape(u.Path)
+		if err != nil {
+			continue
+		}
+		paths = append(paths, p)
+	}
+	return paths
 }
 
 // ---------------- top bar ----------------
