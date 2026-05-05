@@ -4,6 +4,25 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-05-04
+
+### Fixed
+
+- **GUI hard-crashed when opening a `.miniscram` file if the CLI
+  wasn't on `PATH`.** `model.load` shelled out via bare
+  `exec.Command("miniscram", ...)` instead of using the GUI's
+  resolved CLI path (`m.cliBinary`, populated from
+  `resolveMiniscram()` which finds `miniscram` next to or two dirs
+  above the GUI binary). When the bare-name lookup failed, `m.kind`
+  had already been set to `"miniscram"` while `m.meta` stayed nil,
+  so `body()` dispatched to `miniscramView` and the first
+  `mdl.meta.*` deref tripped a SIGSEGV. The two `inspect` call sites
+  in `tools/miniscram-gui/main.go` now use `m.cliBinary`, and
+  `m.kind` is stamped only after the JSON parse succeeds — so any
+  future inspect/parse failure falls through to the existing
+  error-surfacing `emptyView` instead of rendering a half-loaded
+  state.
+
 ## [1.2.1] - 2026-05-01
 
 ### Fixed
