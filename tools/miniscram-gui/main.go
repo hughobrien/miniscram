@@ -119,24 +119,20 @@ func pickSave(defaultName, defaultDir string) (string, error) {
 		}
 		return strings.TrimSpace(string(out)), nil
 	case "windows":
-		// PowerShell expands ", `, and $ inside double-quoted strings.
-		// NTFS rejects " in paths anyway; strip the others (legal in NTFS
-		// but would expand here) rather than escape — simpler, and a
-		// legal save-dialog path won't contain them in practice.
-		psStrip := func(s string) string {
-			for _, r := range []string{`"`, "`", "$"} {
-				s = strings.ReplaceAll(s, r, "")
-			}
-			return s
+		// PowerShell single-quoted strings don't interpret $ or backtick;
+		// only ' needs to be escaped (by doubling). Preserves legal NTFS
+		// chars like $ and backtick in user paths instead of stripping.
+		psQuote := func(s string) string {
+			return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 		}
 		ps := fmt.Sprintf(`Add-Type -AssemblyName System.Windows.Forms;`+
 			`$f = New-Object System.Windows.Forms.SaveFileDialog;`+
-			`$f.FileName = "%s";`+
-			`$f.InitialDirectory = "%s";`+
-			`$f.Filter = "scram|*.scram|All|*";`+
+			`$f.FileName = %s;`+
+			`$f.InitialDirectory = %s;`+
+			`$f.Filter = 'scram|*.scram|All|*';`+
 			`$f.OverwritePrompt = $true;`+
 			`if ($f.ShowDialog() -eq 'OK') { $f.FileName }`,
-			psStrip(defaultName), psStrip(defaultDir))
+			psQuote(defaultName), psQuote(defaultDir))
 		out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).Output()
 		if err != nil {
 			return "", err
@@ -591,6 +587,8 @@ func main() {
 	loadPath := flag.String("load", "", "auto-load a file (for screenshots)")
 	startView := flag.String("view", "file", "starting view: file | stats")
 	doSeed := flag.Bool("seed", false, "seed events table with example data and exit")
+	mockRunning := flag.String("mock-running", "", "screenshot-only: inject a fake in-flight action ('pack'|'unpack'|'verify')")
+	mockToast := flag.String("mock-toast", "", "screenshot-only: inject a fake success toast ('pack'|'unpack'|'verify')")
 	flag.Parse()
 
 	db, err := dbOpen()
@@ -624,6 +622,40 @@ func main() {
 			mdl.invalidate()
 		}
 	})
+
+	// Screenshot-only state injection. Same package, so direct field access.
+	if *mockRunning != "" {
+		mdl.runner.state = &runningState{
+			Action:    *mockRunning,
+			Input:     mdl.path,
+			StartedAt: time.Now().Add(-7 * time.Second),
+			LastLine:  "applying delta ... 4521000 byte(s) of delta applied",
+		}
+	}
+	if *mockToast != "" {
+		out := mdl.path
+		switch *mockToast {
+		case "pack":
+			out = strings.TrimSuffix(mdl.path, filepath.Ext(mdl.path)) + ".miniscram"
+		case "unpack":
+			out = strings.TrimSuffix(mdl.path, filepath.Ext(mdl.path)) + ".scram"
+		case "verify":
+			out = ""
+		}
+		var size int64
+		if out != "" {
+			if st, err := os.Stat(out); err == nil {
+				size = st.Size()
+			}
+		}
+		mdl.toast = &toastState{
+			Action:     *mockToast,
+			Output:     out,
+			OutputSize: size,
+			DurationMs: 5230,
+			ExpiresAt:  time.Now().Add(1 * time.Hour),
+		}
+	}
 
 	go func() {
 		w := new(app.Window)
