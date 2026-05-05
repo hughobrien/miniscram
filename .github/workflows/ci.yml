@@ -66,3 +66,7 @@ jobs:
       - name: Vet
         working-directory: tools/miniscram-gui
         run: go vet ./...
+
+      - name: Test
+        working-directory: tools/miniscram-gui
+        run: go test -race -count=1 ./...
