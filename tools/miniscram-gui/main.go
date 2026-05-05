@@ -104,15 +104,31 @@ func pickSave(defaultName, defaultDir string) (string, error) {
 		}
 		return "", errors.New("install zenity or kdialog for the native save picker")
 	case "darwin":
+		// AppleScript double-quoted string escapes: \ and " must be escaped.
+		asEscape := func(s string) string {
+			s = strings.ReplaceAll(s, `\`, `\\`)
+			s = strings.ReplaceAll(s, `"`, `\"`)
+			return s
+		}
 		script := fmt.Sprintf(
 			`POSIX path of (choose file name with prompt "Save .scram as…" default name "%s" default location POSIX file "%s")`,
-			defaultName, defaultDir)
+			asEscape(defaultName), asEscape(defaultDir))
 		out, err := exec.Command("osascript", "-e", script).Output()
 		if err != nil {
 			return "", err
 		}
 		return strings.TrimSpace(string(out)), nil
 	case "windows":
+		// PowerShell expands ", `, and $ inside double-quoted strings.
+		// NTFS rejects " in paths anyway; strip the others (legal in NTFS
+		// but would expand here) rather than escape — simpler, and a
+		// legal save-dialog path won't contain them in practice.
+		psStrip := func(s string) string {
+			for _, r := range []string{`"`, "`", "$"} {
+				s = strings.ReplaceAll(s, r, "")
+			}
+			return s
+		}
 		ps := fmt.Sprintf(`Add-Type -AssemblyName System.Windows.Forms;`+
 			`$f = New-Object System.Windows.Forms.SaveFileDialog;`+
 			`$f.FileName = "%s";`+
@@ -120,7 +136,7 @@ func pickSave(defaultName, defaultDir string) (string, error) {
 			`$f.Filter = "scram|*.scram|All|*";`+
 			`$f.OverwritePrompt = $true;`+
 			`if ($f.ShowDialog() -eq 'OK') { $f.FileName }`,
-			defaultName, defaultDir)
+			psStrip(defaultName), psStrip(defaultDir))
 		out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).Output()
 		if err != nil {
 			return "", err
