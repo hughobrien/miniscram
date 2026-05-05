@@ -1,4 +1,8 @@
 // tools/miniscram-gui/queue.go
+//
+// Note: queueSnapshot (read-only snapshot struct) and (*queueModel).Snapshot()
+// live here alongside the queueModel type, not in queue_widget.go, so that
+// all model-layer code stays in one file. The widget file is read-only data.
 package main
 
 import (
@@ -358,4 +362,37 @@ func (q *queueModel) drain(mdl *model) {
 			mdl.invalidate()
 		}
 	}
+}
+
+// queueSnapshot is a read-only copy of the queue state for the UI thread.
+// It is built under the mutex and passed to layout without holding the lock.
+type queueSnapshot struct {
+	Items         []queueItem
+	DeleteScram   bool
+	WorkerRunning bool
+	ReadyCount    int
+	SkippedCount  int
+}
+
+// Snapshot builds a queueSnapshot under the mutex. Call from the UI goroutine
+// each frame; do not hold the result across frames (stale item data).
+func (q *queueModel) Snapshot() queueSnapshot {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	cp := make([]queueItem, len(q.items))
+	copy(cp, q.items)
+	s := queueSnapshot{
+		Items:         cp,
+		DeleteScram:   q.deleteScram,
+		WorkerRunning: q.workerRunning,
+	}
+	for _, it := range cp {
+		switch it.State {
+		case qReady:
+			s.ReadyCount++
+		case qSkipped:
+			s.SkippedCount++
+		}
+	}
+	return s
 }
