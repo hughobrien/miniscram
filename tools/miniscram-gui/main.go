@@ -80,6 +80,56 @@ func pickFile() (string, error) {
 	return "", fmt.Errorf("no file picker for %s", runtime.GOOS)
 }
 
+// pickSave shells out to the platform's native save dialog.
+func pickSave(defaultName, defaultDir string) (string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		if p, err := exec.LookPath("zenity"); err == nil {
+			out, err := exec.Command(p, "--file-selection",
+				"--save", "--confirm-overwrite",
+				"--title=Save .scram as…",
+				"--filename="+filepath.Join(defaultDir, defaultName)).Output()
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(string(out)), nil
+		}
+		if p, err := exec.LookPath("kdialog"); err == nil {
+			out, err := exec.Command(p, "--getsavefilename",
+				filepath.Join(defaultDir, defaultName), "*.scram|scram\n*|all files").Output()
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(string(out)), nil
+		}
+		return "", errors.New("install zenity or kdialog for the native save picker")
+	case "darwin":
+		script := fmt.Sprintf(
+			`POSIX path of (choose file name with prompt "Save .scram as…" default name "%s" default location POSIX file "%s")`,
+			defaultName, defaultDir)
+		out, err := exec.Command("osascript", "-e", script).Output()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	case "windows":
+		ps := fmt.Sprintf(`Add-Type -AssemblyName System.Windows.Forms;`+
+			`$f = New-Object System.Windows.Forms.SaveFileDialog;`+
+			`$f.FileName = "%s";`+
+			`$f.InitialDirectory = "%s";`+
+			`$f.Filter = "scram|*.scram|All|*";`+
+			`$f.OverwritePrompt = $true;`+
+			`if ($f.ShowDialog() -eq 'OK') { $f.FileName }`,
+			defaultName, defaultDir)
+		out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).Output()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	return "", fmt.Errorf("no save dialog for %s", runtime.GOOS)
+}
+
 const guiVersion = "0.1"
 const userAgent = "miniscram-gui/" + guiVersion + " (+https://github.com/hughobrien/miniscram) Go-http-client/1.1"
 
@@ -202,6 +252,7 @@ type model struct {
 
 	runner    *actionRunner
 	lastEvent eventRec // populated in handleActionResult; used by Task 3's toast
+	toast     *toastState
 }
 
 func (m *model) load(p string) {
@@ -358,6 +409,26 @@ func (m *model) handleActionResult(res actionResult) {
 	eventInsert(m.db, ev)
 	m.refreshStats()
 	m.lastEvent = ev
+
+	// Populate or clear the toast based on outcome.
+	if res.Status == "success" {
+		var outputSize int64
+		switch res.Action {
+		case "pack":
+			outputSize = ev.MiniscramSize
+		case "unpack":
+			outputSize = ev.ScramSize
+		}
+		m.toast = &toastState{
+			Action:     res.Action,
+			Output:     res.Output,
+			OutputSize: outputSize,
+			DurationMs: res.DurationMs,
+			ExpiresAt:  time.Now().Add(6 * time.Second),
+		}
+	} else {
+		m.toast = nil
+	}
 }
 
 func parseCueLines(s, baseDir string) []cueTrack {
@@ -447,6 +518,21 @@ func openURL(u string) {
 		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", u)
 	default:
 		cmd = exec.Command("xdg-open", u)
+	}
+	_ = cmd.Start()
+}
+
+// revealInFolder opens the OS file manager at the given path's directory.
+func revealInFolder(path string) {
+	dir := filepath.Dir(path)
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", dir)
+	case "windows":
+		cmd = exec.Command("explorer", dir)
+	default:
+		cmd = exec.Command("xdg-open", dir)
 	}
 	_ = cmd.Start()
 }
@@ -556,8 +642,10 @@ func loop(w *app.Window, mdl *model) error {
 		verifyBtn     widget.Clickable
 		unpackBtn     widget.Clickable
 		packBtn       widget.Clickable
-		cancelBtn     widget.Clickable
-		deleteScramCB = widget.Bool{Value: true} // default: consume scram on success
+		cancelBtn       widget.Clickable
+		toastDismissBtn widget.Clickable
+		toastRevealBtn  widget.Clickable
+		deleteScramCB   = widget.Bool{Value: true} // default: consume scram on success
 		mockHoverCB   widget.Bool                // for screenshots
 		copyBtns      = make(map[string]*widget.Clickable)
 		linkBtns      = make(map[string]*linkEntry)
@@ -630,10 +718,44 @@ func loop(w *app.Window, mdl *model) error {
 				mdl.runner.Cancel()
 			}
 			if verifyBtn.Clicked(gtx) && mdl.kind == "miniscram" && !mdl.runner.Running() {
+				mdl.toast = nil
 				_ = mdl.runner.Start("verify", mdl.path, "", "verify", mdl.path)
 			}
-			_ = unpackBtn.Clicked(gtx) // wired in Task 3
+			if unpackBtn.Clicked(gtx) && mdl.kind == "miniscram" && !mdl.runner.Running() {
+				mdl.toast = nil
+				srcPath := mdl.path
+				defaultName := strings.TrimSuffix(mdl.basename, filepath.Ext(mdl.basename)) + ".scram"
+				defaultDir := mdl.dir
+				go func() {
+					out, err := pickSave(defaultName, defaultDir)
+					if err != nil || out == "" {
+						return
+					}
+					if out == srcPath {
+						eventInsert(mdl.db, eventRec{
+							TS:        time.Now(),
+							Action:    "unpack",
+							InputPath: srcPath,
+							Status:    "fail",
+							Error:     "refused: output path equals source .miniscram",
+						})
+						mdl.refreshStats()
+						if mdl.invalidate != nil {
+							mdl.invalidate()
+						}
+						return
+					}
+					_ = mdl.runner.Start("unpack", srcPath, out, "unpack", srcPath, "-o", out)
+				}()
+			}
+			if toastDismissBtn.Clicked(gtx) && mdl.toast != nil {
+				mdl.toast.Hide = true
+			}
+			if toastRevealBtn.Clicked(gtx) && mdl.toast != nil && mdl.toast.Output != "" {
+				revealInFolder(mdl.toast.Output)
+			}
 			if packBtn.Clicked(gtx) && mdl.kind == "cue" && !mdl.runner.Running() {
+				mdl.toast = nil
 				out := strings.TrimSuffix(mdl.path, filepath.Ext(mdl.path)) + ".miniscram"
 				args := []string{"pack", mdl.path}
 				if !deleteScramCB.Value {
@@ -675,6 +797,7 @@ func loop(w *app.Window, mdl *model) error {
 						})
 					})
 				}),
+				layout.Rigid(toastWidget(th, mdl.toast, &toastDismissBtn, &toastRevealBtn)),
 				layout.Rigid(divider),
 				layout.Rigid(footer(th, mdl)),
 			)
