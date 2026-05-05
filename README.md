@@ -250,6 +250,15 @@ Pretty-print a container.
 
     miniscram inspect disc.miniscram [--full] [--json]
 
+## Optional GUI
+
+A small desktop wrapper around the CLI lives in
+[`tools/miniscram-gui/`](./tools/miniscram-gui). It shells out to the
+`miniscram` binary on `PATH`, renders the manifest as a real desktop
+view (compression-ratio hero, tracks table, per-track redump.org
+lookups), and tracks pack/unpack/verify history in a local SQLite.
+Own `go.mod`, so the main build stays free of GUI dependencies.
+
 ## Install
 
 ### Pre-built binary
