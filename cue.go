@@ -84,6 +84,7 @@ func ParseCue(r io.Reader) ([]Track, error) {
 	var hasIndex01 bool
 	var currentFile string // basename of the most recent FILE line
 	var fileTrackCount int // number of TRACKs seen in currentFile (must end at 0 or 1)
+	currentSession := 1   // bumped by REM SESSION NN; stamped on every TRACK
 	flushTrack := func() error {
 		if cur == nil {
 			return nil
@@ -96,7 +97,32 @@ func ParseCue(r io.Reader) ([]Track, error) {
 	}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "REM ") || line == "REM" {
+		if line == "" {
+			continue
+		}
+		// Match REM lines case-insensitively: real cue emitters vary in
+		// capitalisation (e.g. some write "rem session 2").
+		upper := strings.ToUpper(line)
+		if upper == "REM" || strings.HasPrefix(upper, "REM ") {
+			rem := strings.TrimSpace(line[3:]) // trim past "REM"/"rem"
+			fields := strings.Fields(rem)
+			if len(fields) >= 2 && strings.EqualFold(fields[0], "SESSION") {
+				n, err := strconv.Atoi(fields[1])
+				if err != nil || n < 1 {
+					return nil, fmt.Errorf("bad REM SESSION number %q", fields[1])
+				}
+				if n <= currentSession {
+					return nil, fmt.Errorf("REM SESSION %d is not greater than current session %d", n, currentSession)
+				}
+				// Flush any in-progress track before the session bump so the
+				// stamp applies only to the next TRACK onward.
+				if err := flushTrack(); err != nil {
+					return nil, err
+				}
+				cur = nil
+				hasIndex01 = false
+				currentSession = n
+			}
 			continue
 		}
 		fields := strings.Fields(line)
@@ -152,7 +178,7 @@ func ParseCue(r io.Reader) ([]Track, error) {
 			if !validModes[mode] {
 				return nil, fmt.Errorf("unsupported track mode %q (expected MODE1/2352, MODE2/2352, or AUDIO)", mode)
 			}
-			cur = &Track{Number: n, Mode: mode, Filename: currentFile}
+			cur = &Track{Number: n, Mode: mode, Filename: currentFile, Session: currentSession}
 			hasIndex01 = false
 		case "INDEX":
 			if cur == nil {

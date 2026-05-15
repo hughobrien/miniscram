@@ -203,3 +203,72 @@ func TestParseCueRejectsRandomBinaryProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestParseCueRemSession(t *testing.T) {
+	t.Run("stamps-subsequent-tracks", func(t *testing.T) {
+		src := `FILE "a (Track 1).bin" BINARY
+  TRACK 01 AUDIO
+    INDEX 01 00:00:00
+FILE "a (Track 2).bin" BINARY
+  TRACK 02 AUDIO
+    INDEX 01 00:00:00
+REM SESSION 02
+FILE "a (Track 3).bin" BINARY
+  TRACK 03 MODE1/2352
+    INDEX 01 00:00:00
+`
+		got, err := ParseCue(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("err=%v", err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("len=%d, want 3", len(got))
+		}
+		if got[0].Session != 1 || got[1].Session != 1 {
+			t.Fatalf("session1 tracks got Session=%d,%d; want 1,1", got[0].Session, got[1].Session)
+		}
+		if got[2].Session != 2 {
+			t.Fatalf("session2 track got Session=%d; want 2", got[2].Session)
+		}
+	})
+
+	t.Run("case-insensitive", func(t *testing.T) {
+		src := `FILE "a (Track 1).bin" BINARY
+  TRACK 01 AUDIO
+    INDEX 01 00:00:00
+rem session 2
+FILE "a (Track 2).bin" BINARY
+  TRACK 02 MODE1/2352
+    INDEX 01 00:00:00
+`
+		got, err := ParseCue(strings.NewReader(src))
+		if err != nil {
+			t.Fatalf("err=%v", err)
+		}
+		if got[1].Session != 2 {
+			t.Fatalf("got Session=%d; want 2", got[1].Session)
+		}
+	})
+
+	t.Run("rejects-non-monotonic", func(t *testing.T) {
+		src := `FILE "a (Track 1).bin" BINARY
+  TRACK 01 AUDIO
+    INDEX 01 00:00:00
+REM SESSION 02
+FILE "a (Track 2).bin" BINARY
+  TRACK 02 MODE1/2352
+    INDEX 01 00:00:00
+REM SESSION 02
+FILE "a (Track 3).bin" BINARY
+  TRACK 03 MODE1/2352
+    INDEX 01 00:00:00
+`
+		_, err := ParseCue(strings.NewReader(src))
+		if err == nil {
+			t.Fatalf("expected error for non-monotonic REM SESSION")
+		}
+		if !strings.Contains(err.Error(), "SESSION") {
+			t.Fatalf("error doesn't mention SESSION: %v", err)
+		}
+	})
+}
