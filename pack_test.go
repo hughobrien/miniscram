@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -81,6 +82,47 @@ func TestPackEnhancedCDPlaceholder(t *testing.T) {
 	if lme.MismatchRatio <= layoutMismatchAbortRatio {
 		t.Fatalf("ratio %.4f should exceed abort threshold %.2f",
 			lme.MismatchRatio, layoutMismatchAbortRatio)
+	}
+}
+
+func TestPackEnhancedCDRejectsAudioSecondSession(t *testing.T) {
+	dir := t.TempDir()
+	disc := synthEnhancedCD(t, SynthEnhancedCDOpts{})
+	// Build a cue where the post-REM-SESSION-02 track is AUDIO.
+	disc.Cue = ""
+	for a := 0; a < 2; a++ {
+		disc.Cue += fmt.Sprintf("FILE \"x (Track %d).bin\" BINARY\n  TRACK %02d AUDIO\n    INDEX 01 00:00:00\n",
+			a+1, a+1)
+	}
+	disc.Cue += "REM SESSION 02\n"
+	disc.Cue += "FILE \"x (Track 3).bin\" BINARY\n  TRACK 03 AUDIO\n    INDEX 01 00:00:00\n"
+	// Re-truncate audio bins to match (drop the unused 3rd) and
+	// re-emit fixture files.
+	disc.AudioBins = disc.AudioBins[:2]
+	disc.DataBin = make([]byte, 1024*int(SectorSize)) // dummy 1024-sector "track 3"
+	if err := os.WriteFile(filepath.Join(dir, "x.cue"), []byte(disc.Cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for a, ab := range disc.AudioBins {
+		p := filepath.Join(dir, fmt.Sprintf("x (Track %d).bin", a+1))
+		if err := os.WriteFile(p, ab, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x (Track 3).bin"), disc.DataBin, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x.scram"), disc.Scram, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "x.miniscram")
+	err := Pack(PackOptions{
+		CuePath:    filepath.Join(dir, "x.cue"),
+		ScramPath:  filepath.Join(dir, "x.scram"),
+		OutputPath: out,
+	}, nil)
+	if !errors.Is(err, ErrSessionFirstTrackNotData) {
+		t.Fatalf("expected ErrSessionFirstTrackNotData, got %v", err)
 	}
 }
 

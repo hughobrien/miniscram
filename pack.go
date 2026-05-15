@@ -28,6 +28,26 @@ var toolVersion = "miniscram " + version
 // without resorting to substring matching on the message.
 var (
 	errVerifyMismatch = errors.New("round-trip verification failed")
+
+	// ErrSessionGapOutOfRange means the inter-session gap detected
+	// from the scram fell outside the plausible window. Either a
+	// scram-corruption symptom or a disc whose lead-out exceeds our
+	// upper bound — surface to the user with the detected value.
+	ErrSessionGapOutOfRange = errors.New("session gap size out of expected range")
+
+	// ErrSessionFirstTrackNotData means the first track of session 2
+	// (or later) is AUDIO. Detection relies on locking onto a
+	// scrambled sync and audio has none; this case is unsupported.
+	ErrSessionFirstTrackNotData = errors.New("first track of a non-leading session must be DATA")
+)
+
+// Inter-session gap bounds. The lower bound is redumper's sum-of-
+// minima (CD_LEADOUT_MIN_SIZE + CD_LEADIN_MIN_SIZE + CD_PREGAP_SIZE
+// = 6750 + 4500 + 150). The upper bound is a generous backstop
+// against detection drift.
+const (
+	sessionGapMinSectors = 11400
+	sessionGapMaxSectors = 30000
 )
 
 // PackOptions captures everything Pack needs. Defaults match the spec
@@ -89,6 +109,16 @@ func Pack(opts PackOptions, r Reporter) error {
 		return err
 	}
 	st.Done("")
+
+	// 4b. detect inter-session gaps (if any) and adjust track FirstLBAs.
+	if hasMultipleSessions(tracks) {
+		st = r.Step("detecting session gaps")
+		if err := applySessionGaps(tracks, opts.ScramPath, scramSize, opts.LeadinLBA, writeOffsetBytes); err != nil {
+			st.Fail(err)
+			return err
+		}
+		st.Done("%d session boundary(s)", countSessionBoundaries(tracks))
+	}
 
 	// 5. single hashing pass over track files.
 	st = r.Step("hashing tracks")
@@ -462,6 +492,107 @@ func checkConstantOffset(scramPath string, scramSize int64, leadinLBA int32) err
 	return nil
 }
 
+// detectSessionGap scans scram from the byte position implied by
+// naiveLBA forward, looking for the first scrambled sync whose
+// decoded MSF agrees exactly with its byte position under the
+// already-known writeOffsetBytes. Returns the gap as sectors past
+// naiveLBA. Fails with a wrapped error if no such sync is found,
+// or with ErrSessionGapOutOfRange if the detected gap is outside
+// [sessionGapMinSectors, sessionGapMaxSectors].
+func detectSessionGap(scramPath string, scramSize int64, leadinLBA int32, writeOffsetBytes int, naiveLBA int32) (int32, error) {
+	f, err := os.Open(scramPath)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	startByte := int64(naiveLBA-leadinLBA)*int64(SectorSize) + int64(writeOffsetBytes)
+	if startByte < 0 {
+		startByte = 0
+	}
+
+	const chunkSize = 128 * 1024
+	chunk := make([]byte, chunkSize)
+	carry := make([]byte, 0, SyncLen-1)
+	pos := startByte
+	for pos < scramSize {
+		readLen := int64(chunkSize)
+		if pos+readLen > scramSize {
+			readLen = scramSize - pos
+		}
+		n, err := f.ReadAt(chunk[:readLen], pos)
+		if err != nil && err != io.EOF {
+			return 0, err
+		}
+		if n == 0 {
+			break
+		}
+		var search []byte
+		var carryLen int64
+		if len(carry) > 0 {
+			search = append(carry, chunk[:n]...)
+			carryLen = int64(len(carry))
+		} else {
+			search = chunk[:n]
+		}
+		searchPos := 0
+		for {
+			idx := bytes.Index(search[searchPos:], Sync[:])
+			if idx < 0 {
+				break
+			}
+			idx += searchPos
+			syncOff := pos - carryLen + int64(idx)
+			if lba, ok := validateGapSync(f, syncOff, leadinLBA, writeOffsetBytes, scramSize); ok {
+				gap := lba - naiveLBA
+				if gap < sessionGapMinSectors || gap > sessionGapMaxSectors {
+					return 0, fmt.Errorf("%w: detected %d sectors past LBA %d (expected [%d, %d])",
+						ErrSessionGapOutOfRange, gap, naiveLBA, sessionGapMinSectors, sessionGapMaxSectors)
+				}
+				return gap, nil
+			}
+			searchPos = idx + 1
+		}
+		tailStart := n - (SyncLen - 1)
+		if tailStart < 0 {
+			tailStart = 0
+		}
+		carry = append(carry[:0], chunk[tailStart:n]...)
+		pos += int64(n)
+	}
+	return 0, fmt.Errorf("no scrambled sync found past naive LBA %d", naiveLBA)
+}
+
+// validateGapSync is a stricter cousin of validateSyncCandidate: it
+// uses the already-known disc-wide writeOffsetBytes, so the BCD MSF
+// at this sync must decode to *exactly* the LBA implied by the byte
+// position (no ±2 sector slop). Returns the decoded LBA on success.
+func validateGapSync(f io.ReaderAt, syncOff int64, leadinLBA int32, writeOffsetBytes int, scramSize int64) (int32, bool) {
+	if syncOff+int64(SyncLen)+3 > scramSize {
+		return 0, false
+	}
+	var header [3]byte
+	if _, err := f.ReadAt(header[:], syncOff+int64(SyncLen)); err != nil {
+		return 0, false
+	}
+	for i := 0; i < 3; i++ {
+		header[i] ^= scrambleTable[SyncLen+i]
+	}
+	isBCD := func(b byte) bool { return (b>>4) <= 9 && (b&0x0F) <= 9 }
+	if !isBCD(header[0]) || !isBCD(header[1]) || !isBCD(header[2]) {
+		return 0, false
+	}
+	decodedLBA := BCDMSFToLBA(header)
+	if decodedLBA < leadinLBA || decodedLBA > 500_000 {
+		return 0, false
+	}
+	expectedSyncOff := int64(decodedLBA-leadinLBA)*int64(SectorSize) + int64(writeOffsetBytes)
+	if syncOff != expectedSyncOff {
+		return 0, false
+	}
+	return decodedLBA, true
+}
+
 // buildHatAndDelta produces the ε̂ temp file and the delta temp file
 // in one pass. Returns paths to both plus the override LBA list and
 // the delta payload size in bytes.
@@ -505,6 +636,7 @@ func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, sc
 		BinFirstLBA:      tracks[0].FirstLBA,
 		BinSectorCount:   binSectors,
 		Tracks:           tracks,
+		SessionGaps:      derivedSessionGaps(tracks),
 	}
 	enc := NewDeltaEncoder(deltaFile)
 	errs, mismatched, passThroughs, err := BuildEpsilonHat(hatFile, params, binReader, scramFile, enc.Append)
@@ -533,4 +665,49 @@ func buildHatAndDelta(opts PackOptions, files []ResolvedFile, tracks []Track, sc
 		return "", "", nil, 0, 0, err
 	}
 	return hatPath, deltaPath, errs, deltaInfo.Size(), passThroughs, nil
+}
+
+func hasMultipleSessions(tracks []Track) bool {
+	for _, t := range tracks {
+		if t.Session > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func countSessionBoundaries(tracks []Track) int {
+	n := 0
+	for i := 1; i < len(tracks); i++ {
+		if tracks[i].Session > tracks[i-1].Session {
+			n++
+		}
+	}
+	return n
+}
+
+// applySessionGaps detects the gap before each session-boundary
+// track and shifts that track's FirstLBA (and every later track's)
+// by the detected gap size. Tracks are mutated in place.
+//
+// Requires the session-N+1 first track to be DATA (its scrambled
+// sync is the lock target). Returns ErrSessionFirstTrackNotData
+// otherwise.
+func applySessionGaps(tracks []Track, scramPath string, scramSize int64, leadinLBA int32, writeOffsetBytes int) error {
+	for i := 1; i < len(tracks); i++ {
+		if tracks[i].Session <= tracks[i-1].Session {
+			continue
+		}
+		if tracks[i].Mode == "AUDIO" {
+			return fmt.Errorf("%w (track %d, session %d)", ErrSessionFirstTrackNotData, tracks[i].Number, tracks[i].Session)
+		}
+		gap, err := detectSessionGap(scramPath, scramSize, leadinLBA, writeOffsetBytes, tracks[i].FirstLBA)
+		if err != nil {
+			return err
+		}
+		for j := i; j < len(tracks); j++ {
+			tracks[j].FirstLBA += gap
+		}
+	}
+	return nil
 }
