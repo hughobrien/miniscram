@@ -107,9 +107,14 @@ and CHD convention.
 
 ## Chunk vocabulary (v2)
 
-All v2 chunks are critical (uppercase first letter). All four must
-appear exactly once. `MFST` must be the first chunk; the others may
-appear in any order.
+All v2 chunks are critical (uppercase first letter). `MFST`, `TRKS`,
+`HASH`, and `DLTA` are required and must appear exactly once each.
+`MFST` must be the first chunk; the others may appear in any order.
+`SESS` is critical-but-optional: emitted only by multi-session
+containers (v1.3.0+), absent on single-session containers, and
+absent on containers written by pre-v1.3.0 miniscram regardless of
+disc shape. Old readers fail cleanly on SESS via the "unsupported
+critical chunk" path.
 
 ### `MFST` — manifest scalars
 
@@ -154,6 +159,24 @@ per record:
 A v2 container records `MD5 `, `SHA1`, `S256` for the scram and for
 each track — same coverage as v2.
 
+### `SESS` — per-track session numbers (v1.3.0+, optional)
+
+Carries one session number per track in `TRKS` order. Emitted only
+when at least one track has session > 1 — single-session containers
+omit this chunk entirely, keeping byte-identical output to pre-
+v1.3.0 single-session containers.
+
+```
+count                  uint16 BE       must equal TRKS count
+per track:
+  session              uint8           1..255 (0 reserved/invalid)
+```
+
+Old miniscram (≤ v1.2.6) encountering a SESS chunk fails cleanly
+with "unsupported critical chunk \"SESS\"" — by design, since such
+containers describe multi-session discs whose per-track FirstLBAs
+encode an inter-session gap that old code can't model.
+
 ### `DLTA` — zlib-compressed delta payload
 
 Payload is the zlib stream verbatim. Length tells the reader exactly
@@ -178,8 +201,11 @@ where the delta ends; no read-to-EOF heuristic.
    e. Dispatch by type. Unknown uppercase type → reject as
       "unsupported critical chunk %q".
       Unknown lowercase type → skip silently (reserved for future).
-5. After EOF, verify all four critical chunks were seen exactly once.
-   Missing or duplicate → reject with which one.
+5. After EOF, verify all four required chunks (MFST, TRKS, HASH,
+   DLTA) were seen exactly once. Missing or duplicate → reject with
+   which one. SESS, if present, must also be seen exactly once and
+   its count must equal TRKS count; the SESS dispatcher in step 4
+   enforces this and stamps Session onto m.Tracks.
 6. Verify MFST was the first chunk encountered.
 ```
 
@@ -187,7 +213,8 @@ where the delta ends; no read-to-EOF heuristic.
 
 ```
 1. Write 5-byte file header (magic + version).
-2. Emit chunks in the order: MFST, TRKS, HASH, DLTA.
+2. Emit chunks in the order: MFST, TRKS, HASH, [SESS], DLTA. SESS
+   is emitted only when at least one track has session > 1.
 3. Each chunk: write type, write length (BE uint32), write payload,
    write CRC32(type || payload) (BE uint32).
 4. fsync, atomic rename — same write-then-rename pattern as v1.
