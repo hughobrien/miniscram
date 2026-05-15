@@ -169,7 +169,7 @@ func (q *queueModel) addPaths(mdl *model, paths []string) {
 
 	// Load .miniscram files into the inspect pane without holding the queue lock.
 	if mdl != nil && len(miniscramPaths) > 0 {
-		mdl.load(miniscramPaths[len(miniscramPaths)-1])
+		mdl.loadAndFocus(miniscramPaths[len(miniscramPaths)-1])
 	}
 
 	if needWorker {

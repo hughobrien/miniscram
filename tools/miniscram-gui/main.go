@@ -1197,7 +1197,7 @@ func loop(w *app.Window, mdl *model) error {
 					if err != nil || p == "" {
 						return
 					}
-					mdl.load(p)
+					mdl.loadAndFocus(p)
 					if mdl.invalidate != nil {
 						mdl.invalidate()
 					}
@@ -1295,7 +1295,7 @@ func loop(w *app.Window, mdl *model) error {
 			snapForClicks := mdl.queue.Snapshot()
 			for _, it := range snapForClicks.Items {
 				if qBtns.RowClick(it.ID).Clicked(gtx) {
-					mdl.load(it.CuePath)
+					mdl.loadAndFocus(it.CuePath)
 					mdl.queue.mu.Lock()
 					mdl.queue.autoFollow = (it.State == qRunning)
 					mdl.queue.mu.Unlock()
