@@ -4,6 +4,44 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-05-15
+
+### Added
+
+- **Enhanced CD (multi-session) pack/unpack support.** Discs that
+  combine an audio session 1 with a data session 2 (CD-Extra layout
+  — Girls Aloud, Moving Shadow comps, most enhanced-CD music
+  releases) now pack and round-trip byte-exact. `ParseCue`
+  understands `REM SESSION NN`; Pack detects each inter-session gap
+  from the scram by locking onto the next session's first scrambled
+  sync, bound-checks it against `[11400, 30000]` sectors, and
+  shifts every later track's `FirstLBA` accordingly. The builder
+  routes emission through a new `regionAt` classifier covering all
+  seven structural regions (leadin / pregap / bin / gap-leadout /
+  gap-leadin / gap-pregap / leadout).
+- **`SESS` critical chunk** carries per-track session numbers in
+  the v0.2 container format. Only emitted when at least one
+  session > 1, so single-session containers stay byte-identical to
+  prior v0.2 output. Old readers fail cleanly on new multi-session
+  containers with "unsupported critical chunk SESS"; old
+  single-session containers still decode on new code.
+- **Audio-leading pregap fix.** Track-1-AUDIO discs now emit silent
+  audio (zeros) in the 150-sector pregap instead of scrambled
+  Mode 1 zero — matches what Redumper actually dumps and avoids
+  ~150 sectors of spurious overrides per audio-leading disc.
+
+### Fixed
+
+- **GUI surfaces the captured pack-failure reason** on failed queue
+  rows instead of a bare "fail" tag (#44). The error string was
+  already captured in `it.Reason`; the queue widget just wasn't
+  rendering it.
+- **`Unpack` surfaces missing-bin-file errors as a step.** The
+  per-track stat loop now lives inside a `"resolving bin files"`
+  reporter step, so a missing-or-moved bin file produces a clean
+  failure line rather than a silent exit 3. Caught while validating
+  the multi-session pack against a real CD-Extra dump.
+
 ## [1.2.6] - 2026-05-05
 
 ### Changed
