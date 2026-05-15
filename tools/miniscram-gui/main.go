@@ -470,6 +470,16 @@ func (m *model) load(p string) {
 	}
 }
 
+// loadAndFocus is load() with an explicit view pivot to "file". Use it
+// at sites reached only by an explicit user action (sidebar row click,
+// Open button, drag-drop or AddFiles producing a single .miniscram).
+// Worker-driven callers (queue auto-follow, post-pack reload, startup
+// -load) keep calling bare load() so they never yank the user off Stats.
+func (m *model) loadAndFocus(p string) {
+	m.view = "file"
+	m.load(p)
+}
+
 func (m *model) lookup(hashes []string) {
 	for _, h := range hashes {
 		// disk cache first
