@@ -35,6 +35,7 @@ var cueKeywords = [][]byte{
 // filesystem metadata at pack time.
 type Track struct {
 	Number   int        `json:"number"`
+	Session  int        `json:"session,omitempty"`
 	Mode     string     `json:"mode"`
 	FirstLBA int32      `json:"first_lba"`
 	Filename string     `json:"filename"`
