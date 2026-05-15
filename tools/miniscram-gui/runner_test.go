@@ -81,6 +81,12 @@ func TestMain(m *testing.M) {
 		case <-time.After(5 * time.Second):
 			os.Exit(0)
 		}
+	case "json_fail":
+		// Emit one step then a fail event mirroring what pack.go writes
+		// via Reporter.Fail when --progress=json is in effect.
+		fmt.Fprintln(os.Stderr, `{"type":"step","label":"detecting write offset"}`)
+		fmt.Fprintln(os.Stderr, `{"type":"fail","label":"detecting write offset","error":"no plausible scrambled sync field found in 765077352 bytes of scram"}`)
+		os.Exit(1)
 	default:
 		fmt.Fprintln(os.Stderr, "unknown FAKE_MODE")
 		os.Exit(2)
@@ -139,6 +145,31 @@ func TestActionRunner_Fail(t *testing.T) {
 	}
 	if !strings.Contains(res.Error, "scram not found") {
 		t.Errorf("Error = %q, want it to contain 'scram not found'", res.Error)
+	}
+}
+
+// TestActionRunner_FailNDJSONReason confirms the wait-path renders an
+// NDJSON fail event into a human-readable res.Error rather than passing
+// the raw JSON line through. Without prettyProgressLine in runner.go,
+// the toast and queue row show {"type":"fail",...} which wraps over
+// many lines (see issue #50).
+func TestActionRunner_FailNDJSONReason(t *testing.T) {
+	r, done := newTestRunner(t, "json_fail")
+
+	if err := r.Start("pack", "/in/disc.cue", "/out/disc.miniscram"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	res := waitFor(t, done, 3*time.Second)
+	if res.Status != "fail" {
+		t.Errorf("status = %q, want fail", res.Status)
+	}
+	const want = "no plausible scrambled sync field found in 765077352 bytes of scram"
+	if res.Error != want {
+		t.Errorf("Error = %q, want %q", res.Error, want)
+	}
+	if strings.Contains(res.Error, `{"type"`) {
+		t.Errorf("Error %q still contains raw NDJSON; prettyProgressLine should have stripped it", res.Error)
 	}
 }
 
