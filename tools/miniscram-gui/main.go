@@ -749,9 +749,24 @@ func (m *model) hashCueBins(tracks []cueTrack, fullPaths []string) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			md5h, sha1h, sha256h, err := hashCueBin(j.full)
+			var (
+				md5h, sha1h, sha256h string
+				hashErr              error
+			)
+			st, statErr := os.Stat(j.full)
+			if statErr == nil {
+				if cMd5, cSha1, cSha256, hit := binHashLookup(m.db, j.full, st.Size(), st.ModTime().Unix()); hit {
+					md5h, sha1h, sha256h = cMd5, cSha1, cSha256
+				}
+			}
+			if sha1h == "" {
+				md5h, sha1h, sha256h, hashErr = hashCueBin(j.full)
+				if hashErr == nil && statErr == nil {
+					binHashPut(m.db, j.full, st.Size(), st.ModTime().Unix(), md5h, sha1h, sha256h)
+				}
+			}
 			m.redumpMu.Lock()
-			if err != nil {
+			if hashErr != nil {
 				tracks[j.idx].state = "fail"
 			} else {
 				tracks[j.idx].hashes = map[string]string{
@@ -765,8 +780,7 @@ func (m *model) hashCueBins(tracks []cueTrack, fullPaths []string) {
 			if m.invalidate != nil {
 				m.invalidate()
 			}
-			if err == nil && sha1h != "" {
-				// lookup() handles its own redump cache + dedup.
+			if hashErr == nil && sha1h != "" {
 				m.lookup([]string{sha1h})
 			}
 		}()
