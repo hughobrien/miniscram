@@ -8,6 +8,31 @@ import (
 
 const errorSectorsListCap = 10000
 
+// SessionGap describes the inter-session gap between session N and
+// session N+1 on a multi-session disc. The three sub-regions appear
+// in disc order: session-N lead-out, session-(N+1) lead-in, session-
+// (N+1) pregap. Sectors sum to the total detected gap.
+type SessionGap struct {
+	StartLBA       int32 // first LBA of LeadoutSectors
+	LeadoutSectors int32 // session-N lead-out (Mode 0 scrambled zero)
+	LeadinSectors  int32 // session-(N+1) lead-in (zeros)
+	PregapSectors  int32 // session-(N+1) pregap (Mode 1 scrambled zero)
+}
+
+// region classifies an LBA into one of the seven structural regions
+// BuildEpsilonHat emits content for.
+type region int
+
+const (
+	regionLeadin region = iota
+	regionPregap
+	regionBin
+	regionGapLeadout
+	regionGapLeadin
+	regionGapPregap
+	regionLeadout
+)
+
 // BuildParams holds everything BuildEpsilonHat needs to know about the
 // disc layout. Note LeadinLBA is parameterised so unit tests can use a
 // truncated layout (no real leadin) while real Redumper input uses
@@ -19,6 +44,7 @@ type BuildParams struct {
 	BinFirstLBA      int32
 	BinSectorCount   int32
 	Tracks           []Track
+	SessionGaps      []SessionGap // empty for single-session discs
 }
 
 // LayoutMismatchError indicates the lockstep pre-check found enough
@@ -96,6 +122,41 @@ func trackModeAt(tracks []Track, lba int32) string {
 		}
 	}
 	return mode
+}
+
+// regionAt classifies an LBA into one of the seven structural
+// regions BuildEpsilonHat emits content for. Inter-session gaps
+// take precedence over bin regions: a gap LBA may sit inside the
+// closed interval [tracks[0].FirstLBA, lastTrack.FirstLBA+lastSize),
+// and the gap classification wins.
+func regionAt(lba int32, tracks []Track, gaps []SessionGap) region {
+	if lba < LBAPregapStart {
+		return regionLeadin
+	}
+	for _, g := range gaps {
+		end := g.StartLBA + g.LeadoutSectors + g.LeadinSectors + g.PregapSectors
+		if lba < g.StartLBA || lba >= end {
+			continue
+		}
+		switch {
+		case lba < g.StartLBA+g.LeadoutSectors:
+			return regionGapLeadout
+		case lba < g.StartLBA+g.LeadoutSectors+g.LeadinSectors:
+			return regionGapLeadin
+		default:
+			return regionGapPregap
+		}
+	}
+	if len(tracks) > 0 && lba < tracks[0].FirstLBA {
+		return regionPregap
+	}
+	for _, t := range tracks {
+		sectors := int32(t.Size / int64(SectorSize))
+		if lba >= t.FirstLBA && lba < t.FirstLBA+sectors {
+			return regionBin
+		}
+	}
+	return regionLeadout
 }
 
 // BuildEpsilonHat writes the reconstructed scrambled image to out.

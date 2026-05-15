@@ -194,3 +194,42 @@ func TestBuilderRefusesAtTooManyMismatches(t *testing.T) {
 		t.Fatalf("error %v is not *LayoutMismatchError", err)
 	}
 }
+
+func TestRegionAt(t *testing.T) {
+	// Two-session disc: audio LBAs 0..199, gap 200..11599, data 11600..11649.
+	tracks := []Track{
+		{Number: 1, Session: 1, Mode: "AUDIO", FirstLBA: 0, Size: 100 * int64(SectorSize)},
+		{Number: 2, Session: 1, Mode: "AUDIO", FirstLBA: 100, Size: 100 * int64(SectorSize)},
+		{Number: 3, Session: 2, Mode: "MODE1/2352", FirstLBA: 11600, Size: 50 * int64(SectorSize)},
+	}
+	gaps := []SessionGap{
+		{StartLBA: 200, LeadoutSectors: 6750, LeadinSectors: 4500, PregapSectors: 150},
+	}
+	cases := []struct {
+		name string
+		lba  int32
+		want region
+	}{
+		{"leadin", -45150, regionLeadin},
+		{"pregap-last", -1, regionPregap},
+		{"audio-track-1-start", 0, regionBin},
+		{"audio-track-2-end", 199, regionBin},
+		{"gap-leadout-start", 200, regionGapLeadout},
+		{"gap-leadout-end", 6949, regionGapLeadout},
+		{"gap-leadin-start", 6950, regionGapLeadin},
+		{"gap-leadin-end", 11449, regionGapLeadin},
+		{"gap-pregap-start", 11450, regionGapPregap},
+		{"gap-pregap-end", 11599, regionGapPregap},
+		{"data-start", 11600, regionBin},
+		{"data-end", 11649, regionBin},
+		{"trailing-leadout", 11650, regionLeadout},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := regionAt(c.lba, tracks, gaps)
+			if got != c.want {
+				t.Fatalf("regionAt(%d) = %v; want %v", c.lba, got, c.want)
+			}
+		})
+	}
+}
