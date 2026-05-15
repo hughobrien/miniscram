@@ -1,4 +1,3 @@
-// tools/miniscram-gui/queue_widget_test.go
 package main
 
 import (
@@ -23,6 +22,8 @@ func TestReasonLabel_FailedSingleLine(t *testing.T) {
 // the default (unbounded) wrapping behaviour.
 func TestReasonLabel_OtherStatesUncapped(t *testing.T) {
 	th := material.NewTheme()
+	// qReady and qRunning aren't covered: queueRowSuffix returns
+	// early for those states, so reasonLabel is never called.
 	for _, st := range []queueState{qDone, qSkipped, qCancelled} {
 		lb := reasonLabel(th, st, "short")
 		if lb.MaxLines != 0 {
