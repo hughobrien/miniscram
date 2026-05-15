@@ -224,6 +224,10 @@ func queueRow(th *material.Theme, it queueItem, btns *queuePanelButtons) layout.
 			}
 			call.Add(gtx.Ops)
 
+			if clickArea.Hovered() {
+				drawHoverBorder(gtx.Ops, content.Size)
+			}
+
 			// Enforce a minimum row height.
 			if content.Size.Y < rowH {
 				content.Size.Y = rowH
@@ -304,4 +308,16 @@ func queueRowActionBtn(th *material.Theme, it queueItem, click *widget.Clickable
 		btn.Inset = layout.Inset{Top: 2, Bottom: 2, Left: 6, Right: 6}
 		return btn.Layout(gtx)
 	}
+}
+
+// drawHoverBorder paints a 1-px frame around a rectangle of the
+// given size at (0,0). Four thin filled rects rather than
+// clip.Stroke because the latter's Path API has shifted across Gio
+// releases — the four-rect form is portable.
+func drawHoverBorder(ops *op.Ops, size image.Point) {
+	col := text3
+	paint.FillShape(ops, col, clip.Rect{Max: image.Pt(size.X, 1)}.Op())                       // top
+	paint.FillShape(ops, col, clip.Rect{Min: image.Pt(0, size.Y - 1), Max: size}.Op())         // bottom
+	paint.FillShape(ops, col, clip.Rect{Max: image.Pt(1, size.Y)}.Op())                       // left
+	paint.FillShape(ops, col, clip.Rect{Min: image.Pt(size.X - 1, 0), Max: size}.Op())         // right
 }
