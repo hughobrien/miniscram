@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -53,6 +56,100 @@ func TestHashFile(t *testing.T) {
 	}
 	if _, err := hashFile("/nonexistent/path/here"); err == nil {
 		t.Fatal("expected error opening nonexistent file")
+	}
+}
+
+func TestPackEnhancedCDRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	disc := synthEnhancedCD(t, SynthEnhancedCDOpts{})
+	cuePath := writeEnhancedCDFixture(t, dir, disc)
+	scramPath := filepath.Join(dir, "x.scram")
+	containerPath := filepath.Join(dir, "x.miniscram")
+
+	// Pack succeeds: detection finds the gap, builder emits matching
+	// content for the gap region, layout-mismatch ratio stays at 0.
+	if err := Pack(PackOptions{
+		CuePath:    cuePath,
+		ScramPath:  scramPath,
+		OutputPath: containerPath,
+	}, nil); err != nil {
+		t.Fatalf("Pack: %v", err)
+	}
+
+	// Round-trip the container into a temp .scram and byte-compare.
+	roundtripPath := filepath.Join(dir, "x.scram.roundtrip")
+	if err := Unpack(UnpackOptions{
+		ContainerPath: containerPath,
+		OutputPath:    roundtripPath,
+	}, nil); err != nil {
+		t.Fatalf("Unpack: %v", err)
+	}
+	original, err := os.ReadFile(scramPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundtripped, err := os.ReadFile(roundtripPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(original, roundtripped) {
+		t.Fatalf("round-trip scram differs from original (len %d vs %d)",
+			len(original), len(roundtripped))
+	}
+
+	// Container should be small: bin + delta with a tiny delta because
+	// the synth scram matches our prediction sector-for-sector. Pin a
+	// generous upper bound so the test catches a regression where the
+	// delta blows up but isn't brittle against minor format changes.
+	info, err := os.Stat(containerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const maxContainerKB = 64
+	if info.Size() > maxContainerKB*1024 {
+		t.Fatalf("container size %d bytes exceeds %d KB upper bound",
+			info.Size(), maxContainerKB)
+	}
+}
+
+func TestPackEnhancedCDRejectsAudioSecondSession(t *testing.T) {
+	dir := t.TempDir()
+	disc := synthEnhancedCD(t, SynthEnhancedCDOpts{})
+	// Build a cue where the post-REM-SESSION-02 track is AUDIO.
+	disc.Cue = ""
+	for a := 0; a < 2; a++ {
+		disc.Cue += fmt.Sprintf("FILE \"x (Track %d).bin\" BINARY\n  TRACK %02d AUDIO\n    INDEX 01 00:00:00\n",
+			a+1, a+1)
+	}
+	disc.Cue += "REM SESSION 02\n"
+	disc.Cue += "FILE \"x (Track 3).bin\" BINARY\n  TRACK 03 AUDIO\n    INDEX 01 00:00:00\n"
+	// Re-truncate audio bins to match (drop the unused 3rd) and
+	// re-emit fixture files.
+	disc.AudioBins = disc.AudioBins[:2]
+	disc.DataBin = make([]byte, 1024*int(SectorSize)) // dummy 1024-sector "track 3"
+	if err := os.WriteFile(filepath.Join(dir, "x.cue"), []byte(disc.Cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for a, ab := range disc.AudioBins {
+		p := filepath.Join(dir, fmt.Sprintf("x (Track %d).bin", a+1))
+		if err := os.WriteFile(p, ab, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x (Track 3).bin"), disc.DataBin, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x.scram"), disc.Scram, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "x.miniscram")
+	err := Pack(PackOptions{
+		CuePath:    filepath.Join(dir, "x.cue"),
+		ScramPath:  filepath.Join(dir, "x.scram"),
+		OutputPath: out,
+	}, nil)
+	if !errors.Is(err, ErrSessionFirstTrackNotData) {
+		t.Fatalf("expected ErrSessionFirstTrackNotData, got %v", err)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -106,6 +107,34 @@ func findHASHChunk(data []byte) (chunkStart, payloadOff, payloadLen int, ok bool
 		pos = payloadStart + length + 4 // skip payload + CRC
 	}
 	return 0, 0, 0, false
+}
+
+func TestUnpackMissingBinSurfacesStepError(t *testing.T) {
+	containerPath, dir := packAndUnpackSetup(t)
+
+	// Move only the container to a fresh dir; leave the bin(s) behind.
+	freshDir := t.TempDir()
+	newContainerPath := filepath.Join(freshDir, "x.miniscram")
+	if err := os.Rename(containerPath, newContainerPath); err != nil {
+		t.Fatal(err)
+	}
+	_ = dir // bins remain in the original dir, absent from freshDir
+
+	err := Unpack(UnpackOptions{
+		ContainerPath: newContainerPath,
+		OutputPath:    filepath.Join(freshDir, "x.scram.recovered"),
+		Verify:        false,
+	}, NewReporter(io.Discard, true))
+	if err == nil {
+		t.Fatal("expected error for missing bin file, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no such file") {
+		t.Errorf("expected 'no such file' in error, got: %v", msg)
+	}
+	if !strings.Contains(msg, "track 1") {
+		t.Errorf("expected track number in error, got: %v", msg)
+	}
 }
 
 func TestUnpackVerifiesHashes(t *testing.T) {

@@ -8,6 +8,31 @@ import (
 
 const errorSectorsListCap = 10000
 
+// SessionGap describes the inter-session gap between session N and
+// session N+1 on a multi-session disc. The three sub-regions appear
+// in disc order: session-N lead-out, session-(N+1) lead-in, session-
+// (N+1) pregap. Sectors sum to the total detected gap.
+type SessionGap struct {
+	StartLBA       int32 // first LBA of LeadoutSectors
+	LeadoutSectors int32 // session-N lead-out (Mode 0 scrambled zero)
+	LeadinSectors  int32 // session-(N+1) lead-in (zeros)
+	PregapSectors  int32 // session-(N+1) pregap (Mode 1 scrambled zero)
+}
+
+// region classifies an LBA into one of the seven structural regions
+// BuildEpsilonHat emits content for.
+type region int
+
+const (
+	regionLeadin region = iota
+	regionPregap
+	regionBin
+	regionGapLeadout
+	regionGapLeadin
+	regionGapPregap
+	regionLeadout
+)
+
 // BuildParams holds everything BuildEpsilonHat needs to know about the
 // disc layout. Note LeadinLBA is parameterised so unit tests can use a
 // truncated layout (no real leadin) while real Redumper input uses
@@ -19,6 +44,7 @@ type BuildParams struct {
 	BinFirstLBA      int32
 	BinSectorCount   int32
 	Tracks           []Track
+	SessionGaps      []SessionGap // empty for single-session discs
 }
 
 // LayoutMismatchError indicates the lockstep pre-check found enough
@@ -98,6 +124,41 @@ func trackModeAt(tracks []Track, lba int32) string {
 	return mode
 }
 
+// regionAt classifies an LBA into one of the seven structural
+// regions BuildEpsilonHat emits content for. Inter-session gaps
+// take precedence over bin regions: a gap LBA may sit inside the
+// closed interval [tracks[0].FirstLBA, lastTrack.FirstLBA+lastSize),
+// and the gap classification wins.
+func regionAt(lba int32, tracks []Track, gaps []SessionGap) region {
+	if lba < LBAPregapStart {
+		return regionLeadin
+	}
+	for _, g := range gaps {
+		end := g.StartLBA + g.LeadoutSectors + g.LeadinSectors + g.PregapSectors
+		if lba < g.StartLBA || lba >= end {
+			continue
+		}
+		switch {
+		case lba < g.StartLBA+g.LeadoutSectors:
+			return regionGapLeadout
+		case lba < g.StartLBA+g.LeadoutSectors+g.LeadinSectors:
+			return regionGapLeadin
+		default:
+			return regionGapPregap
+		}
+	}
+	if len(tracks) > 0 && lba < tracks[0].FirstLBA {
+		return regionPregap
+	}
+	for _, t := range tracks {
+		sectors := int32(t.Size / int64(SectorSize))
+		if lba >= t.FirstLBA && lba < t.FirstLBA+sectors {
+			return regionBin
+		}
+	}
+	return regionLeadout
+}
+
 // BuildEpsilonHat writes the reconstructed scrambled image to out.
 //
 // If scram is non-nil, every byte written is compared against scram in
@@ -162,12 +223,19 @@ func BuildEpsilonHat(
 
 	for lba := p.LeadinLBA; lba < endLBA; lba++ {
 		var sec [SectorSize]byte
-		switch {
-		case lba < LBAPregapStart:
-			// leadin: zeros
-		case lba < p.BinFirstLBA:
-			sec = generateMode1ZeroSector(lba)
-		case lba < p.BinFirstLBA+p.BinSectorCount:
+		switch regionAt(lba, p.Tracks, p.SessionGaps) {
+		case regionLeadin:
+			// zeros
+		case regionPregap:
+			// Audio-leading discs have silent audio (PCM zeros) in
+			// the track-1 pregap, not scrambled Mode 1 zero. Single-
+			// session data discs keep the historical Mode 1 emission.
+			if len(p.Tracks) > 0 && p.Tracks[0].Mode == "AUDIO" {
+				// zeros
+			} else {
+				sec = generateMode1ZeroSector(lba)
+			}
+		case regionBin:
 			if _, err := io.ReadFull(bin, binBuf); err != nil {
 				return nil, 0, 0, fmt.Errorf("reading bin LBA %d: %w", lba, err)
 			}
@@ -184,7 +252,13 @@ func BuildEpsilonHat(
 					passThroughs++
 				}
 			}
-		default:
+		case regionGapLeadout:
+			sec = generateLeadoutSector(lba)
+		case regionGapLeadin:
+			// zeros
+		case regionGapPregap:
+			sec = generateMode1ZeroSector(lba)
+		case regionLeadout:
 			sec = generateLeadoutSector(lba)
 		}
 
@@ -273,4 +347,51 @@ func CheckLayoutMismatch(errLBAs []int32, mismatchedSectors int, totalDiscSector
 		ErrorSectors:  head,
 		MismatchRatio: ratio,
 	}
+}
+
+// Canonical sub-region sizes for a CD-Extra inter-session gap.
+// Redumper's printCUE uses these as the standard minima:
+// CD_LEADOUT_MIN_SIZE = 6750, CD_LEADIN_MIN_SIZE = 4500,
+// CD_PREGAP_SIZE = 150.
+const (
+	sessionGapPregapSectors = 150
+	sessionGapLeadinSectors = 4500
+)
+
+// derivedSessionGaps reconstructs SessionGap entries from a tracks
+// slice whose FirstLBAs have already been adjusted for inter-session
+// gaps (i.e. as written into the manifest by Pack). The total gap
+// between sessions is the LBA jump between the last track of session
+// N and the first track of session N+1; we split it using the
+// canonical pregap/leadin minima and put any slack into the leadout.
+//
+// Returns one SessionGap per session boundary, in order. Empty for
+// single-session discs.
+func derivedSessionGaps(tracks []Track) []SessionGap {
+	if len(tracks) < 2 {
+		return nil
+	}
+	var gaps []SessionGap
+	for i := 1; i < len(tracks); i++ {
+		prev, cur := tracks[i-1], tracks[i]
+		if cur.Session <= prev.Session {
+			continue
+		}
+		prevEnd := prev.FirstLBA + int32(prev.Size/int64(SectorSize))
+		total := cur.FirstLBA - prevEnd
+		if total <= 0 {
+			continue
+		}
+		leadout := total - sessionGapLeadinSectors - sessionGapPregapSectors
+		if leadout < 0 {
+			leadout = 0
+		}
+		gaps = append(gaps, SessionGap{
+			StartLBA:       prevEnd,
+			LeadoutSectors: leadout,
+			LeadinSectors:  sessionGapLeadinSectors,
+			PregapSectors:  sessionGapPregapSectors,
+		})
+	}
+	return gaps
 }

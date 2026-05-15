@@ -106,6 +106,11 @@ func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
 	if err := writeChunk(f, hashTag, encodeHASHPayload(m)); err != nil {
 		return fmt.Errorf("writing HASH: %w", err)
 	}
+	if hasMultipleSessions(m.Tracks) {
+		if err := writeChunk(f, sessTag, encodeSESSPayload(m.Tracks)); err != nil {
+			return fmt.Errorf("writing SESS: %w", err)
+		}
+	}
 	if err := writeChunk(f, dltaTag, dltaBuf.Bytes()); err != nil {
 		return fmt.Errorf("writing DLTA: %w", err)
 	}
@@ -187,6 +192,13 @@ func ReadContainer(path string) (*Manifest, []byte, error) {
 			// MFST/TRKS surface as their proper errors rather than as a
 			// generic "HASH before MFST/TRKS".
 			hashPayload = payload
+		case sessTag:
+			if m == nil || m.Tracks == nil {
+				return nil, nil, fmt.Errorf("SESS before MFST/TRKS")
+			}
+			if err := decodeSESSPayload(payload, m.Tracks); err != nil {
+				return nil, nil, err
+			}
 		case dltaTag:
 			zr, err := zlib.NewReader(bytes.NewReader(payload))
 			if err != nil {
