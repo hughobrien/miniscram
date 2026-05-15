@@ -446,6 +446,24 @@ func (m *model) load(p string) {
 		}
 		go m.lookup(hashes)
 	case ".cue":
+		// If pack already ran (sibling .scram is gone or empty) and
+		// the packed result is sitting next to the cue, prefer to
+		// show that result rather than rendering cueView's "missing
+		// scram — pack can't run" warning. Common after a batch pack
+		// where the queue rows still point at the cues.
+		base := strings.TrimSuffix(p, filepath.Ext(p))
+		scramPath := base + ".scram"
+		miniscramPath := base + ".miniscram"
+		scramOK := false
+		if st, err := os.Stat(scramPath); err == nil && st.Size() > 0 {
+			scramOK = true
+		}
+		if !scramOK {
+			if _, err := os.Stat(miniscramPath); err == nil {
+				m.load(miniscramPath)
+				return
+			}
+		}
 		b, err := os.ReadFile(p)
 		if err != nil {
 			m.err = err.Error()
