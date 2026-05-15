@@ -96,6 +96,8 @@ func decodeMFSTPayload(payload []byte) (*Manifest, error) {
 
 // encodeTRKSPayload emits the TRKS chunk payload per spec §"TRKS".
 // Per-track Hashes are emitted in the HASH chunk, not here.
+// Per-track layout: number(u8) || mode_len(u8) || mode || first_lba(u32) ||
+// size(u64) || filename_len(u16) || filename || session(u8).
 func encodeTRKSPayload(tracks []Track) []byte {
 	var b []byte
 	b = binary.BigEndian.AppendUint16(b, uint16(len(tracks)))
@@ -108,6 +110,7 @@ func encodeTRKSPayload(tracks []Track) []byte {
 		b = binary.BigEndian.AppendUint64(b, uint64(t.Size))
 		b = binary.BigEndian.AppendUint16(b, uint16(len(filename)))
 		b = append(b, filename...)
+		b = append(b, byte(t.Session))
 	}
 	return b
 }
@@ -150,8 +153,13 @@ func decodeTRKSPayload(payload []byte) ([]Track, error) {
 		if err != nil {
 			return nil, fmt.Errorf("TRKS track[%d] filename: %w", i, err)
 		}
+		session, err := r.uint8()
+		if err != nil {
+			return nil, fmt.Errorf("TRKS track[%d] session: %w", i, err)
+		}
 		tracks[i] = Track{
 			Number:   int(num),
+			Session:  int(session),
 			Mode:     string(mode),
 			FirstLBA: int32(firstLBA),
 			Size:     int64(size),

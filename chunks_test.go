@@ -144,8 +144,9 @@ func TestMFSTRejectsTruncated(t *testing.T) {
 
 func TestTRKSRoundTrip(t *testing.T) {
 	in := []Track{
-		{Number: 1, Mode: "MODE1/2352", FirstLBA: 0, Size: 791104608, Filename: "x.bin"},
-		{Number: 2, Mode: "AUDIO", FirstLBA: 336420, Size: 47040, Filename: "x.bin"},
+		{Number: 1, Session: 1, Mode: "AUDIO", FirstLBA: 0, Size: 470400, Filename: "x (Track 1).bin"},
+		{Number: 2, Session: 1, Mode: "AUDIO", FirstLBA: 200, Size: 470400, Filename: "x (Track 2).bin"},
+		{Number: 3, Session: 2, Mode: "MODE1/2352", FirstLBA: 12000, Size: 791104608, Filename: "x (Track 3).bin"},
 	}
 	payload := encodeTRKSPayload(in)
 	out, err := decodeTRKSPayload(payload)
@@ -158,9 +159,9 @@ func TestTRKSRoundTrip(t *testing.T) {
 	for i := range in {
 		// Hashes intentionally not compared — populated by HASH codec.
 		got, want := out[i], in[i]
-		if got.Number != want.Number || got.Mode != want.Mode ||
-			got.FirstLBA != want.FirstLBA || got.Size != want.Size ||
-			got.Filename != want.Filename {
+		if got.Number != want.Number || got.Session != want.Session ||
+			got.Mode != want.Mode || got.FirstLBA != want.FirstLBA ||
+			got.Size != want.Size || got.Filename != want.Filename {
 			t.Errorf("track %d:\ngot:  %+v\nwant: %+v", i, got, want)
 		}
 	}

@@ -89,11 +89,13 @@ func TestMFSTCodecRoundTripProperty(t *testing.T) {
 // TRKS chunk codec on randomized track slices.
 func TestTRKSCodecRoundTripProperty(t *testing.T) {
 	f := func(rawTracks []Track) bool {
-		// Sanitize: number fits uint8, mode_len fits uint8, filename_len
-		// fits uint16. Zero per-track Hashes since TRKS doesn't encode them.
+		// Sanitize: number fits uint8, session fits uint8, mode_len fits
+		// uint8, filename_len fits uint16. Zero per-track Hashes since TRKS
+		// doesn't encode them.
 		clean := make([]Track, len(rawTracks))
 		for i, tk := range rawTracks {
 			tk.Number = tk.Number & 0xFF
+			tk.Session = tk.Session & 0xFF
 			if len(tk.Mode) > 0xFF {
 				tk.Mode = tk.Mode[:0xFF]
 			}
@@ -112,9 +114,9 @@ func TestTRKSCodecRoundTripProperty(t *testing.T) {
 		}
 		for i := range clean {
 			a, b := clean[i], out[i]
-			if a.Number != b.Number || a.Mode != b.Mode ||
-				a.FirstLBA != b.FirstLBA || a.Size != b.Size ||
-				a.Filename != b.Filename {
+			if a.Number != b.Number || a.Session != b.Session ||
+				a.Mode != b.Mode || a.FirstLBA != b.FirstLBA ||
+				a.Size != b.Size || a.Filename != b.Filename {
 				return false
 			}
 		}

@@ -98,6 +98,7 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 		BinFirstLBA:      m.BinFirstLBA(),
 		BinSectorCount:   m.BinSectorCount(),
 		Tracks:           m.Tracks,
+		SessionGaps:      derivedSessionGaps(m.Tracks),
 	}
 	if _, _, _, err := BuildEpsilonHat(hatFile, params, binReader, nil, nil); err != nil {
 		closeBin()
