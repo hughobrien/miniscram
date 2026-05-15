@@ -34,6 +34,15 @@ CREATE TABLE IF NOT EXISTS events (
     error            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts_unix DESC);
+CREATE TABLE IF NOT EXISTS bin_hash_cache (
+    path         TEXT PRIMARY KEY,
+    size         INTEGER NOT NULL,
+    mtime_unix   INTEGER NOT NULL,
+    md5          TEXT NOT NULL,
+    sha1         TEXT NOT NULL,
+    sha256       TEXT NOT NULL,
+    computed_unix INTEGER NOT NULL
+);
 `
 
 func dataPath() string {
@@ -210,4 +219,42 @@ func eventsAggregate(db *sql.DB) statsAgg {
 		}
 	}
 	return a
+}
+
+// bin hash cache (per-bin file) ------------------------------
+
+// binHashLookup returns the cached digests for path iff the stored
+// (size, mtime_unix) match the observed values. A miss is returned
+// for "no row", "stale row", or db == nil.
+func binHashLookup(db *sql.DB, path string, size, mtimeUnix int64) (md5h, sha1h, sha256h string, ok bool) {
+	if db == nil {
+		return "", "", "", false
+	}
+	row := db.QueryRow(`
+		SELECT md5, sha1, sha256 FROM bin_hash_cache
+		WHERE path = ? AND size = ? AND mtime_unix = ?
+	`, path, size, mtimeUnix)
+	if err := row.Scan(&md5h, &sha1h, &sha256h); err != nil {
+		return "", "", "", false
+	}
+	return md5h, sha1h, sha256h, true
+}
+
+// binHashPut writes (or replaces) the row for path with the observed
+// size+mtime and the computed digests. No-op when db == nil.
+func binHashPut(db *sql.DB, path string, size, mtimeUnix int64, md5h, sha1h, sha256h string) {
+	if db == nil {
+		return
+	}
+	_, _ = db.Exec(`
+		INSERT INTO bin_hash_cache (path, size, mtime_unix, md5, sha1, sha256, computed_unix)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(path) DO UPDATE SET
+			size = excluded.size,
+			mtime_unix = excluded.mtime_unix,
+			md5 = excluded.md5,
+			sha1 = excluded.sha1,
+			sha256 = excluded.sha256,
+			computed_unix = excluded.computed_unix
+	`, path, size, mtimeUnix, md5h, sha1h, sha256h, time.Now().Unix())
 }
