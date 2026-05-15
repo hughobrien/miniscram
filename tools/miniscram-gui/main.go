@@ -920,6 +920,34 @@ func mustRGB(s string) color.NRGBA {
 	return color.NRGBA{R: byte(r), G: byte(g), B: byte(b), A: 0xff}
 }
 
+// startupAction is the resolved intent of CLI invocation: load a
+// file (-load <file> or positional file), enqueue a directory
+// (positional dir, equivalent of clicking AddDir on startup), or
+// do nothing.
+type startupAction struct {
+	Kind string // "" | "dir" | "file"
+	Path string
+}
+
+// resolveStartupAction picks the path to act on at startup and
+// classifies it. -load wins over a positional arg; among multiple
+// positional args the first one wins. A nonexistent path is
+// classified as "file" so the caller can route it through load(),
+// which already surfaces a sensible error.
+func resolveStartupAction(loadFlag string, args []string) startupAction {
+	p := loadFlag
+	if p == "" && len(args) > 0 {
+		p = args[0]
+	}
+	if p == "" {
+		return startupAction{}
+	}
+	if st, err := os.Stat(p); err == nil && st.IsDir() {
+		return startupAction{Kind: "dir", Path: p}
+	}
+	return startupAction{Kind: "file", Path: p}
+}
+
 // ---------------- main / loop ----------------
 
 func main() {
