@@ -170,6 +170,60 @@ func TestActionRunner_FailNDJSONReason(t *testing.T) {
 	}
 }
 
+// TestActionRunner_JSONHappy exercises the success path under
+// --progress=json. The fake emits step/done pairs for every known
+// pack phase; the runner should report success with a positive
+// duration and non-empty LastLine (the final NDJSON event).
+func TestActionRunner_JSONHappy(t *testing.T) {
+	gBefore := runtime.NumGoroutine()
+	r, done := newTestRunner(t, "json_happy")
+
+	output := os.Args[0]
+	if err := r.Start("pack", "/in/disc.cue", output); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	res := waitFor(t, done, 3*time.Second)
+	if res.Status != "success" {
+		t.Errorf("status = %q, want success (err=%q)", res.Status, res.Error)
+	}
+	if res.DurationMs <= 0 {
+		t.Errorf("duration = %dms, want > 0", res.DurationMs)
+	}
+	if res.OutputSize <= 0 {
+		t.Errorf("OutputSize = %d, want > 0", res.OutputSize)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	if leaked := runtime.NumGoroutine() - gBefore; leaked > 1 {
+		t.Errorf("goroutine leak: %d new goroutines after run", leaked)
+	}
+}
+
+// TestActionRunner_JSONCancel confirms that NDJSON output under
+// SIGTERM still classifies as "cancelled", not "fail". The
+// Cancelling arm in wait() must fire before err-classification, so
+// prettyProgressLine is never invoked on the cancellation path and
+// res.Error stays empty.
+func TestActionRunner_JSONCancel(t *testing.T) {
+	r, done := newTestRunner(t, "json_long")
+
+	if err := r.Start("pack", "/in/disc.cue", "/out/disc.miniscram"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	r.Cancel()
+
+	res := waitFor(t, done, 2*time.Second)
+	if res.Status != "cancelled" {
+		t.Errorf("status = %q, want cancelled", res.Status)
+	}
+	if res.Error != "" {
+		t.Errorf("Error = %q, want empty on cancel", res.Error)
+	}
+}
+
 func TestActionRunner_Cancel(t *testing.T) {
 	r, done := newTestRunner(t, "long")
 
