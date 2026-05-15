@@ -223,12 +223,19 @@ func BuildEpsilonHat(
 
 	for lba := p.LeadinLBA; lba < endLBA; lba++ {
 		var sec [SectorSize]byte
-		switch {
-		case lba < LBAPregapStart:
-			// leadin: zeros
-		case lba < p.BinFirstLBA:
-			sec = generateMode1ZeroSector(lba)
-		case lba < p.BinFirstLBA+p.BinSectorCount:
+		switch regionAt(lba, p.Tracks, p.SessionGaps) {
+		case regionLeadin:
+			// zeros
+		case regionPregap:
+			// Audio-leading discs have silent audio (PCM zeros) in
+			// the track-1 pregap, not scrambled Mode 1 zero. Single-
+			// session data discs keep the historical Mode 1 emission.
+			if len(p.Tracks) > 0 && p.Tracks[0].Mode == "AUDIO" {
+				// zeros
+			} else {
+				sec = generateMode1ZeroSector(lba)
+			}
+		case regionBin:
 			if _, err := io.ReadFull(bin, binBuf); err != nil {
 				return nil, 0, 0, fmt.Errorf("reading bin LBA %d: %w", lba, err)
 			}
@@ -245,7 +252,13 @@ func BuildEpsilonHat(
 					passThroughs++
 				}
 			}
-		default:
+		case regionGapLeadout:
+			sec = generateLeadoutSector(lba)
+		case regionGapLeadin:
+			// zeros
+		case regionGapPregap:
+			sec = generateMode1ZeroSector(lba)
+		case regionLeadout:
 			sec = generateLeadoutSector(lba)
 		}
 

@@ -49,7 +49,7 @@ func synthDiscRaw(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSe
 		LeadinLBA: disc.LeadinLBA, WriteOffsetBytes: writeOffsetBytes,
 		ScramSize: int64(len(disc.Scram)), BinFirstLBA: 0,
 		BinSectorCount: int32(mainSectors),
-		Tracks:         []Track{{Number: 1, Mode: modeStr, FirstLBA: 0}},
+		Tracks:         []Track{{Number: 1, Mode: modeStr, FirstLBA: 0, Size: int64(mainSectors) * SectorSize}},
 	}
 	return disc.Bin, disc.Scram, params
 }
