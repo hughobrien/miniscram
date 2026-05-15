@@ -446,6 +446,24 @@ func (m *model) load(p string) {
 		}
 		go m.lookup(hashes)
 	case ".cue":
+		// If pack already ran (sibling .scram is gone or empty) and
+		// the packed result is sitting next to the cue, prefer to
+		// show that result rather than rendering cueView's "missing
+		// scram — pack can't run" warning. Common after a batch pack
+		// where the queue rows still point at the cues.
+		base := strings.TrimSuffix(p, filepath.Ext(p))
+		scramPath := base + ".scram"
+		miniscramPath := base + ".miniscram"
+		scramOK := false
+		if st, err := os.Stat(scramPath); err == nil && st.Size() > 0 {
+			scramOK = true
+		}
+		if !scramOK {
+			if _, err := os.Stat(miniscramPath); err == nil {
+				m.load(miniscramPath)
+				return
+			}
+		}
 		b, err := os.ReadFile(p)
 		if err != nil {
 			m.err = err.Error()
@@ -468,6 +486,16 @@ func (m *model) load(p string) {
 	default:
 		m.err = "drop a .miniscram or a .cue"
 	}
+}
+
+// loadAndFocus is load() with an explicit view pivot to "file". Use it
+// at sites reached only by an explicit user action (sidebar row click,
+// Open button, drag-drop or AddFiles producing a single .miniscram).
+// Worker-driven callers (queue auto-follow, post-pack reload, startup
+// -load) keep calling bare load() so they never yank the user off Stats.
+func (m *model) loadAndFocus(p string) {
+	m.view = "file"
+	m.load(p)
 }
 
 func (m *model) lookup(hashes []string) {
@@ -739,9 +767,24 @@ func (m *model) hashCueBins(tracks []cueTrack, fullPaths []string) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			md5h, sha1h, sha256h, err := hashCueBin(j.full)
+			var (
+				md5h, sha1h, sha256h string
+				hashErr              error
+			)
+			st, statErr := os.Stat(j.full)
+			if statErr == nil {
+				if cMd5, cSha1, cSha256, hit := binHashLookup(m.db, j.full, st.Size(), st.ModTime().Unix()); hit {
+					md5h, sha1h, sha256h = cMd5, cSha1, cSha256
+				}
+			}
+			if sha1h == "" {
+				md5h, sha1h, sha256h, hashErr = hashCueBin(j.full)
+				if hashErr == nil && statErr == nil {
+					binHashPut(m.db, j.full, st.Size(), st.ModTime().Unix(), md5h, sha1h, sha256h)
+				}
+			}
 			m.redumpMu.Lock()
-			if err != nil {
+			if hashErr != nil {
 				tracks[j.idx].state = "fail"
 			} else {
 				tracks[j.idx].hashes = map[string]string{
@@ -755,8 +798,7 @@ func (m *model) hashCueBins(tracks []cueTrack, fullPaths []string) {
 			if m.invalidate != nil {
 				m.invalidate()
 			}
-			if err == nil && sha1h != "" {
-				// lookup() handles its own redump cache + dedup.
+			if hashErr == nil && sha1h != "" {
 				m.lookup([]string{sha1h})
 			}
 		}()
@@ -878,6 +920,34 @@ func mustRGB(s string) color.NRGBA {
 	return color.NRGBA{R: byte(r), G: byte(g), B: byte(b), A: 0xff}
 }
 
+// startupAction is the resolved intent of CLI invocation: load a
+// file (-load <file> or positional file), enqueue a directory
+// (positional dir, equivalent of clicking AddDir on startup), or
+// do nothing.
+type startupAction struct {
+	Kind string // "" | "dir" | "file"
+	Path string
+}
+
+// resolveStartupAction picks the path to act on at startup and
+// classifies it. -load wins over a positional arg; among multiple
+// positional args the first one wins. A nonexistent path is
+// classified as "file" so the caller can route it through load(),
+// which already surfaces a sensible error.
+func resolveStartupAction(loadFlag string, args []string) startupAction {
+	p := loadFlag
+	if p == "" && len(args) > 0 {
+		p = args[0]
+	}
+	if p == "" {
+		return startupAction{}
+	}
+	if st, err := os.Stat(p); err == nil && st.IsDir() {
+		return startupAction{Kind: "dir", Path: p}
+	}
+	return startupAction{Kind: "file", Path: p}
+}
+
 // ---------------- main / loop ----------------
 
 func main() {
@@ -928,14 +998,17 @@ func main() {
 		mdl.miniscramVersion = v
 	}
 
-	if *loadPath != "" {
-		mdl.load(*loadPath)
+	mdl.queue = newQueueModel()
+
+	switch a := resolveStartupAction(*loadPath, flag.Args()); a.Kind {
+	case "dir":
+		mdl.queue.addPaths(mdl, []string{a.Path})
+	case "file":
+		mdl.load(a.Path)
 	}
 	if mdl.view == "stats" {
 		mdl.refreshStats()
 	}
-
-	mdl.queue = newQueueModel()
 
 	// Screenshot-only state injection. Same package, so direct field access.
 	if *mockRunning != "" {
@@ -1187,7 +1260,7 @@ func loop(w *app.Window, mdl *model) error {
 					if err != nil || p == "" {
 						return
 					}
-					mdl.load(p)
+					mdl.loadAndFocus(p)
 					if mdl.invalidate != nil {
 						mdl.invalidate()
 					}
@@ -1285,7 +1358,7 @@ func loop(w *app.Window, mdl *model) error {
 			snapForClicks := mdl.queue.Snapshot()
 			for _, it := range snapForClicks.Items {
 				if qBtns.RowClick(it.ID).Clicked(gtx) {
-					mdl.load(it.CuePath)
+					mdl.loadAndFocus(it.CuePath)
 					mdl.queue.mu.Lock()
 					mdl.queue.autoFollow = (it.State == qRunning)
 					mdl.queue.mu.Unlock()
