@@ -233,3 +233,66 @@ func TestRegionAt(t *testing.T) {
 		})
 	}
 }
+
+func TestDerivedSessionGaps(t *testing.T) {
+	t.Run("single-session-no-gaps", func(t *testing.T) {
+		tracks := []Track{
+			{Session: 1, FirstLBA: 0, Size: 100 * int64(SectorSize)},
+			{Session: 1, FirstLBA: 100, Size: 200 * int64(SectorSize)},
+		}
+		got := derivedSessionGaps(tracks)
+		if len(got) != 0 {
+			t.Fatalf("expected 0 gaps, got %v", got)
+		}
+	})
+
+	t.Run("two-session-standard-minima", func(t *testing.T) {
+		// Audio: tracks 1..2 covering LBAs 0..199. Gap of 11400 sectors.
+		// Data: track 3 at LBA 11600.
+		tracks := []Track{
+			{Session: 1, FirstLBA: 0, Size: 100 * int64(SectorSize)},
+			{Session: 1, FirstLBA: 100, Size: 100 * int64(SectorSize)},
+			{Session: 2, FirstLBA: 11600, Size: 50 * int64(SectorSize)},
+		}
+		got := derivedSessionGaps(tracks)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 gap, got %d", len(got))
+		}
+		g := got[0]
+		if g.StartLBA != 200 {
+			t.Errorf("StartLBA=%d; want 200", g.StartLBA)
+		}
+		if g.PregapSectors != 150 {
+			t.Errorf("PregapSectors=%d; want 150", g.PregapSectors)
+		}
+		if g.LeadinSectors != 4500 {
+			t.Errorf("LeadinSectors=%d; want 4500", g.LeadinSectors)
+		}
+		if g.LeadoutSectors != 11400-4500-150 {
+			t.Errorf("LeadoutSectors=%d; want %d", g.LeadoutSectors, 11400-4500-150)
+		}
+	})
+
+	t.Run("two-session-extra-slack-goes-to-leadout", func(t *testing.T) {
+		// Total gap = 13000 sectors (1600 over the minimum). Lead-in
+		// and pregap stay at the minima; lead-out absorbs the slack.
+		tracks := []Track{
+			{Session: 1, FirstLBA: 0, Size: 200 * int64(SectorSize)},
+			{Session: 2, FirstLBA: 13200, Size: 50 * int64(SectorSize)},
+		}
+		got := derivedSessionGaps(tracks)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 gap, got %d", len(got))
+		}
+		g := got[0]
+		if g.PregapSectors != 150 {
+			t.Errorf("PregapSectors=%d; want 150", g.PregapSectors)
+		}
+		if g.LeadinSectors != 4500 {
+			t.Errorf("LeadinSectors=%d; want 4500", g.LeadinSectors)
+		}
+		if g.LeadoutSectors != 13000-4500-150 {
+			t.Errorf("LeadoutSectors=%d; want %d", g.LeadoutSectors, 13000-4500-150)
+		}
+	})
+}

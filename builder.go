@@ -348,3 +348,50 @@ func CheckLayoutMismatch(errLBAs []int32, mismatchedSectors int, totalDiscSector
 		MismatchRatio: ratio,
 	}
 }
+
+// Canonical sub-region sizes for a CD-Extra inter-session gap.
+// Redumper's printCUE uses these as the standard minima:
+// CD_LEADOUT_MIN_SIZE = 6750, CD_LEADIN_MIN_SIZE = 4500,
+// CD_PREGAP_SIZE = 150.
+const (
+	sessionGapPregapSectors = 150
+	sessionGapLeadinSectors = 4500
+)
+
+// derivedSessionGaps reconstructs SessionGap entries from a tracks
+// slice whose FirstLBAs have already been adjusted for inter-session
+// gaps (i.e. as written into the manifest by Pack). The total gap
+// between sessions is the LBA jump between the last track of session
+// N and the first track of session N+1; we split it using the
+// canonical pregap/leadin minima and put any slack into the leadout.
+//
+// Returns one SessionGap per session boundary, in order. Empty for
+// single-session discs.
+func derivedSessionGaps(tracks []Track) []SessionGap {
+	if len(tracks) < 2 {
+		return nil
+	}
+	var gaps []SessionGap
+	for i := 1; i < len(tracks); i++ {
+		prev, cur := tracks[i-1], tracks[i]
+		if cur.Session <= prev.Session {
+			continue
+		}
+		prevEnd := prev.FirstLBA + int32(prev.Size/int64(SectorSize))
+		total := cur.FirstLBA - prevEnd
+		if total <= 0 {
+			continue
+		}
+		leadout := total - sessionGapLeadinSectors - sessionGapPregapSectors
+		if leadout < 0 {
+			leadout = 0
+		}
+		gaps = append(gaps, SessionGap{
+			StartLBA:       prevEnd,
+			LeadoutSectors: leadout,
+			LeadinSectors:  sessionGapLeadinSectors,
+			PregapSectors:  sessionGapPregapSectors,
+		})
+	}
+	return gaps
+}
