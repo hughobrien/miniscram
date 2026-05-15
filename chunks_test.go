@@ -176,6 +176,46 @@ func TestTRKSRejectsTruncated(t *testing.T) {
 	}
 }
 
+func TestSESSRoundTrip(t *testing.T) {
+	// Multi-session: SESS chunk must be emitted and decode back cleanly.
+	in := []Track{
+		{Number: 1, Session: 1, Mode: "AUDIO", FirstLBA: 0, Size: 470400, Filename: "x (Track 1).bin"},
+		{Number: 2, Session: 1, Mode: "AUDIO", FirstLBA: 200, Size: 470400, Filename: "x (Track 2).bin"},
+		{Number: 3, Session: 2, Mode: "MODE1/2352", FirstLBA: 12000, Size: 791104608, Filename: "x (Track 3).bin"},
+	}
+	if !hasMultipleSessions(in) {
+		t.Fatal("fixture must have Session > 1")
+	}
+	payload := encodeSESSPayload(in)
+	// Decode into a copy with Session zeroed to verify stamping.
+	out := make([]Track, len(in))
+	copy(out, in)
+	for i := range out {
+		out[i].Session = 0
+	}
+	if err := decodeSESSPayload(payload, out); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range in {
+		if out[i].Session != want.Session {
+			t.Errorf("track %d: got Session=%d want %d", i, out[i].Session, want.Session)
+		}
+	}
+}
+
+func TestSESSTrackCountMismatch(t *testing.T) {
+	in := []Track{
+		{Number: 1, Session: 1},
+		{Number: 2, Session: 2},
+	}
+	payload := encodeSESSPayload(in)
+	// Try decoding into a slice of wrong length.
+	out := make([]Track, 3)
+	if err := decodeSESSPayload(payload, out); err == nil {
+		t.Fatal("expected error for track count mismatch")
+	}
+}
+
 func TestHASHRoundTrip(t *testing.T) {
 	in := &Manifest{
 		Scram: ScramInfo{Hashes: FileHashes{

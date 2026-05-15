@@ -36,6 +36,7 @@ var (
 	mfstTag = fourcc("MFST")
 	trksTag = fourcc("TRKS")
 	hashTag = fourcc("HASH")
+	sessTag = fourcc("SESS")
 )
 
 // encodeMFSTPayload emits the MFST chunk payload per spec §"MFST":
@@ -162,6 +163,42 @@ func decodeTRKSPayload(payload []byte) ([]Track, error) {
 		return nil, fmt.Errorf("TRKS: %d trailing bytes after %d tracks", len(payload)-r.pos, count)
 	}
 	return tracks, nil
+}
+
+// encodeSESSPayload emits the SESS chunk payload: u16 track_count,
+// then one u8 session per track in TRKS order.
+func encodeSESSPayload(tracks []Track) []byte {
+	var b []byte
+	b = binary.BigEndian.AppendUint16(b, uint16(len(tracks)))
+	for _, t := range tracks {
+		b = append(b, byte(t.Session))
+	}
+	return b
+}
+
+// decodeSESSPayload reads SESS and stamps Session onto the
+// provided tracks slice. Returns an error if the chunk's
+// track_count doesn't match len(tracks).
+func decodeSESSPayload(payload []byte, tracks []Track) error {
+	r := payloadReader{buf: payload}
+	n, err := r.uint16()
+	if err != nil {
+		return fmt.Errorf("SESS track_count: %w", err)
+	}
+	if int(n) != len(tracks) {
+		return fmt.Errorf("SESS track_count %d != TRKS track_count %d", n, len(tracks))
+	}
+	for i := range tracks {
+		s, err := r.uint8()
+		if err != nil {
+			return fmt.Errorf("SESS track[%d] session: %w", i, err)
+		}
+		tracks[i].Session = int(s)
+	}
+	if !r.eof() {
+		return fmt.Errorf("SESS: %d trailing bytes after %d tracks", len(payload)-r.pos, n)
+	}
+	return nil
 }
 
 // hashAlgoLen maps the on-disk algo tag to its expected digest length.

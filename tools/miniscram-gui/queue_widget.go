@@ -272,7 +272,10 @@ func queueRowSuffix(th *material.Theme, it queueItem) layout.Widget {
 			label = fmt.Sprintf("%.1fs", float64(it.DurationMs)/1000)
 			col = good
 		case qFailed:
-			label = "fail"
+			label = it.Reason
+			if label == "" {
+				label = "fail"
+			}
 			col = bad
 		case qSkipped:
 			label = it.Reason

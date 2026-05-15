@@ -49,7 +49,7 @@ func synthDiscRaw(t *testing.T, mainSectors int, writeOffsetBytes int, leadoutSe
 		LeadinLBA: disc.LeadinLBA, WriteOffsetBytes: writeOffsetBytes,
 		ScramSize: int64(len(disc.Scram)), BinFirstLBA: 0,
 		BinSectorCount: int32(mainSectors),
-		Tracks:         []Track{{Number: 1, Mode: modeStr, FirstLBA: 0}},
+		Tracks:         []Track{{Number: 1, Mode: modeStr, FirstLBA: 0, Size: int64(mainSectors) * SectorSize}},
 	}
 	return disc.Bin, disc.Scram, params
 }
@@ -193,4 +193,106 @@ func TestBuilderRefusesAtTooManyMismatches(t *testing.T) {
 	if !errors.As(err, &lme) {
 		t.Fatalf("error %v is not *LayoutMismatchError", err)
 	}
+}
+
+func TestRegionAt(t *testing.T) {
+	// Two-session disc: audio LBAs 0..199, gap 200..11599, data 11600..11649.
+	tracks := []Track{
+		{Number: 1, Session: 1, Mode: "AUDIO", FirstLBA: 0, Size: 100 * int64(SectorSize)},
+		{Number: 2, Session: 1, Mode: "AUDIO", FirstLBA: 100, Size: 100 * int64(SectorSize)},
+		{Number: 3, Session: 2, Mode: "MODE1/2352", FirstLBA: 11600, Size: 50 * int64(SectorSize)},
+	}
+	gaps := []SessionGap{
+		{StartLBA: 200, LeadoutSectors: 6750, LeadinSectors: 4500, PregapSectors: 150},
+	}
+	cases := []struct {
+		name string
+		lba  int32
+		want region
+	}{
+		{"leadin", -45150, regionLeadin},
+		{"pregap-last", -1, regionPregap},
+		{"audio-track-1-start", 0, regionBin},
+		{"audio-track-2-end", 199, regionBin},
+		{"gap-leadout-start", 200, regionGapLeadout},
+		{"gap-leadout-end", 6949, regionGapLeadout},
+		{"gap-leadin-start", 6950, regionGapLeadin},
+		{"gap-leadin-end", 11449, regionGapLeadin},
+		{"gap-pregap-start", 11450, regionGapPregap},
+		{"gap-pregap-end", 11599, regionGapPregap},
+		{"data-start", 11600, regionBin},
+		{"data-end", 11649, regionBin},
+		{"trailing-leadout", 11650, regionLeadout},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := regionAt(c.lba, tracks, gaps)
+			if got != c.want {
+				t.Fatalf("regionAt(%d) = %v; want %v", c.lba, got, c.want)
+			}
+		})
+	}
+}
+
+func TestDerivedSessionGaps(t *testing.T) {
+	t.Run("single-session-no-gaps", func(t *testing.T) {
+		tracks := []Track{
+			{Session: 1, FirstLBA: 0, Size: 100 * int64(SectorSize)},
+			{Session: 1, FirstLBA: 100, Size: 200 * int64(SectorSize)},
+		}
+		got := derivedSessionGaps(tracks)
+		if len(got) != 0 {
+			t.Fatalf("expected 0 gaps, got %v", got)
+		}
+	})
+
+	t.Run("two-session-standard-minima", func(t *testing.T) {
+		// Audio: tracks 1..2 covering LBAs 0..199. Gap of 11400 sectors.
+		// Data: track 3 at LBA 11600.
+		tracks := []Track{
+			{Session: 1, FirstLBA: 0, Size: 100 * int64(SectorSize)},
+			{Session: 1, FirstLBA: 100, Size: 100 * int64(SectorSize)},
+			{Session: 2, FirstLBA: 11600, Size: 50 * int64(SectorSize)},
+		}
+		got := derivedSessionGaps(tracks)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 gap, got %d", len(got))
+		}
+		g := got[0]
+		if g.StartLBA != 200 {
+			t.Errorf("StartLBA=%d; want 200", g.StartLBA)
+		}
+		if g.PregapSectors != 150 {
+			t.Errorf("PregapSectors=%d; want 150", g.PregapSectors)
+		}
+		if g.LeadinSectors != 4500 {
+			t.Errorf("LeadinSectors=%d; want 4500", g.LeadinSectors)
+		}
+		if g.LeadoutSectors != 11400-4500-150 {
+			t.Errorf("LeadoutSectors=%d; want %d", g.LeadoutSectors, 11400-4500-150)
+		}
+	})
+
+	t.Run("two-session-extra-slack-goes-to-leadout", func(t *testing.T) {
+		// Total gap = 13000 sectors (1600 over the minimum). Lead-in
+		// and pregap stay at the minima; lead-out absorbs the slack.
+		tracks := []Track{
+			{Session: 1, FirstLBA: 0, Size: 200 * int64(SectorSize)},
+			{Session: 2, FirstLBA: 13200, Size: 50 * int64(SectorSize)},
+		}
+		got := derivedSessionGaps(tracks)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 gap, got %d", len(got))
+		}
+		g := got[0]
+		if g.PregapSectors != 150 {
+			t.Errorf("PregapSectors=%d; want 150", g.PregapSectors)
+		}
+		if g.LeadinSectors != 4500 {
+			t.Errorf("LeadinSectors=%d; want 4500", g.LeadinSectors)
+		}
+		if g.LeadoutSectors != 13000-4500-150 {
+			t.Errorf("LeadoutSectors=%d; want %d", g.LeadoutSectors, 13000-4500-150)
+		}
+	})
 }

@@ -239,3 +239,195 @@ func buildDelta(t *testing.T, offs []uint64) []byte {
 	}
 	return buf.Bytes()
 }
+
+// SynthEnhancedCDOpts configures synthEnhancedCD.
+type SynthEnhancedCDOpts struct {
+	AudioTracks       int   // number of audio tracks in session 1 (default 3)
+	AudioSectorsEach  int32 // sectors per audio track (default 200)
+	DataSectors       int32 // sectors in the session-2 data track (default 500)
+	GapLeadoutSectors int32 // sec.1 lead-out (default 6750, redumper minimum)
+	GapLeadinSectors  int32 // sec.2 lead-in  (default 4500)
+	GapPregapSectors  int32 // sec.2 pregap   (default 150)
+	TrailingLeadout   int32 // post-disc leadout sectors (default 5)
+	WriteOffset       int   // bytes (default 0)
+}
+
+// SynthEnhancedCD is the result of synthEnhancedCD.
+type SynthEnhancedCD struct {
+	AudioBins            [][]byte
+	DataBin              []byte
+	Scram                []byte
+	Cue                  string
+	LeadinLBA            int32
+	ExpectedDataFirstLBA int32 // post-fix value; matches the actual scram layout
+	GapSectors           int32 // total inter-session gap
+}
+
+// synthEnhancedCD builds an in-memory bin/scram/cue triple modelling
+// a CD-Extra disc: N audio tracks (session 1) + REM SESSION 02 +
+// 1 data track (session 2). The scram has the inter-session gap
+// baked in (Mode 0 leadout + zero leadin + Mode 1 pregap), so a
+// correct packer must detect that gap from the scram alone.
+func synthEnhancedCD(t *testing.T, opts SynthEnhancedCDOpts) SynthEnhancedCD {
+	t.Helper()
+
+	if opts.AudioTracks == 0 {
+		opts.AudioTracks = 3
+	}
+	if opts.AudioSectorsEach == 0 {
+		opts.AudioSectorsEach = 200
+	}
+	if opts.DataSectors == 0 {
+		opts.DataSectors = 500
+	}
+	if opts.GapLeadoutSectors == 0 {
+		opts.GapLeadoutSectors = 6750
+	}
+	if opts.GapLeadinSectors == 0 {
+		opts.GapLeadinSectors = 4500
+	}
+	if opts.GapPregapSectors == 0 {
+		opts.GapPregapSectors = 150
+	}
+	if opts.TrailingLeadout == 0 {
+		opts.TrailingLeadout = 5
+	}
+
+	const (
+		leadinLBA int32 = LBALeadinStart
+		pregap          = 150
+	)
+	leadinSectors := int32(LBAPregapStart - LBALeadinStart) // 45000
+
+	// Audio bins: deterministic, non-zero, and chosen so no 12-byte
+	// run accidentally matches the scrambled-sync pattern. The Sync
+	// pattern's first byte is 0x00 and its 2..11 bytes are 0xFF;
+	// our pattern only produces 0xFF when (j*3 + a*17) % 256 == 0xFF,
+	// which can't appear 10 bytes in a row.
+	audioBins := make([][]byte, opts.AudioTracks)
+	totalAudioSectors := int32(0)
+	for a := range audioBins {
+		ab := make([]byte, int(opts.AudioSectorsEach)*SectorSize)
+		for j := range ab {
+			ab[j] = byte(j*3 + (a+1)*17)
+		}
+		audioBins[a] = ab
+		totalAudioSectors += opts.AudioSectorsEach
+	}
+
+	// Data bin: descrambled Mode 1 sectors at LBAs starting at the
+	// data track's actual FirstLBA on disc. The bin holds the
+	// descrambled bytes; the scram below scrambles them.
+	dataFirstLBA := totalAudioSectors + opts.GapLeadoutSectors + opts.GapLeadinSectors + opts.GapPregapSectors
+	dataBin := make([]byte, int(opts.DataSectors)*SectorSize)
+	for i := int32(0); i < opts.DataSectors; i++ {
+		s := dataBin[int(i)*SectorSize : (int(i)+1)*SectorSize]
+		copy(s[:SyncLen], Sync[:])
+		lba := dataFirstLBA + i
+		msf := LBAToBCDMSF(lba)
+		s[12], s[13], s[14], s[15] = msf[0], msf[1], msf[2], 0x01
+		for j := 16; j < SectorSize; j++ {
+			s[j] = byte(j * int(i+1))
+		}
+	}
+
+	// Scram layout in disc order.
+	totalScramSectors := leadinSectors + pregap + totalAudioSectors +
+		opts.GapLeadoutSectors + opts.GapLeadinSectors + opts.GapPregapSectors +
+		opts.DataSectors + opts.TrailingLeadout
+	scramLen := int64(totalScramSectors)*int64(SectorSize) + int64(opts.WriteOffset)
+	if scramLen < 0 {
+		scramLen = 0
+	}
+	scram := make([]byte, scramLen)
+
+	writeSec := func(idx int32, sec [SectorSize]byte) {
+		pos := int64(idx)*int64(SectorSize) + int64(opts.WriteOffset)
+		writeAt(scram, pos, sec[:])
+	}
+
+	idx := int32(0)
+	// Disc lead-in: zeros (already zeroed).
+	idx += leadinSectors
+	// Track-1 pregap: silent audio (zeros) because track 1 is audio.
+	idx += pregap
+	// Audio tracks: PCM as-is, no scrambling.
+	for a := range audioBins {
+		for j := int32(0); j < opts.AudioSectorsEach; j++ {
+			var sec [SectorSize]byte
+			copy(sec[:], audioBins[a][int(j)*SectorSize:(int(j)+1)*SectorSize])
+			writeSec(idx, sec)
+			idx++
+		}
+	}
+	// Session-1 lead-out: Mode 0 scrambled zero, increasing LBA.
+	for j := int32(0); j < opts.GapLeadoutSectors; j++ {
+		writeSec(idx, generateLeadoutSector(leadinLBA+idx))
+		idx++
+	}
+	// Session-2 lead-in: zeros.
+	idx += opts.GapLeadinSectors
+	// Session-2 pregap: Mode 1 scrambled zero.
+	for j := int32(0); j < opts.GapPregapSectors; j++ {
+		writeSec(idx, generateMode1ZeroSector(leadinLBA+idx))
+		idx++
+	}
+	// Data track: Scramble() applied to the bin sectors.
+	for j := int32(0); j < opts.DataSectors; j++ {
+		var sec [SectorSize]byte
+		copy(sec[:], dataBin[int(j)*SectorSize:(int(j)+1)*SectorSize])
+		Scramble(&sec)
+		writeSec(idx, sec)
+		idx++
+	}
+	// Trailing lead-out: Mode 0 scrambled zero.
+	for j := int32(0); j < opts.TrailingLeadout; j++ {
+		writeSec(idx, generateLeadoutSector(leadinLBA+idx))
+		idx++
+	}
+
+	// Cue.
+	var cue strings.Builder
+	for a := 0; a < opts.AudioTracks; a++ {
+		fmt.Fprintf(&cue, "FILE \"x (Track %d).bin\" BINARY\n  TRACK %02d AUDIO\n    INDEX 01 00:00:00\n",
+			a+1, a+1)
+	}
+	cue.WriteString("REM SESSION 02\n")
+	fmt.Fprintf(&cue, "FILE \"x (Track %d).bin\" BINARY\n  TRACK %02d MODE1/2352\n    INDEX 01 00:00:00\n",
+		opts.AudioTracks+1, opts.AudioTracks+1)
+
+	return SynthEnhancedCD{
+		AudioBins:            audioBins,
+		DataBin:              dataBin,
+		Scram:                scram,
+		Cue:                  cue.String(),
+		LeadinLBA:            leadinLBA,
+		ExpectedDataFirstLBA: dataFirstLBA,
+		GapSectors:           opts.GapLeadoutSectors + opts.GapLeadinSectors + opts.GapPregapSectors,
+	}
+}
+
+// writeEnhancedCDFixture writes the enhanced-CD bin/scram/cue files
+// into dir. Returns the cue path.
+func writeEnhancedCDFixture(t *testing.T, dir string, d SynthEnhancedCD) string {
+	t.Helper()
+	for a, ab := range d.AudioBins {
+		p := filepath.Join(dir, fmt.Sprintf("x (Track %d).bin", a+1))
+		if err := os.WriteFile(p, ab, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dataPath := filepath.Join(dir, fmt.Sprintf("x (Track %d).bin", len(d.AudioBins)+1))
+	if err := os.WriteFile(dataPath, d.DataBin, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scramPath := filepath.Join(dir, "x.scram")
+	if err := os.WriteFile(scramPath, d.Scram, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cuePath := filepath.Join(dir, "x.cue")
+	if err := os.WriteFile(cuePath, []byte(d.Cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return cuePath
+}

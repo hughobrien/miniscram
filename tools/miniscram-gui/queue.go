@@ -229,6 +229,7 @@ var packPhases = []struct {
 	// Verify (round-trip) steps, emitted by unpack.go
 	{"reading manifest", 0.96},
 	{"reading container", 0.97},
+	{"resolving bin files", 0.975},
 	{"verifying bin hashes", 0.98},
 	{"building scram prediction", 0.99},
 	{"applying delta", 0.99},
