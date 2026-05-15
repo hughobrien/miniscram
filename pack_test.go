@@ -118,13 +118,15 @@ func TestPackEnhancedCDRejectsAudioSecondSession(t *testing.T) {
 	// Build a cue where the post-REM-SESSION-02 track is AUDIO.
 	disc.Cue = ""
 	for a := 0; a < 2; a++ {
-		disc.Cue += fmt.Sprintf("FILE \"x (Track %d).bin\" BINARY\n  TRACK %02d AUDIO\n    INDEX 01 00:00:00\n",
+		disc.Cue += fmt.Sprintf("FILE \"x (Track %d).bin\" BINARY\n  TRACK %02d MODE1/2352\n    INDEX 01 00:00:00\n",
 			a+1, a+1)
 	}
 	disc.Cue += "REM SESSION 02\n"
 	disc.Cue += "FILE \"x (Track 3).bin\" BINARY\n  TRACK 03 AUDIO\n    INDEX 01 00:00:00\n"
 	// Re-truncate audio bins to match (drop the unused 3rd) and
-	// re-emit fixture files.
+	// re-emit fixture files. The session-1 bins are declared MODE1/2352
+	// in the cue; ResolveCue only stats file size, so the byte content
+	// does not need to be valid sector data for this error-path test.
 	disc.AudioBins = disc.AudioBins[:2]
 	disc.DataBin = make([]byte, 1024*int(SectorSize)) // dummy 1024-sector "track 3"
 	if err := os.WriteFile(filepath.Join(dir, "x.cue"), []byte(disc.Cue), 0o644); err != nil {

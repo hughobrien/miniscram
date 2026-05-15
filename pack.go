@@ -95,13 +95,9 @@ func Pack(opts PackOptions, r Reporter) error {
 	st.Done("%d track(s), %d bytes total", len(tracks), binSize)
 
 	// 1b. audio-only short-circuit. Pack has nothing to do when every
-	// track is AUDIO and the disc has only one session —
-	// detectWriteOffset would scan the entire scram before failing.
-	// Fail fast with a clean sentinel. Multi-session discs that lack a
-	// data first-track in session 2+ are caught later by
-	// applySessionGaps → ErrSessionFirstTrackNotData, which carries
-	// the exact track/session context needed for diagnosis.
-	if !anyDataTrack(tracks) && !hasMultipleSessions(tracks) {
+	// track is AUDIO — detectWriteOffset would scan the entire scram
+	// before failing. Fail fast with a clean sentinel.
+	if !anyDataTrack(tracks) {
 		st = r.Step("checking disc type")
 		st.Fail(ErrAudioOnlyDisc)
 		return ErrAudioOnlyDisc
