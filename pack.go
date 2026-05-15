@@ -495,10 +495,12 @@ func checkConstantOffset(scramPath string, scramSize int64, leadinLBA int32) err
 // detectSessionGap scans scram from the byte position implied by
 // naiveLBA forward, looking for the first scrambled sync whose
 // decoded MSF agrees exactly with its byte position under the
-// already-known writeOffsetBytes. Returns the gap as sectors past
-// naiveLBA. Fails with a wrapped error if no such sync is found,
-// or with ErrSessionGapOutOfRange if the detected gap is outside
-// [sessionGapMinSectors, sessionGapMaxSectors].
+// already-known writeOffsetBytes AND whose gap from naiveLBA is at
+// least sessionGapMinSectors. Syncs with a smaller gap are skipped
+// because they belong to the session-1 leadout or session-2 pregap.
+// Returns the gap as sectors past naiveLBA. Fails with a wrapped
+// error if no such sync is found, or with ErrSessionGapOutOfRange
+// if the detected gap exceeds sessionGapMaxSectors.
 func detectSessionGap(scramPath string, scramSize int64, leadinLBA int32, writeOffsetBytes int, naiveLBA int32) (int32, error) {
 	f, err := os.Open(scramPath)
 	if err != nil {
@@ -545,11 +547,15 @@ func detectSessionGap(scramPath string, scramSize int64, leadinLBA int32, writeO
 			syncOff := pos - carryLen + int64(idx)
 			if lba, ok := validateGapSync(f, syncOff, leadinLBA, writeOffsetBytes, scramSize); ok {
 				gap := lba - naiveLBA
-				if gap < sessionGapMinSectors || gap > sessionGapMaxSectors {
-					return 0, fmt.Errorf("%w: detected %d sectors past LBA %d (expected [%d, %d])",
-						ErrSessionGapOutOfRange, gap, naiveLBA, sessionGapMinSectors, sessionGapMaxSectors)
+				if gap > sessionGapMaxSectors {
+					return 0, fmt.Errorf("%w: detected %d sectors past LBA %d (max %d)",
+						ErrSessionGapOutOfRange, gap, naiveLBA, sessionGapMaxSectors)
 				}
-				return gap, nil
+				if gap >= sessionGapMinSectors {
+					return gap, nil
+				}
+				// gap < min: this sync sits inside the inter-session leadout
+				// or pregap; keep scanning forward for the real data sync.
 			}
 			searchPos = idx + 1
 		}
