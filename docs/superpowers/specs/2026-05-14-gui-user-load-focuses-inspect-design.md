@@ -69,13 +69,23 @@ All other callers of `load()` remain on `load()`:
 ### Concurrency
 
 `m.view` is currently written only from the UI goroutine (the tab
-buttons at `main.go:1171-1177`). Two of the new write sites stay on
-the UI goroutine; the third (`main.go:1190`) is inside the
-Open-button goroutine that already calls `load()` and freely
-mutates `m.path`, `m.kind`, `m.meta` from there. Adding `m.view`
-to that set introduces no new race class — the existing convention
-is that `load()` and the UI handler-loop never run concurrently
-for the same model.
+buttons at `main.go:1171-1177`). Of the three new write sites:
+
+- `main.go:1288` (sidebar row click) — always on the UI goroutine.
+- `main.go:1190` (Open button) — inside the picker goroutine spawned
+  by `go func() { p, err := pickFile(); ... }()`.
+- `queue.go:172` (post-`addPaths` load) — runs on whichever goroutine
+  called `addPaths`. Callers: drag-drop (`main.go:1128`, UI goroutine);
+  AddFiles button (`main.go:1255`, inside a `go func() { paths, err :=
+  pickFiles(); ... }()` picker goroutine); AddDir
+  (`main.go:1267`, never reaches the `.miniscram` branch because
+  directories produce only `.cue` paths via `walkForCues`).
+
+So `m.view` gains two new write goroutines: the Open picker and the
+AddFiles picker. Both already call `load()` and freely mutate `m.path`,
+`m.kind`, `m.meta` from there. Adding `m.view` to that set introduces
+no new race class — the existing convention is that `load()` and the
+UI handler-loop never run concurrently for the same model.
 
 ### Why a helper, not inlining
 
