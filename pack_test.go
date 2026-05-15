@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -53,6 +54,33 @@ func TestHashFile(t *testing.T) {
 	}
 	if _, err := hashFile("/nonexistent/path/here"); err == nil {
 		t.Fatal("expected error opening nonexistent file")
+	}
+}
+
+func TestPackEnhancedCDPlaceholder(t *testing.T) {
+	// Pre-multi-session, packing an Enhanced CD trips the 5% layout
+	// abort because ResolveCue places the session-2 data track at
+	// LBA = cumulative_audio_sectors, but on the actual scram it
+	// sits ~11400 sectors later (session lead-out + lead-in + pregap).
+	// Once Task 11 lands, this test flips to a successful round-trip.
+	dir := t.TempDir()
+	disc := synthEnhancedCD(t, SynthEnhancedCDOpts{})
+	cuePath := writeEnhancedCDFixture(t, dir, disc)
+
+	out := filepath.Join(dir, "x.miniscram")
+	err := Pack(PackOptions{
+		CuePath:    cuePath,
+		ScramPath:  filepath.Join(dir, "x.scram"),
+		OutputPath: out,
+	}, nil)
+
+	var lme *LayoutMismatchError
+	if !errors.As(err, &lme) {
+		t.Fatalf("expected *LayoutMismatchError, got %T: %v", err, err)
+	}
+	if lme.MismatchRatio <= layoutMismatchAbortRatio {
+		t.Fatalf("ratio %.4f should exceed abort threshold %.2f",
+			lme.MismatchRatio, layoutMismatchAbortRatio)
 	}
 }
 
