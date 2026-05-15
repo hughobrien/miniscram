@@ -168,9 +168,6 @@ func TestActionRunner_FailNDJSONReason(t *testing.T) {
 	if res.Error != want {
 		t.Errorf("Error = %q, want %q", res.Error, want)
 	}
-	if strings.Contains(res.Error, `{"type"`) {
-		t.Errorf("Error %q still contains raw NDJSON; prettyProgressLine should have stripped it", res.Error)
-	}
 }
 
 func TestActionRunner_Cancel(t *testing.T) {
