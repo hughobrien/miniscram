@@ -106,7 +106,7 @@ func WriteContainer(path string, m *Manifest, deltaSrc io.Reader) error {
 	if err := writeChunk(f, hashTag, encodeHASHPayload(m)); err != nil {
 		return fmt.Errorf("writing HASH: %w", err)
 	}
-	if hasAnyMultiSession(m.Tracks) {
+	if hasMultipleSessions(m.Tracks) {
 		if err := writeChunk(f, sessTag, encodeSESSPayload(m.Tracks)); err != nil {
 			return fmt.Errorf("writing SESS: %w", err)
 		}

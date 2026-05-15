@@ -165,16 +165,6 @@ func decodeTRKSPayload(payload []byte) ([]Track, error) {
 	return tracks, nil
 }
 
-// hasAnyMultiSession reports whether any track has Session > 1.
-func hasAnyMultiSession(tracks []Track) bool {
-	for _, t := range tracks {
-		if t.Session > 1 {
-			return true
-		}
-	}
-	return false
-}
-
 // encodeSESSPayload emits the SESS chunk payload: u16 track_count,
 // then one u8 session per track in TRKS order.
 func encodeSESSPayload(tracks []Track) []byte {

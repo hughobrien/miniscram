@@ -108,7 +108,7 @@ func ParseCue(r io.Reader) ([]Track, error) {
 			fields := strings.Fields(rem)
 			if len(fields) >= 2 && strings.EqualFold(fields[0], "SESSION") {
 				n, err := strconv.Atoi(fields[1])
-				if err != nil || n < 1 {
+				if err != nil || n < 1 || n > 255 {
 					return nil, fmt.Errorf("bad REM SESSION number %q", fields[1])
 				}
 				if n <= currentSession {

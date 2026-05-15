@@ -183,7 +183,7 @@ func TestSESSRoundTrip(t *testing.T) {
 		{Number: 2, Session: 1, Mode: "AUDIO", FirstLBA: 200, Size: 470400, Filename: "x (Track 2).bin"},
 		{Number: 3, Session: 2, Mode: "MODE1/2352", FirstLBA: 12000, Size: 791104608, Filename: "x (Track 3).bin"},
 	}
-	if !hasAnyMultiSession(in) {
+	if !hasMultipleSessions(in) {
 		t.Fatal("fixture must have Session > 1")
 	}
 	payload := encodeSESSPayload(in)
