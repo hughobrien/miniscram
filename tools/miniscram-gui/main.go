@@ -998,14 +998,17 @@ func main() {
 		mdl.miniscramVersion = v
 	}
 
-	if *loadPath != "" {
-		mdl.load(*loadPath)
+	mdl.queue = newQueueModel()
+
+	switch a := resolveStartupAction(*loadPath, flag.Args()); a.Kind {
+	case "dir":
+		mdl.queue.addPaths(mdl, []string{a.Path})
+	case "file":
+		mdl.load(a.Path)
 	}
 	if mdl.view == "stats" {
 		mdl.refreshStats()
 	}
-
-	mdl.queue = newQueueModel()
 
 	// Screenshot-only state injection. Same package, so direct field access.
 	if *mockRunning != "" {
