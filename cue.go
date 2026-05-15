@@ -47,6 +47,18 @@ type Track struct {
 // AUDIO tracks are not scrambled; everything else is.
 func (t Track) IsData() bool { return t.Mode != "AUDIO" }
 
+// anyDataTrack reports whether the slice contains at least one
+// non-AUDIO track. Used by Pack to short-circuit on audio-only discs
+// before any scram I/O.
+func anyDataTrack(tracks []Track) bool {
+	for _, t := range tracks {
+		if t.IsData() {
+			return true
+		}
+	}
+	return false
+}
+
 var validModes = map[string]bool{
 	"MODE1/2352": true,
 	"MODE2/2352": true,

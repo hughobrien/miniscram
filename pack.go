@@ -39,6 +39,14 @@ var (
 	// (or later) is AUDIO. Detection relies on locking onto a
 	// scrambled sync and audio has none; this case is unsupported.
 	ErrSessionFirstTrackNotData = errors.New("first track of a non-leading session must be DATA")
+
+	// ErrAudioOnlyDisc means the cuesheet has zero data tracks
+	// (every TRACK is AUDIO). Miniscram only packs scrambled data
+	// tracks; on an audio-only disc there is nothing to do, and
+	// detectWriteOffset would otherwise spin through the entire scram
+	// file before failing with "no plausible scrambled sync field
+	// found".
+	ErrAudioOnlyDisc = errors.New("cue contains only AUDIO tracks; nothing for miniscram to scramble-pack")
 )
 
 // Inter-session gap bounds. The lower bound is redumper's sum-of-
@@ -85,6 +93,19 @@ func Pack(opts PackOptions, r Reporter) error {
 	}
 	binSectors := int32(binSize / int64(SectorSize))
 	st.Done("%d track(s), %d bytes total", len(tracks), binSize)
+
+	// 1b. audio-only short-circuit. Pack has nothing to do when every
+	// track is AUDIO and the disc has only one session —
+	// detectWriteOffset would scan the entire scram before failing.
+	// Fail fast with a clean sentinel. Multi-session discs that lack a
+	// data first-track in session 2+ are caught later by
+	// applySessionGaps → ErrSessionFirstTrackNotData, which carries
+	// the exact track/session context needed for diagnosis.
+	if !anyDataTrack(tracks) && !hasMultipleSessions(tracks) {
+		st = r.Step("checking disc type")
+		st.Fail(ErrAudioOnlyDisc)
+		return ErrAudioOnlyDisc
+	}
 
 	// 2. stat scram.
 	scramInfo, err := os.Stat(opts.ScramPath)

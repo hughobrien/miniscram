@@ -153,6 +153,34 @@ func TestPackEnhancedCDRejectsAudioSecondSession(t *testing.T) {
 	}
 }
 
+// TestPackRejectsAudioOnlyCue confirms Pack short-circuits before any
+// scram I/O when every TRACK in the cue is AUDIO. ScramPath points to
+// a nonexistent file on purpose: if the early-reject ever regresses,
+// os.Stat would surface a different error and this test would still
+// fail (just with the wrong message), making the regression obvious.
+func TestPackRejectsAudioOnlyCue(t *testing.T) {
+	dir := t.TempDir()
+	cue := "FILE \"x (Track 1).bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n" +
+		"FILE \"x (Track 2).bin\" BINARY\n  TRACK 02 AUDIO\n    INDEX 01 00:00:00\n"
+	if err := os.WriteFile(filepath.Join(dir, "x.cue"), []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// ResolveCue stats each FILE; one-sector audio bins are enough.
+	for _, name := range []string{"x (Track 1).bin", "x (Track 2).bin"} {
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, SectorSize), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := Pack(PackOptions{
+		CuePath:    filepath.Join(dir, "x.cue"),
+		ScramPath:  filepath.Join(dir, "does-not-exist.scram"),
+		OutputPath: filepath.Join(dir, "x.miniscram"),
+	}, nil)
+	if !errors.Is(err, ErrAudioOnlyDisc) {
+		t.Fatalf("expected ErrAudioOnlyDisc, got %v", err)
+	}
+}
+
 func TestCompareHashes(t *testing.T) {
 	base := FileHashes{MD5: "aaa", SHA1: "bbb", SHA256: "ccc"}
 	if err := compareHashes(base, base); err != nil {
