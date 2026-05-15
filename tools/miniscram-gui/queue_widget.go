@@ -284,10 +284,22 @@ func queueRowSuffix(th *material.Theme, it queueItem) layout.Widget {
 		default:
 			return layout.Dimensions{}
 		}
-		lb := material.Label(th, unit.Sp(11), label)
+		lb := reasonLabel(th, it.State, label)
 		lb.Color = col
 		return lb.Layout(gtx)
 	}
+}
+
+// reasonLabel builds the label-style for a queue-row suffix. The
+// qFailed state forces MaxLines = 1 so long error strings (e.g.
+// "no plausible scrambled sync field found in 765077352 bytes of
+// scram") don't tower over the queue. Truncator defaults to "…".
+func reasonLabel(th *material.Theme, state queueState, label string) material.LabelStyle {
+	lb := material.Label(th, unit.Sp(11), label)
+	if state == qFailed {
+		lb.MaxLines = 1
+	}
+	return lb
 }
 
 // queueRowActionBtn renders the × (remove ready) or ⏹ (cancel running) button.
