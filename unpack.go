@@ -43,21 +43,26 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	}
 	st.Done("delta %d bytes", len(delta))
 
-	// Resolve track files relative to the container's directory.
+	st = r.Step("resolving bin files")
 	containerDir := filepath.Dir(opts.ContainerPath)
 	files := make([]ResolvedFile, len(m.Tracks))
 	for i, tr := range m.Tracks {
 		path := filepath.Join(containerDir, tr.Filename)
 		info, err := os.Stat(path)
 		if err != nil {
-			return fmt.Errorf("track %d (%s): %w", tr.Number, tr.Filename, err)
+			wrapped := fmt.Errorf("track %d (%s): %w", tr.Number, tr.Filename, err)
+			st.Fail(wrapped)
+			return wrapped
 		}
 		if info.Size() != tr.Size {
-			return fmt.Errorf("%w: track %d (%s) size on disk %d != manifest %d",
+			wrapped := fmt.Errorf("%w: track %d (%s) size on disk %d != manifest %d",
 				errBinHashMismatch, tr.Number, tr.Filename, info.Size(), tr.Size)
+			st.Fail(wrapped)
+			return wrapped
 		}
 		files[i] = ResolvedFile{Path: path, Size: tr.Size}
 	}
+	st.Done("%d track(s)", len(files))
 
 	st = r.Step("verifying bin hashes")
 	perTrack, err := hashTrackFiles(files)
