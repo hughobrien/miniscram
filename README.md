@@ -191,9 +191,10 @@ TRKS / HASH / DLTA chunks. 856 MB → 329 bytes — about 2.7 million×.
   1 and Mode 2 identically; covered by synthetic round-trip tests
   and the Final Fantasy VIII demo above (`MODE2/2352`), but no
   CD-i / VCD dataset has been exercised end-to-end yet.
-- **Audio-only discs.** The disc round-trips, but ~150 pregap
-  sectors get baked into the delta as overrides (~350 KiB extra
-  noise) because pregap is synthesised as Mode 1 zero sectors.
+- **Audio-only discs.** No real-disc fixture exercised yet, but the
+  pack path handles audio-leading layouts correctly: pregap emits
+  silent audio (zeros) rather than scrambled Mode 1 zero, matching
+  what Redumper dumps.
 
 ### Refuses or under-performs
 
@@ -204,9 +205,11 @@ TRKS / HASH / DLTA chunks. 856 MB → 329 bytes — about 2.7 million×.
   Redumper produces one TRACK per FILE; convert from DiscImageCreator
   or IsoBuster output beforehand.
 - **Modes other than `MODE1/2352`, `MODE2/2352`, `AUDIO`** — rejected.
-- **Discs with non-zero pregap or leadout** (CD+, Enhanced CDs) —
-  pregap/leadout is synthesised as zero sectors; real content becomes
-  delta overrides. Functional but inflates the delta.
+- **Discs with non-zero pregap or leadout** — pregap/leadout is
+  synthesised as zero or scrambled-zero sectors; real content
+  becomes delta overrides. Functional but inflates the delta.
+  Enhanced CDs (CD-Extra) are handled correctly — see the
+  multi-session note below.
 - **Non-zero lead-in.** Lead-in (LBAs -45150 to -150) is filled with
   zeros. SafeDisc / SecuROM dumps have non-zero lead-in data; those
   bytes flow through the delta. This is why protected-disc deltas are
@@ -216,8 +219,13 @@ TRKS / HASH / DLTA chunks. 856 MB → 329 bytes — about 2.7 million×.
 
 - **DVD / Blu-ray.** Different sector format, not addressable by
   miniscram's ECMA-130 pipeline.
-- **Multi-session CDs with non-trivial second sessions.** The cuesheet
-  parser doesn't model session boundaries.
+- **Multi-session CDs whose session 2+ first track is AUDIO.** Pack
+  rejects with `ErrSessionFirstTrackNotData`. Detection locks onto
+  the next session's first scrambled sync to measure the inter-
+  session gap; audio tracks have no scrambled sync to anchor on.
+  Two-session discs with `REM SESSION 02` followed by a DATA track
+  (the canonical CD-Extra layout) work end-to-end and round-trip
+  byte-exact.
 - **Subchannel data.** Main channel only. PSX libcrypt-class
   protection lives in subchannel and is invisible to miniscram.
   Redumper preserves it in the `*_logs.zip` it produces alongside the
