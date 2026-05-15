@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -58,30 +59,56 @@ func TestHashFile(t *testing.T) {
 	}
 }
 
-func TestPackEnhancedCDPlaceholder(t *testing.T) {
-	// Pre-multi-session, packing an Enhanced CD trips the 5% layout
-	// abort because ResolveCue places the session-2 data track at
-	// LBA = cumulative_audio_sectors, but on the actual scram it
-	// sits ~11400 sectors later (session lead-out + lead-in + pregap).
-	// Once Task 11 lands, this test flips to a successful round-trip.
+func TestPackEnhancedCDRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	disc := synthEnhancedCD(t, SynthEnhancedCDOpts{})
 	cuePath := writeEnhancedCDFixture(t, dir, disc)
+	scramPath := filepath.Join(dir, "x.scram")
+	containerPath := filepath.Join(dir, "x.miniscram")
 
-	out := filepath.Join(dir, "x.miniscram")
-	err := Pack(PackOptions{
+	// Pack succeeds: detection finds the gap, builder emits matching
+	// content for the gap region, layout-mismatch ratio stays at 0.
+	if err := Pack(PackOptions{
 		CuePath:    cuePath,
-		ScramPath:  filepath.Join(dir, "x.scram"),
-		OutputPath: out,
-	}, nil)
-
-	var lme *LayoutMismatchError
-	if !errors.As(err, &lme) {
-		t.Fatalf("expected *LayoutMismatchError, got %T: %v", err, err)
+		ScramPath:  scramPath,
+		OutputPath: containerPath,
+	}, nil); err != nil {
+		t.Fatalf("Pack: %v", err)
 	}
-	if lme.MismatchRatio <= layoutMismatchAbortRatio {
-		t.Fatalf("ratio %.4f should exceed abort threshold %.2f",
-			lme.MismatchRatio, layoutMismatchAbortRatio)
+
+	// Round-trip the container into a temp .scram and byte-compare.
+	roundtripPath := filepath.Join(dir, "x.scram.roundtrip")
+	if err := Unpack(UnpackOptions{
+		ContainerPath: containerPath,
+		OutputPath:    roundtripPath,
+	}, nil); err != nil {
+		t.Fatalf("Unpack: %v", err)
+	}
+	original, err := os.ReadFile(scramPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundtripped, err := os.ReadFile(roundtripPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(original, roundtripped) {
+		t.Fatalf("round-trip scram differs from original (len %d vs %d)",
+			len(original), len(roundtripped))
+	}
+
+	// Container should be small: bin + delta with a tiny delta because
+	// the synth scram matches our prediction sector-for-sector. Pin a
+	// generous upper bound so the test catches a regression where the
+	// delta blows up but isn't brittle against minor format changes.
+	info, err := os.Stat(containerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const maxContainerKB = 64
+	if info.Size() > maxContainerKB*1024 {
+		t.Fatalf("container size %d bytes exceeds %d KB upper bound",
+			info.Size(), maxContainerKB)
 	}
 }
 
