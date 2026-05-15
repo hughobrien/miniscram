@@ -144,9 +144,8 @@ func TestMFSTRejectsTruncated(t *testing.T) {
 
 func TestTRKSRoundTrip(t *testing.T) {
 	in := []Track{
-		{Number: 1, Session: 1, Mode: "AUDIO", FirstLBA: 0, Size: 470400, Filename: "x (Track 1).bin"},
-		{Number: 2, Session: 1, Mode: "AUDIO", FirstLBA: 200, Size: 470400, Filename: "x (Track 2).bin"},
-		{Number: 3, Session: 2, Mode: "MODE1/2352", FirstLBA: 12000, Size: 791104608, Filename: "x (Track 3).bin"},
+		{Number: 1, Mode: "MODE1/2352", FirstLBA: 0, Size: 791104608, Filename: "x.bin"},
+		{Number: 2, Mode: "AUDIO", FirstLBA: 336420, Size: 47040, Filename: "x.bin"},
 	}
 	payload := encodeTRKSPayload(in)
 	out, err := decodeTRKSPayload(payload)
@@ -159,9 +158,9 @@ func TestTRKSRoundTrip(t *testing.T) {
 	for i := range in {
 		// Hashes intentionally not compared — populated by HASH codec.
 		got, want := out[i], in[i]
-		if got.Number != want.Number || got.Session != want.Session ||
-			got.Mode != want.Mode || got.FirstLBA != want.FirstLBA ||
-			got.Size != want.Size || got.Filename != want.Filename {
+		if got.Number != want.Number || got.Mode != want.Mode ||
+			got.FirstLBA != want.FirstLBA || got.Size != want.Size ||
+			got.Filename != want.Filename {
 			t.Errorf("track %d:\ngot:  %+v\nwant: %+v", i, got, want)
 		}
 	}
@@ -174,6 +173,46 @@ func TestTRKSRejectsTruncated(t *testing.T) {
 		if err == nil {
 			t.Errorf("decoding truncated TRKS (len=%d) should fail", i)
 		}
+	}
+}
+
+func TestSESSRoundTrip(t *testing.T) {
+	// Multi-session: SESS chunk must be emitted and decode back cleanly.
+	in := []Track{
+		{Number: 1, Session: 1, Mode: "AUDIO", FirstLBA: 0, Size: 470400, Filename: "x (Track 1).bin"},
+		{Number: 2, Session: 1, Mode: "AUDIO", FirstLBA: 200, Size: 470400, Filename: "x (Track 2).bin"},
+		{Number: 3, Session: 2, Mode: "MODE1/2352", FirstLBA: 12000, Size: 791104608, Filename: "x (Track 3).bin"},
+	}
+	if !hasAnyMultiSession(in) {
+		t.Fatal("fixture must have Session > 1")
+	}
+	payload := encodeSESSPayload(in)
+	// Decode into a copy with Session zeroed to verify stamping.
+	out := make([]Track, len(in))
+	copy(out, in)
+	for i := range out {
+		out[i].Session = 0
+	}
+	if err := decodeSESSPayload(payload, out); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range in {
+		if out[i].Session != want.Session {
+			t.Errorf("track %d: got Session=%d want %d", i, out[i].Session, want.Session)
+		}
+	}
+}
+
+func TestSESSTrackCountMismatch(t *testing.T) {
+	in := []Track{
+		{Number: 1, Session: 1},
+		{Number: 2, Session: 2},
+	}
+	payload := encodeSESSPayload(in)
+	// Try decoding into a slice of wrong length.
+	out := make([]Track, 3)
+	if err := decodeSESSPayload(payload, out); err == nil {
+		t.Fatal("expected error for track count mismatch")
 	}
 }
 
