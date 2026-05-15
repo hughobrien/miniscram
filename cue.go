@@ -103,7 +103,7 @@ func ParseCue(r io.Reader) ([]Track, error) {
 		// Match REM lines case-insensitively: real cue emitters vary in
 		// capitalisation (e.g. some write "rem session 2").
 		upper := strings.ToUpper(line)
-		if upper == "REM" || strings.HasPrefix(upper, "REM ") {
+		if upper == "REM" || strings.HasPrefix(upper, "REM ") || strings.HasPrefix(upper, "REM\t") {
 			rem := strings.TrimSpace(line[3:]) // trim past "REM"/"rem"
 			fields := strings.Fields(rem)
 			if len(fields) >= 2 && strings.EqualFold(fields[0], "SESSION") {
@@ -111,8 +111,11 @@ func ParseCue(r io.Reader) ([]Track, error) {
 				if err != nil || n < 1 || n > 255 {
 					return nil, fmt.Errorf("bad REM SESSION number %q", fields[1])
 				}
-				if n <= currentSession {
-					return nil, fmt.Errorf("REM SESSION %d is not greater than current session %d", n, currentSession)
+				if n < currentSession {
+					return nil, fmt.Errorf("REM SESSION %d is less than current session %d", n, currentSession)
+				}
+				if n == currentSession {
+					continue
 				}
 				// Flush any in-progress track before the session bump so the
 				// stamp applies only to the next TRACK onward.

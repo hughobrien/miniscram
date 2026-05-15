@@ -195,6 +195,9 @@ func decodeSESSPayload(payload []byte, tracks []Track) error {
 		}
 		tracks[i].Session = int(s)
 	}
+	if !r.eof() {
+		return fmt.Errorf("SESS: %d trailing bytes after %d tracks", len(payload)-r.pos, n)
+	}
 	return nil
 }
 

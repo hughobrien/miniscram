@@ -286,18 +286,15 @@ func compareHashes(got, want FileHashes) error {
 	return errors.New(strings.Join(diffs, "; "))
 }
 
-// validateSyncCandidate reads the 3-byte MSF header at syncOff+SyncLen
-// and returns the implied write offset if all checks pass:
-//   - BCD-valid header bytes (each nibble ≤ 9 after descrambling)
-//   - decoded LBA in [leadinLBA, 500_000]
-//   - implied write offset sample-aligned (multiple of 4)
-//   - implied write offset within ±2 sectors
+// decodeBCDLBA reads the 3-byte header immediately after a sync
+// pattern at syncOff, descrambles it, validates BCD nibbles, decodes
+// the MSF to LBA, and range-checks against [leadinLBA, 500_000].
+// Returns the decoded LBA on success.
 //
-// Used by both detectWriteOffset (first valid candidate wins) and
-// checkConstantOffset (samples N candidates and asserts equality).
-//
-// Returns ok=false on any failure (bad read, BCD mismatch, etc.).
-func validateSyncCandidate(f io.ReaderAt, syncOff int64, leadinLBA int32, scramSize int64) (int, bool) {
+// Shared between validateSyncCandidate (which goes on to compute
+// the implied writeOffset) and validateGapSync (which requires the
+// implied position to match a known writeOffset exactly).
+func decodeBCDLBA(f io.ReaderAt, syncOff int64, leadinLBA int32, scramSize int64) (int32, bool) {
 	if syncOff+int64(SyncLen)+3 > scramSize {
 		return 0, false
 	}
@@ -314,6 +311,25 @@ func validateSyncCandidate(f io.ReaderAt, syncOff int64, leadinLBA int32, scramS
 	}
 	decodedLBA := BCDMSFToLBA(header)
 	if decodedLBA < leadinLBA || decodedLBA > 500_000 {
+		return 0, false
+	}
+	return decodedLBA, true
+}
+
+// validateSyncCandidate reads the 3-byte MSF header at syncOff+SyncLen
+// and returns the implied write offset if all checks pass:
+//   - BCD-valid header bytes (each nibble ≤ 9 after descrambling)
+//   - decoded LBA in [leadinLBA, 500_000]
+//   - implied write offset sample-aligned (multiple of 4)
+//   - implied write offset within ±2 sectors
+//
+// Used by both detectWriteOffset (first valid candidate wins) and
+// checkConstantOffset (samples N candidates and asserts equality).
+//
+// Returns ok=false on any failure (bad read, BCD mismatch, etc.).
+func validateSyncCandidate(f io.ReaderAt, syncOff int64, leadinLBA int32, scramSize int64) (int, bool) {
+	decodedLBA, ok := decodeBCDLBA(f, syncOff, leadinLBA, scramSize)
+	if !ok {
 		return 0, false
 	}
 	expectedAt := int64(decodedLBA-leadinLBA) * int64(SectorSize)
@@ -574,22 +590,8 @@ func detectSessionGap(scramPath string, scramSize int64, leadinLBA int32, writeO
 // at this sync must decode to *exactly* the LBA implied by the byte
 // position (no ±2 sector slop). Returns the decoded LBA on success.
 func validateGapSync(f io.ReaderAt, syncOff int64, leadinLBA int32, writeOffsetBytes int, scramSize int64) (int32, bool) {
-	if syncOff+int64(SyncLen)+3 > scramSize {
-		return 0, false
-	}
-	var header [3]byte
-	if _, err := f.ReadAt(header[:], syncOff+int64(SyncLen)); err != nil {
-		return 0, false
-	}
-	for i := 0; i < 3; i++ {
-		header[i] ^= scrambleTable[SyncLen+i]
-	}
-	isBCD := func(b byte) bool { return (b>>4) <= 9 && (b&0x0F) <= 9 }
-	if !isBCD(header[0]) || !isBCD(header[1]) || !isBCD(header[2]) {
-		return 0, false
-	}
-	decodedLBA := BCDMSFToLBA(header)
-	if decodedLBA < leadinLBA || decodedLBA > 500_000 {
+	decodedLBA, ok := decodeBCDLBA(f, syncOff, leadinLBA, scramSize)
+	if !ok {
 		return 0, false
 	}
 	expectedSyncOff := int64(decodedLBA-leadinLBA)*int64(SectorSize) + int64(writeOffsetBytes)
@@ -699,6 +701,9 @@ func countSessionBoundaries(tracks []Track) int {
 // Requires the session-N+1 first track to be DATA (its scrambled
 // sync is the lock target). Returns ErrSessionFirstTrackNotData
 // otherwise.
+//
+// On error, tracks may be left partially shifted; Pack discards the
+// slice in that case.
 func applySessionGaps(tracks []Track, scramPath string, scramSize int64, leadinLBA int32, writeOffsetBytes int) error {
 	for i := 1; i < len(tracks); i++ {
 		if tracks[i].Session <= tracks[i-1].Session {
