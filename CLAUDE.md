@@ -102,6 +102,34 @@ Theme E for an open task to expand coverage.
   in `/tmp`.
 - Commit message style: `type: terse subject`, body explains *why*
   when non-obvious. Recent log shows the convention.
+- **`gh` CLI has a classic-projects bug** against this repo: `gh
+  issue view`, `gh pr edit`, and `gh pr view --json` fail with
+  `GraphQL: Projects (classic) is being deprecated …`. Workaround:
+  use `gh api` directly (e.g. `gh api /repos/<owner>/<repo>/issues/N`,
+  `gh api -X PATCH /repos/.../pulls/N -f title=…`). Plain `gh pr
+  view N` (no `--json`) and `gh pr checks N --watch` still work.
+
+## Releases
+
+- **Tag format:** annotated `v<major>.<minor>.<patch>`, message =
+  the version string (`git tag -a v1.4.0 -m "v1.4.0"`).
+- **Tag the changelog commit**, not the merge commit. Convention is
+  to land the `CHANGELOG.md` bump as its own commit (typically via
+  a small PR like `docs: changelog entry for vX.Y.Z`), then tag.
+- **`git push origin v<x.y.z>` triggers `.github/workflows/release.yml`,**
+  which cross-builds `miniscram` (CLI + GUI) for linux-amd64 and
+  windows-amd64, computes `SHA256SUMS`, and publishes a GitHub
+  release with those three assets. Wait for the workflow to finish
+  before announcing.
+- **Semver policy:**
+  - **MAJOR** — incompatible container-format changes (e.g. removing
+    or renaming an existing chunk type, changing chunk semantics
+    that older readers would silently misinterpret).
+  - **MINOR** — new CLI flags, new GUI features, new `--progress=json`
+    event types, additive `Reporter` interface methods, new container
+    chunks that older readers reject cleanly.
+  - **PATCH** — bug fixes, doc-only changes, internal refactors, test
+    additions, performance improvements without behavior change.
 
 ## Tooling
 
