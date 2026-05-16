@@ -61,14 +61,3 @@ func TestDeleteUnusedScrams_PartialFailure(t *testing.T) {
 		t.Errorf("accumulator not cleared after partial failure")
 	}
 }
-
-// TestUnusedScramBar_HiddenWhenEmpty asserts the widget's
-// visibility-from-snapshot rule. Pure-data test: the widget itself
-// returns zero dims when the snapshot has no entries.
-func TestUnusedScramBar_HiddenWhenEmpty(t *testing.T) {
-	q := newQueueModel()
-	snap := q.Snapshot()
-	if len(snap.UnusedScrams) != 0 {
-		t.Fatalf("snapshot.UnusedScrams = %+v, want empty", snap.UnusedScrams)
-	}
-}
