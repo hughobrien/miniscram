@@ -1359,6 +1359,26 @@ func loop(w *app.Window, mdl *model) error {
 				mdl.queue.mu.Unlock()
 				mdl.runner.Cancel()
 			}
+			if qBtns.DeleteUnusedScrams.Clicked(gtx) {
+				failed := deleteUnusedScrams(mdl.queue)
+				if len(failed) > 0 {
+					total := len(failed)
+					mdl.toast = &toastState{
+						Status:    "fail",
+						FailMsg:   fmt.Sprintf("failed to delete %d unused .scram(s)", total),
+						ExpiresAt: time.Now().Add(8 * time.Second),
+					}
+				}
+				if mdl.invalidate != nil {
+					mdl.invalidate()
+				}
+			}
+			if qBtns.DismissUnusedScrams.Clicked(gtx) {
+				mdl.queue.clearUnusedScrams()
+				if mdl.invalidate != nil {
+					mdl.invalidate()
+				}
+			}
 			// Per-row click: auto-follow + row actions (× / ⏹).
 			snapForClicks := mdl.queue.Snapshot()
 			for _, it := range snapForClicks.Items {

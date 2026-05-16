@@ -26,12 +26,14 @@ import (
 // queuePanelButtons groups the panel's interactive widgets so loop() can own
 // their lifetime.
 type queuePanelButtons struct {
-	AddFiles      widget.Clickable
-	AddDir        widget.Clickable
-	DeleteScramCB widget.Bool
-	Stop          widget.Clickable
-	rowClick      map[int64]*widget.Clickable
-	rowAction     map[int64]*widget.Clickable // × for ready, ⏹ for running
+	AddFiles            widget.Clickable
+	AddDir              widget.Clickable
+	DeleteScramCB       widget.Bool
+	Stop                widget.Clickable
+	DeleteUnusedScrams  widget.Clickable
+	DismissUnusedScrams widget.Clickable
+	rowClick            map[int64]*widget.Clickable
+	rowAction           map[int64]*widget.Clickable // × for ready, ⏹ for running
 }
 
 func newQueuePanelButtons() *queuePanelButtons {
@@ -83,6 +85,7 @@ func queuePanel(th *material.Theme, snap queueSnapshot, btns *queuePanelButtons,
 					layout.Rigid(thinDivider),
 					queueItemsList(th, snap, btns, listScroll),
 					layout.Rigid(thinDivider),
+					layout.Rigid(unusedScramBar(th, snap, btns)),
 					layout.Rigid(queueStopButton(th, snap, btns)),
 				)
 			})
@@ -143,6 +146,49 @@ func queueStopButton(th *material.Theme, snap queueSnapshot, btns *queuePanelBut
 			btn.TextSize = unit.Sp(12)
 			btn.Inset = layout.Inset{Top: 6, Bottom: 6, Left: 10, Right: 10}
 			return btn.Layout(gtx)
+		})
+	}
+}
+
+// unusedScramBar renders a single button + dismiss × at the bottom
+// of the queue panel when there are accumulated unused .scram paths.
+// Click drains the accumulator (deletion handler), × clears it
+// without deleting. Returns zero dims when the accumulator is empty.
+func unusedScramBar(th *material.Theme, snap queueSnapshot, btns *queuePanelButtons) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		if len(snap.UnusedScrams) == 0 {
+			return layout.Dimensions{}
+		}
+		var total int64
+		for _, u := range snap.UnusedScrams {
+			total += u.Size
+		}
+		label := fmt.Sprintf("Delete %d unused .scram (%s)", len(snap.UnusedScrams), humanBytes(total))
+		if len(snap.UnusedScrams) != 1 {
+			label = fmt.Sprintf("Delete %d unused .scrams (%s)", len(snap.UnusedScrams), humanBytes(total))
+		}
+		return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					btn := material.Button(th, &btns.DeleteUnusedScrams, label)
+					btn.Background = mustRGB("3a1a1a")
+					btn.Color = bad
+					btn.CornerRadius = unit.Dp(4)
+					btn.TextSize = unit.Sp(12)
+					btn.Inset = layout.Inset{Top: 6, Bottom: 6, Left: 10, Right: 10}
+					return btn.Layout(gtx)
+				}),
+				layout.Rigid(spacer(6, 0)),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					btn := material.Button(th, &btns.DismissUnusedScrams, "×")
+					btn.Background = surface2
+					btn.Color = text2
+					btn.CornerRadius = unit.Dp(4)
+					btn.TextSize = unit.Sp(12)
+					btn.Inset = layout.Inset{Top: 6, Bottom: 6, Left: 10, Right: 10}
+					return btn.Layout(gtx)
+				}),
+			)
 		})
 	}
 }
