@@ -16,7 +16,8 @@ type Reporter interface {
 	// UnusedScram reports a source .scram file whose contents are
 	// useless to miniscram (today: only emitted on audio-only cues,
 	// ahead of the matching fail event). Carries the path and byte
-	// size so downstream consumers can offer cleanup.
+	// size so downstream consumers can offer cleanup. Like Info/Warn,
+	// fires outside any open step context.
 	UnusedScram(path string, size int64)
 }
 

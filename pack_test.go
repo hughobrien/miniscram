@@ -183,38 +183,29 @@ func TestPackRejectsAudioOnlyCue(t *testing.T) {
 	}
 }
 
-// capturingReporter records all calls for assertion. Implements the
-// full Reporter interface; Step returns a no-op StepHandle that
-// records Fail-with-error calls for completeness.
+// capturingReporter records UnusedScram calls so Pack tests can
+// assert on them. Other Reporter methods are no-ops (the existing
+// tests cover non-UnusedScram surfaces through other paths).
+type unusedScramCall struct {
+	Path string
+	Size int64
+}
+
 type capturingReporter struct {
-	info, warn []string
-	unused     []struct {
-		Path string
-		Size int64
-	}
-	fails []error
+	unused []unusedScramCall
 }
 
-func (c *capturingReporter) Step(label string) StepHandle {
-	return &capturingStep{c: c}
-}
-func (c *capturingReporter) Info(format string, args ...any) {
-	c.info = append(c.info, fmt.Sprintf(format, args...))
-}
-func (c *capturingReporter) Warn(format string, args ...any) {
-	c.warn = append(c.warn, fmt.Sprintf(format, args...))
-}
+func (c *capturingReporter) Step(string) StepHandle              { return noopStep{} }
+func (c *capturingReporter) Info(string, ...any)                 {}
+func (c *capturingReporter) Warn(string, ...any)                 {}
 func (c *capturingReporter) UnusedScram(path string, size int64) {
-	c.unused = append(c.unused, struct {
-		Path string
-		Size int64
-	}{path, size})
+	c.unused = append(c.unused, unusedScramCall{Path: path, Size: size})
 }
 
-type capturingStep struct{ c *capturingReporter }
+type noopStep struct{}
 
-func (s *capturingStep) Done(string, ...any) {}
-func (s *capturingStep) Fail(err error)      { s.c.fails = append(s.c.fails, err) }
+func (noopStep) Done(string, ...any) {}
+func (noopStep) Fail(error)          {}
 
 func TestPackEmitsUnusedScramEvent(t *testing.T) {
 	dir := t.TempDir()
