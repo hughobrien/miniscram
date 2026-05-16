@@ -316,3 +316,51 @@ func TestCLIProgressJSONQuietConflict(t *testing.T) {
 		t.Errorf("stderr missing 'mutually exclusive'; got:\n%s", stderr.String())
 	}
 }
+
+func TestCLIPack_RemoveUnusedScramFlagDeletesFile(t *testing.T) {
+	dir := t.TempDir()
+	cue := "FILE \"x (Track 1).bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n"
+	cuePath := filepath.Join(dir, "x.cue")
+	if err := os.WriteFile(cuePath, []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x (Track 1).bin"), make([]byte, SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scramPath := filepath.Join(dir, "x.scram")
+	if err := os.WriteFile(scramPath, []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	code := runPack([]string{"--progress=json", "--remove-unused-scram", cuePath}, &stderr)
+	if code == exitOK {
+		t.Fatalf("exit = exitOK, want non-zero for ErrAudioOnlyDisc")
+	}
+	if _, err := os.Stat(scramPath); !os.IsNotExist(err) {
+		t.Errorf("scram still exists (err=%v); want removed", err)
+	}
+}
+
+func TestCLIPack_NoFlagKeepsFile(t *testing.T) {
+	dir := t.TempDir()
+	cue := "FILE \"x (Track 1).bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n"
+	cuePath := filepath.Join(dir, "x.cue")
+	if err := os.WriteFile(cuePath, []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x (Track 1).bin"), make([]byte, SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scramPath := filepath.Join(dir, "x.scram")
+	if err := os.WriteFile(scramPath, []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	code := runPack([]string{"--progress=json", cuePath}, &stderr)
+	if code == exitOK {
+		t.Fatalf("exit = exitOK, want non-zero")
+	}
+	if _, err := os.Stat(scramPath); err != nil {
+		t.Errorf("scram missing (err=%v); want preserved without flag", err)
+	}
+}

@@ -54,6 +54,8 @@ OPTIONS:
                            default: <cue-stem>.miniscram next to <cue>.
     -f, --force            overwrite existing output.
     --keep-source          do not remove <scram> after verified pack.
+    --remove-unused-scram  remove .scram when there's nothing to pack
+                           (audio-only cues; default: keep).
     --progress=json        emit NDJSON progress events on stderr
                            (suppresses human text; for scripted consumers).
     -q, --quiet            suppress progress output.
