@@ -482,3 +482,47 @@ func TestUpdateRunningProgress(t *testing.T) {
 		t.Errorf("non-running item Fraction = %v, want 0.0", q.items[1].Fraction)
 	}
 }
+
+func TestQueue_AppendUnusedScramDedupes(t *testing.T) {
+	q := newQueueModel()
+	q.appendUnusedScram(unusedScram{Path: "/a.scram", Size: 100})
+	q.appendUnusedScram(unusedScram{Path: "/a.scram", Size: 100})
+	q.appendUnusedScram(unusedScram{Path: "/b.scram", Size: 200})
+	got := q.snapshotUnusedScrams()
+	if len(got) != 2 {
+		t.Fatalf("got %d entries, want 2", len(got))
+	}
+	if got[0].Path != "/a.scram" || got[1].Path != "/b.scram" {
+		t.Errorf("got %+v, want [/a.scram /b.scram]", got)
+	}
+}
+
+func TestQueue_ClearUnusedScrams(t *testing.T) {
+	q := newQueueModel()
+	q.appendUnusedScram(unusedScram{Path: "/a.scram", Size: 1})
+	q.appendUnusedScram(unusedScram{Path: "/b.scram", Size: 2})
+	q.clearUnusedScrams()
+	if got := q.snapshotUnusedScrams(); len(got) != 0 {
+		t.Errorf("got %d entries after clear; want 0", len(got))
+	}
+}
+
+func TestQueue_SnapshotExposesUnusedScrams(t *testing.T) {
+	q := newQueueModel()
+	q.appendUnusedScram(unusedScram{Path: "/a.scram", Size: 729})
+	snap := q.Snapshot()
+	if len(snap.UnusedScrams) != 1 || snap.UnusedScrams[0].Path != "/a.scram" {
+		t.Errorf("snapshot.UnusedScrams = %+v", snap.UnusedScrams)
+	}
+}
+
+func TestProgressEvent_ParsesUnusedScram(t *testing.T) {
+	const line = `{"type":"unused-scram","path":"/disc/x.scram","size":765077352}`
+	var ev progressEvent
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ev.Type != "unused-scram" || ev.Path != "/disc/x.scram" || ev.Size != 765077352 {
+		t.Errorf("got %+v", ev)
+	}
+}
