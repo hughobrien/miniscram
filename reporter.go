@@ -13,6 +13,12 @@ type Reporter interface {
 	Step(label string) StepHandle
 	Info(format string, args ...any)
 	Warn(format string, args ...any)
+	// UnusedScram reports a source .scram file whose contents are
+	// useless to miniscram (today: only emitted on audio-only cues,
+	// ahead of the matching fail event). Carries the path and byte
+	// size so downstream consumers can offer cleanup. Like Info/Warn,
+	// fires outside any open step context.
+	UnusedScram(path string, size int64)
 }
 
 // StepHandle is returned from Reporter.Step. Done or Fail must be
@@ -48,6 +54,10 @@ func (r *textReporter) Info(format string, args ...any) {
 
 func (r *textReporter) Warn(format string, args ...any) {
 	fmt.Fprintf(r.w, "warning: %s\n", fmt.Sprintf(format, args...))
+}
+
+func (r *textReporter) UnusedScram(path string, size int64) {
+	fmt.Fprintf(r.w, "note: unused .scram at %s (%d bytes) — pass --remove-unused-scram to delete\n", path, size)
 }
 
 type textStep struct {
@@ -97,8 +107,9 @@ type quietReporter struct{ w io.Writer }
 func (q quietReporter) Step(label string) StepHandle {
 	return quietStep{w: q.w, label: label}
 }
-func (quietReporter) Info(string, ...any) {}
-func (quietReporter) Warn(string, ...any) {}
+func (quietReporter) Info(string, ...any)       {}
+func (quietReporter) Warn(string, ...any)       {}
+func (quietReporter) UnusedScram(string, int64) {}
 
 type quietStep struct {
 	w     io.Writer
@@ -137,6 +148,8 @@ type progressEvent struct {
 	Label string `json:"label,omitempty"`
 	Msg   string `json:"msg,omitempty"`
 	Error string `json:"error,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Size  int64  `json:"size,omitempty"`
 }
 
 // jsonReporter emits one NDJSON event per Reporter API call. Used
@@ -165,6 +178,10 @@ func (r *jsonReporter) Info(format string, args ...any) {
 
 func (r *jsonReporter) Warn(format string, args ...any) {
 	_ = r.enc.Encode(progressEvent{Type: "warn", Msg: fmt.Sprintf(format, args...)})
+}
+
+func (r *jsonReporter) UnusedScram(path string, size int64) {
+	_ = r.enc.Encode(progressEvent{Type: "unused-scram", Path: path, Size: size})
 }
 
 type jsonStep struct {

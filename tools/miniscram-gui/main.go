@@ -1213,9 +1213,14 @@ func loop(w *app.Window, mdl *model) error {
 			// advance the running queue row's Fraction via lookupFraction.
 			if rs := mdl.runner.Snapshot(); rs != nil {
 				var ev progressEvent
-				if json.Unmarshal([]byte(rs.LastLine), &ev) == nil && ev.Type == "step" && ev.Label != "" {
-					if frac, ok := lookupFraction(ev.Label); ok {
-						mdl.queue.UpdateRunningProgress(ev.Label, frac)
+				if json.Unmarshal([]byte(rs.LastLine), &ev) == nil {
+					switch {
+					case ev.Type == "step" && ev.Label != "":
+						if frac, ok := lookupFraction(ev.Label); ok {
+							mdl.queue.UpdateRunningProgress(ev.Label, frac)
+						}
+					case ev.Type == "unused-scram" && ev.Path != "":
+						mdl.queue.appendUnusedScram(unusedScram{Path: ev.Path, Size: ev.Size})
 					}
 				}
 			}
@@ -1353,6 +1358,25 @@ func loop(w *app.Window, mdl *model) error {
 				mdl.queue.stopped = true
 				mdl.queue.mu.Unlock()
 				mdl.runner.Cancel()
+			}
+			if qBtns.DeleteUnusedScrams.Clicked(gtx) {
+				failed := deleteUnusedScrams(mdl.queue)
+				if len(failed) > 0 {
+					mdl.toast = &toastState{
+						Status:    "fail",
+						FailMsg:   fmt.Sprintf("could not delete %d .scram file(s) — check permissions or remove manually", len(failed)),
+						ExpiresAt: time.Now().Add(8 * time.Second),
+					}
+				}
+				if mdl.invalidate != nil {
+					mdl.invalidate()
+				}
+			}
+			if qBtns.DismissUnusedScrams.Clicked(gtx) {
+				mdl.queue.clearUnusedScrams()
+				if mdl.invalidate != nil {
+					mdl.invalidate()
+				}
 			}
 			// Per-row click: auto-follow + row actions (× / ⏹).
 			snapForClicks := mdl.queue.Snapshot()

@@ -208,7 +208,7 @@ func (r *actionRunner) wait() {
 		res.Status = "cancelled"
 	case err != nil:
 		res.Status = "fail"
-		res.Error = state.LastLine
+		res.Error = prettyProgressLine(state.LastLine)
 		if res.Error == "" {
 			res.Error = err.Error()
 		}
