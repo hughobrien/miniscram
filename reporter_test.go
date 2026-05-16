@@ -104,3 +104,47 @@ func TestJSONReporter(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestReporterUnusedScram_Text(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(&buf, false)
+	// 765077352 bytes ≈ 730 MiB — the audio CD reported in issue #50.
+	r.UnusedScram("/disc/x.scram", 765077352)
+	got := buf.String()
+	if !strings.Contains(got, "/disc/x.scram") {
+		t.Errorf("output %q missing path", got)
+	}
+	if !strings.Contains(got, "765077352") {
+		t.Errorf("output %q missing size", got)
+	}
+	if !strings.Contains(got, "--remove-unused-scram") {
+		t.Errorf("output %q missing flag hint", got)
+	}
+	if got != "" && !strings.HasSuffix(got, "\n") {
+		t.Errorf("output %q missing trailing newline", got)
+	}
+	if n := strings.Count(got, "\n"); n != 1 {
+		t.Errorf("output %q has %d newlines, want 1", got, n)
+	}
+}
+
+func TestReporterUnusedScram_Quiet(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(&buf, true)
+	// 765077352 bytes ≈ 730 MiB — the audio CD reported in issue #50.
+	r.UnusedScram("/disc/x.scram", 765077352)
+	if buf.Len() != 0 {
+		t.Errorf("quiet reporter wrote %q; want empty", buf.String())
+	}
+}
+
+func TestReporterUnusedScram_JSON(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewJSONReporter(&buf)
+	// 765077352 bytes ≈ 730 MiB — the audio CD reported in issue #50.
+	r.UnusedScram("/disc/x.scram", 765077352)
+	const want = `{"type":"unused-scram","path":"/disc/x.scram","size":765077352}` + "\n"
+	if got := buf.String(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

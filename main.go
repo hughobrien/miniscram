@@ -140,11 +140,13 @@ func requireOnePositional(stderr io.Writer, helpText string, positional []string
 
 func runPack(args []string, stderr io.Writer) int {
 	var output, outputLong string
-	var keepSource, force, forceLong bool
+	var keepSource, removeUnused, force, forceLong bool
 	positional, common, exit, ok := parseSubcommand("pack", packHelpText, args, stderr, func(fs *flag.FlagSet) {
 		fs.StringVar(&output, "o", "", "output path")
 		fs.StringVar(&outputLong, "output", "", "output path")
 		fs.BoolVar(&keepSource, "keep-source", false, "keep .scram after verified pack")
+		fs.BoolVar(&removeUnused, "remove-unused-scram", false,
+			"remove source .scram when miniscram has nothing to pack (audio-only cues)")
 		fs.BoolVar(&force, "f", false, "overwrite output")
 		fs.BoolVar(&forceLong, "force", false, "overwrite output")
 	})
@@ -178,6 +180,16 @@ func runPack(args []string, stderr io.Writer) int {
 		CuePath: cuePath, ScramPath: scramPath, OutputPath: out,
 		LeadinLBA: LBALeadinStart,
 	}, rep)
+	if errors.Is(err, ErrAudioOnlyDisc) && removeUnused {
+		switch rmErr := os.Remove(scramPath); {
+		case rmErr == nil:
+			rep.Info("removed unused source %s", scramPath)
+		case errors.Is(rmErr, os.ErrNotExist):
+			// Already gone — goal achieved, no warning needed.
+		default:
+			rep.Warn("could not remove unused source: %v", rmErr)
+		}
+	}
 	if err != nil {
 		return errToExit(err)
 	}

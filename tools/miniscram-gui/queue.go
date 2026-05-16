@@ -39,6 +39,14 @@ type queueItem struct {
 	DurationMs int64
 }
 
+// unusedScram is an entry in the queue's accumulator of .scram files
+// flagged as useless by Pack (today: audio-only cues). The GUI's
+// bottom-of-queue button drains this slice.
+type unusedScram struct {
+	Path string
+	Size int64
+}
+
 type queueModel struct {
 	mu            sync.Mutex
 	items         []queueItem
@@ -47,6 +55,7 @@ type queueModel struct {
 	stopped       bool
 	autoFollow    bool
 	workerRunning bool
+	unusedScrams  []unusedScram
 }
 
 func newQueueModel() *queueModel {
@@ -185,6 +194,8 @@ type progressEvent struct {
 	Label string `json:"label,omitempty"`
 	Msg   string `json:"msg,omitempty"`
 	Error string `json:"error,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Size  int64  `json:"size,omitempty"`
 }
 
 // prettyProgressLine renders a stderr line for human display. NDJSON
@@ -416,6 +427,7 @@ type queueSnapshot struct {
 	WorkerRunning bool
 	ReadyCount    int
 	SkippedCount  int
+	UnusedScrams  []unusedScram
 }
 
 // removeByID removes the item with the given ID from the queue.
@@ -431,6 +443,37 @@ func (q *queueModel) removeByID(id int64) {
 	}
 }
 
+// appendUnusedScram adds an entry unless the same Path is already
+// present. Safe to call from any goroutine.
+func (q *queueModel) appendUnusedScram(u unusedScram) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, x := range q.unusedScrams {
+		if x.Path == u.Path {
+			return
+		}
+	}
+	q.unusedScrams = append(q.unusedScrams, u)
+}
+
+// clearUnusedScrams drops the entire accumulator. Used after a
+// successful batch deletion or a dismiss.
+func (q *queueModel) clearUnusedScrams() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.unusedScrams = nil
+}
+
+// snapshotUnusedScrams returns a copy of the accumulator suitable for
+// the UI goroutine to iterate without the queue mutex held.
+func (q *queueModel) snapshotUnusedScrams() []unusedScram {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	cp := make([]unusedScram, len(q.unusedScrams))
+	copy(cp, q.unusedScrams)
+	return cp
+}
+
 // Snapshot builds a queueSnapshot under the mutex. Call from the UI goroutine
 // each frame; do not hold the result across frames (stale item data).
 func (q *queueModel) Snapshot() queueSnapshot {
@@ -438,10 +481,13 @@ func (q *queueModel) Snapshot() queueSnapshot {
 	defer q.mu.Unlock()
 	cp := make([]queueItem, len(q.items))
 	copy(cp, q.items)
+	us := make([]unusedScram, len(q.unusedScrams))
+	copy(us, q.unusedScrams)
 	s := queueSnapshot{
 		Items:         cp,
 		DeleteScram:   q.deleteScram,
 		WorkerRunning: q.workerRunning,
+		UnusedScrams:  us,
 	}
 	for _, it := range cp {
 		switch it.State {
