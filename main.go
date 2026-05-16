@@ -181,10 +181,13 @@ func runPack(args []string, stderr io.Writer) int {
 		LeadinLBA: LBALeadinStart,
 	}, rep)
 	if errors.Is(err, ErrAudioOnlyDisc) && removeUnused {
-		if rmErr := os.Remove(scramPath); rmErr != nil {
-			rep.Warn("could not remove unused source: %v", rmErr)
-		} else {
+		switch rmErr := os.Remove(scramPath); {
+		case rmErr == nil:
 			rep.Info("removed unused source %s", scramPath)
+		case errors.Is(rmErr, os.ErrNotExist):
+			// Already gone — goal achieved, no warning needed.
+		default:
+			rep.Warn("could not remove unused source: %v", rmErr)
 		}
 	}
 	if err != nil {

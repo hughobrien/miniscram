@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"os"
@@ -336,7 +337,7 @@ func TestCLIPack_RemoveUnusedScramFlagDeletesFile(t *testing.T) {
 	if code == exitOK {
 		t.Fatalf("exit = exitOK, want non-zero for ErrAudioOnlyDisc")
 	}
-	if _, err := os.Stat(scramPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(scramPath); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("scram still exists (err=%v); want removed", err)
 	}
 }
@@ -362,5 +363,30 @@ func TestCLIPack_NoFlagKeepsFile(t *testing.T) {
 	}
 	if _, err := os.Stat(scramPath); err != nil {
 		t.Errorf("scram missing (err=%v); want preserved without flag", err)
+	}
+}
+
+// TestCLIPack_RemoveUnusedScram_ScramAlreadyGone confirms the flag
+// is idempotent: a missing .scram is a no-op, not a warning. (Pack's
+// stat-swallow already handles the "no UnusedScram event" side; this
+// test pins the main.go Remove call's ENOENT swallow.)
+func TestCLIPack_RemoveUnusedScram_ScramAlreadyGone(t *testing.T) {
+	dir := t.TempDir()
+	cue := "FILE \"x (Track 1).bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n"
+	cuePath := filepath.Join(dir, "x.cue")
+	if err := os.WriteFile(cuePath, []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x (Track 1).bin"), make([]byte, SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Intentionally do NOT create x.scram.
+	var stderr bytes.Buffer
+	code := runPack([]string{"--progress=json", "--remove-unused-scram", cuePath}, &stderr)
+	if code == exitOK {
+		t.Fatalf("exit = exitOK, want non-zero")
+	}
+	if strings.Contains(stderr.String(), "could not remove unused source") {
+		t.Errorf("stderr contains warning about missing scram; should be silent: %q", stderr.String())
 	}
 }
