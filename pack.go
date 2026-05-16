@@ -96,8 +96,13 @@ func Pack(opts PackOptions, r Reporter) error {
 
 	// 1b. audio-only short-circuit. Pack has nothing to do when every
 	// track is AUDIO — detectWriteOffset would scan the entire scram
-	// before failing. Fail fast with a clean sentinel.
+	// before failing. Fail fast with a clean sentinel. Stat the scram
+	// first so the reporter can hint at cleanup; stat failure is
+	// swallowed (the reject still fires, just without the hint).
 	if !anyDataTrack(tracks) {
+		if info, err := os.Stat(opts.ScramPath); err == nil {
+			r.UnusedScram(opts.ScramPath, info.Size())
+		}
 		st = r.Step("checking disc type")
 		st.Fail(ErrAudioOnlyDisc)
 		return ErrAudioOnlyDisc

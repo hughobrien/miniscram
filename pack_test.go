@@ -183,6 +183,96 @@ func TestPackRejectsAudioOnlyCue(t *testing.T) {
 	}
 }
 
+// capturingReporter records all calls for assertion. Implements the
+// full Reporter interface; Step returns a no-op StepHandle that
+// records Fail-with-error calls for completeness.
+type capturingReporter struct {
+	info, warn []string
+	unused     []struct {
+		Path string
+		Size int64
+	}
+	fails []error
+}
+
+func (c *capturingReporter) Step(label string) StepHandle {
+	return &capturingStep{c: c}
+}
+func (c *capturingReporter) Info(format string, args ...any) {
+	c.info = append(c.info, fmt.Sprintf(format, args...))
+}
+func (c *capturingReporter) Warn(format string, args ...any) {
+	c.warn = append(c.warn, fmt.Sprintf(format, args...))
+}
+func (c *capturingReporter) UnusedScram(path string, size int64) {
+	c.unused = append(c.unused, struct {
+		Path string
+		Size int64
+	}{path, size})
+}
+
+type capturingStep struct{ c *capturingReporter }
+
+func (s *capturingStep) Done(string, ...any) {}
+func (s *capturingStep) Fail(err error)      { s.c.fails = append(s.c.fails, err) }
+
+func TestPackEmitsUnusedScramEvent(t *testing.T) {
+	dir := t.TempDir()
+	cue := "FILE \"x (Track 1).bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n"
+	if err := os.WriteFile(filepath.Join(dir, "x.cue"), []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x (Track 1).bin"), make([]byte, SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const scramPayload = "junk-scram-content"
+	scramPath := filepath.Join(dir, "x.scram")
+	if err := os.WriteFile(scramPath, []byte(scramPayload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cap := &capturingReporter{}
+	err := Pack(PackOptions{
+		CuePath:    filepath.Join(dir, "x.cue"),
+		ScramPath:  scramPath,
+		OutputPath: filepath.Join(dir, "x.miniscram"),
+	}, cap)
+	if !errors.Is(err, ErrAudioOnlyDisc) {
+		t.Fatalf("expected ErrAudioOnlyDisc, got %v", err)
+	}
+	if len(cap.unused) != 1 {
+		t.Fatalf("got %d UnusedScram calls, want 1", len(cap.unused))
+	}
+	if cap.unused[0].Path != scramPath {
+		t.Errorf("path = %q, want %q", cap.unused[0].Path, scramPath)
+	}
+	if cap.unused[0].Size != int64(len(scramPayload)) {
+		t.Errorf("size = %d, want %d", cap.unused[0].Size, int64(len(scramPayload)))
+	}
+}
+
+func TestPackUnusedScramStatFailureIsSwallowed(t *testing.T) {
+	dir := t.TempDir()
+	cue := "FILE \"x (Track 1).bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n"
+	if err := os.WriteFile(filepath.Join(dir, "x.cue"), []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x (Track 1).bin"), make([]byte, SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cap := &capturingReporter{}
+	err := Pack(PackOptions{
+		CuePath:    filepath.Join(dir, "x.cue"),
+		ScramPath:  filepath.Join(dir, "does-not-exist.scram"),
+		OutputPath: filepath.Join(dir, "x.miniscram"),
+	}, cap)
+	if !errors.Is(err, ErrAudioOnlyDisc) {
+		t.Fatalf("expected ErrAudioOnlyDisc, got %v", err)
+	}
+	if len(cap.unused) != 0 {
+		t.Errorf("got %d UnusedScram calls, want 0 (scram missing)", len(cap.unused))
+	}
+}
+
 func TestCompareHashes(t *testing.T) {
 	base := FileHashes{MD5: "aaa", SHA1: "bbb", SHA256: "ccc"}
 	if err := compareHashes(base, base); err != nil {
