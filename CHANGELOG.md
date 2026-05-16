@@ -4,6 +4,40 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-05-16
+
+### Added
+
+- **`--remove-unused-scram` flag on `miniscram pack`.** Opt-in (default
+  keep). When set, removes the source `.scram` after Pack rejects an
+  audio-only cue. Idempotent — ENOENT is silently swallowed. Inverse
+  default vs. `--keep-source`: the success path is recoverable from
+  the container, the audio-only reject is not.
+- **GUI batch-cleanup button.** A bottom-of-queue red "Delete N unused
+  .scrams (X MiB)" button appears whenever the queue has accumulated
+  one or more audio-only rejects, draining them all on one click.
+  Dismiss with `×` to leave the files on disk. Accumulator persists
+  across queue runs in the session; deduped by path.
+- **`Reporter.UnusedScram(path, size)` event.** Emitted by `Pack`
+  before the audio-only fail, carrying the source `.scram` path and
+  byte size. Text reporter prints a one-line `--remove-unused-scram`
+  hint; JSON reporter emits `{"type":"unused-scram","path":...,"size":...}`.
+
+### Fixed
+
+- **Audio-only cuesheets fail fast** (#50). Pack now rejects audio-only
+  cues at the top with `ErrAudioOnlyDisc` instead of letting
+  `detectWriteOffset` scan the entire `.scram` (~750 MB+ for a typical
+  audio CD) before failing with a cryptic "no plausible scrambled
+  sync field found" message. Exits in under a second with a clear
+  message.
+- **GUI no longer renders raw NDJSON** in the failure toast and queue
+  sidebar (#50). The runner's `actionResult.Error` now passes through
+  `prettyProgressLine` so users see the human-readable error string
+  instead of `{"type":"fail","label":"...","error":"..."}`. Sidebar
+  failed-rows also cap at one line with ellipsis to keep the queue
+  visually tidy when several rows fail.
+
 ## [1.3.0] - 2026-05-15
 
 ### Added
