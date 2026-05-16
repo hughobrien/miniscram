@@ -488,12 +488,16 @@ func TestQueue_AppendUnusedScramDedupes(t *testing.T) {
 	q.appendUnusedScram(unusedScram{Path: "/a.scram", Size: 100})
 	q.appendUnusedScram(unusedScram{Path: "/a.scram", Size: 100})
 	q.appendUnusedScram(unusedScram{Path: "/b.scram", Size: 200})
+	q.appendUnusedScram(unusedScram{Path: "/a.scram", Size: 999}) // path collision wins; first observation kept.
 	got := q.snapshotUnusedScrams()
 	if len(got) != 2 {
 		t.Fatalf("got %d entries, want 2", len(got))
 	}
 	if got[0].Path != "/a.scram" || got[1].Path != "/b.scram" {
 		t.Errorf("got %+v, want [/a.scram /b.scram]", got)
+	}
+	if got[0].Size != 100 {
+		t.Errorf("got[0].Size = %d, want 100 (first-observation-wins on path collision)", got[0].Size)
 	}
 }
 
