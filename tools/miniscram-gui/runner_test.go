@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -86,6 +87,13 @@ func TestMain(m *testing.M) {
 		// via Reporter.Fail when --progress=json is in effect.
 		fmt.Fprintln(os.Stderr, `{"type":"step","label":"detecting write offset"}`)
 		fmt.Fprintln(os.Stderr, `{"type":"fail","label":"detecting write offset","error":"no plausible scrambled sync field found in 765077352 bytes of scram"}`)
+		os.Exit(1)
+	case "json_scram":
+		// Emit an unused-scram event then a fail event, mirroring what
+		// pack.go writes when it hits the audio-only short-circuit.
+		fmt.Fprintln(os.Stderr, `{"type":"unused-scram","path":"/disc/x.scram","size":765077352}`)
+		time.Sleep(50 * time.Millisecond)
+		fmt.Fprintln(os.Stderr, `{"type":"fail","label":"checking disc type","error":"cue contains only AUDIO tracks; nothing for miniscram to scramble-pack"}`)
 		os.Exit(1)
 	default:
 		fmt.Fprintln(os.Stderr, "unknown FAKE_MODE")
@@ -169,6 +177,49 @@ func TestActionRunner_FailNDJSONReason(t *testing.T) {
 		t.Errorf("Error = %q, want %q", res.Error, want)
 	}
 }
+
+// TestActionRunner_OnUnusedScramCallback confirms that onUnusedScram
+// is called from readStderr when the subprocess emits an unused-scram
+// NDJSON event, even though a subsequent fail event overwrites LastLine
+// before FrameEvent can inspect it.
+func TestActionRunner_OnUnusedScramCallback(t *testing.T) {
+	r, done := newTestRunner(t, "json_scram")
+
+	var (
+		mu    sync.Mutex
+		calls []unusedScram
+	)
+	r.onUnusedScram = func(path string, size int64) {
+		mu.Lock()
+		calls = append(calls, unusedScram{Path: path, Size: size})
+		mu.Unlock()
+	}
+
+	if err := r.Start("pack", "/in/disc.cue", "/out/disc.miniscram"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	res := waitFor(t, done, 3*time.Second)
+	if res.Status != "fail" {
+		t.Errorf("status = %q, want fail", res.Status)
+	}
+
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+
+	if len(got) != 1 {
+		t.Fatalf("onUnusedScram called %d time(s), want 1", len(got))
+	}
+	if got[0].Path != "/disc/x.scram" {
+		t.Errorf("path = %q, want /disc/x.scram", got[0].Path)
+	}
+	if got[0].Size != 765077352 {
+		t.Errorf("size = %d, want 765077352", got[0].Size)
+	}
+}
+
+
 
 // TestActionRunner_JSONHappy exercises the success path under
 // --progress=json. The fake emits step/done pairs for every known
