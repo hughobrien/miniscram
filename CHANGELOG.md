@@ -4,6 +4,24 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-05-17
+
+### Fixed
+
+- **GUI queue-row error text wraps instead of truncating** (#54). The
+  `reasonLabel` helper replaced `MaxLines=1` with `WrapPolicy=WrapGraphemes`
+  so messages like "cue contains only AUDIO tracks; nothing for miniscram
+  to scramble-pack" wrap at character boundaries instead of being cut off
+  with ellipsis.
+- **GUI "Delete N unused .scrams" button now reliably appears** after
+  audio-only pack failures (#54). The `unused-scram` NDJSON event is now
+  dispatched directly from the `readStderr` goroutine via an
+  `onUnusedScram` callback, bypassing a Gio frame-coalescing race that
+  previously dropped the event when a `fail` event arrived immediately
+  after and overwrote `state.LastLine`.
+- **Delete button label now reads "(audio)"** to clarify that these are
+  audio-track scrams safe to remove.
+
 ## [1.4.0] - 2026-05-16
 
 ### Added
