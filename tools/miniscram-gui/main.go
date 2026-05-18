@@ -999,6 +999,9 @@ func main() {
 	}
 
 	mdl.queue = newQueueModel()
+	mdl.runner.onUnusedScram = func(path string, size int64) {
+		mdl.queue.appendUnusedScram(unusedScram{Path: path, Size: size})
+	}
 
 	switch a := resolveStartupAction(*loadPath, flag.Args()); a.Kind {
 	case "dir":
@@ -1214,13 +1217,10 @@ func loop(w *app.Window, mdl *model) error {
 			if rs := mdl.runner.Snapshot(); rs != nil {
 				var ev progressEvent
 				if json.Unmarshal([]byte(rs.LastLine), &ev) == nil {
-					switch {
-					case ev.Type == "step" && ev.Label != "":
+					if ev.Type == "step" && ev.Label != "" {
 						if frac, ok := lookupFraction(ev.Label); ok {
 							mdl.queue.UpdateRunningProgress(ev.Label, frac)
 						}
-					case ev.Type == "unused-scram" && ev.Path != "":
-						mdl.queue.appendUnusedScram(unusedScram{Path: ev.Path, Size: ev.Size})
 					}
 				}
 			}

@@ -6,15 +6,16 @@ import (
 	"gioui.org/widget/material"
 )
 
-// TestReasonLabel_FailedSingleLine confirms qFailed reasons render as
-// a single line with the default truncator. Without this cap, error
-// strings wrap multi-line and tower over the queue (see issue #50).
-func TestReasonLabel_FailedSingleLine(t *testing.T) {
+// TestReasonLabel_FailedCapped confirms qFailed reasons are capped
+// at two lines. A single line hides too much of many real error texts
+// (e.g. "cue contains only AUDIO tracks; nothing for miniscram to
+// scramble-pack"); unlimited lines would tower over the queue (issue #50).
+func TestReasonLabel_FailedCapped(t *testing.T) {
 	th := material.NewTheme()
 	long := "no plausible scrambled sync field found in 765077352 bytes of scram"
 	lb := reasonLabel(th, qFailed, long)
-	if lb.MaxLines != 1 {
-		t.Errorf("reasonLabel(qFailed).MaxLines = %d, want 1", lb.MaxLines)
+	if lb.MaxLines != 2 {
+		t.Errorf("reasonLabel(qFailed).MaxLines = %d, want 2", lb.MaxLines)
 	}
 }
 

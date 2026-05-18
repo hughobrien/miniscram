@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -45,6 +46,14 @@ type actionRunner struct {
 	state      *runningState
 	done       chan actionResult // buffered; drained by the UI loop
 	invalidate func()
+
+	// onUnusedScram is called from the readStderr goroutine (not the
+	// UI goroutine) whenever a {"type":"unused-scram",...} NDJSON
+	// event arrives from the subprocess. This avoids the Gio frame-
+	// coalescing race that would otherwise drop the event when a
+	// "fail" event arrives immediately after and overwrites LastLine
+	// before the FrameEvent loop can inspect it.
+	onUnusedScram func(path string, size int64)
 }
 
 func newActionRunner(invalidate func()) *actionRunner {
@@ -175,6 +184,19 @@ func (r *actionRunner) readStderr(stderr io.ReadCloser) {
 			r.state.LastLine = line
 		}
 		r.mu.Unlock()
+
+		// Fire onUnusedScram directly from this goroutine before
+		// invalidating. Gio coalesces consecutive invalidate() calls
+		// into one frame, so a "fail" event arriving immediately
+		// after an "unused-scram" event would overwrite LastLine
+		// before the FrameEvent loop reads it. Dispatching here
+		// guarantees the unused-scram notification is never dropped.
+		if r.onUnusedScram != nil && len(line) > 0 && line[0] == '{' {
+			var ev progressEvent
+			if json.Unmarshal([]byte(line), &ev) == nil && ev.Type == "unused-scram" && ev.Path != "" {
+				r.onUnusedScram(ev.Path, ev.Size)
+			}
+		}
 		if r.invalidate != nil {
 			r.invalidate()
 		}

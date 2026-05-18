@@ -163,9 +163,9 @@ func unusedScramBar(th *material.Theme, snap queueSnapshot, btns *queuePanelButt
 		for _, u := range snap.UnusedScrams {
 			total += u.Size
 		}
-		label := fmt.Sprintf("Delete %d unused .scram (%s)", len(snap.UnusedScrams), humanBytes(total))
+		label := fmt.Sprintf("Delete %d .scram (%s)", len(snap.UnusedScrams), humanBytes(total))
 		if len(snap.UnusedScrams) != 1 {
-			label = fmt.Sprintf("Delete %d unused .scrams (%s)", len(snap.UnusedScrams), humanBytes(total))
+			label = fmt.Sprintf("Delete %d .scrams (%s)", len(snap.UnusedScrams), humanBytes(total))
 		}
 		return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
@@ -337,13 +337,14 @@ func queueRowSuffix(th *material.Theme, it queueItem) layout.Widget {
 }
 
 // reasonLabel builds the label-style for a queue-row suffix. The
-// qFailed state forces MaxLines = 1 so long error strings (e.g.
-// "no plausible scrambled sync field found in 765077352 bytes of
-// scram") don't tower over the queue. Truncator defaults to "…".
+// qFailed state caps at MaxLines=2 — one line hides too much of
+// the error (e.g. "cue contains only AUDIO tracks; nothing for
+// miniscram to scramble-pack") and unlimited lines would tower
+// over the queue on pathological stderr. Truncator defaults to "…".
 func reasonLabel(th *material.Theme, state queueState, label string) material.LabelStyle {
 	lb := material.Label(th, unit.Sp(11), label)
 	if state == qFailed {
-		lb.MaxLines = 1
+		lb.MaxLines = 2
 	}
 	return lb
 }
