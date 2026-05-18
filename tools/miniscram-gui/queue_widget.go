@@ -163,9 +163,9 @@ func unusedScramBar(th *material.Theme, snap queueSnapshot, btns *queuePanelButt
 		for _, u := range snap.UnusedScrams {
 			total += u.Size
 		}
-		label := fmt.Sprintf("Delete %d unused .scram (%s)", len(snap.UnusedScrams), humanBytes(total))
+		label := fmt.Sprintf("Delete %d unused .scram (audio, %s)", len(snap.UnusedScrams), humanBytes(total))
 		if len(snap.UnusedScrams) != 1 {
-			label = fmt.Sprintf("Delete %d unused .scrams (%s)", len(snap.UnusedScrams), humanBytes(total))
+			label = fmt.Sprintf("Delete %d unused .scrams (audio, %s)", len(snap.UnusedScrams), humanBytes(total))
 		}
 		return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
@@ -343,7 +343,7 @@ func queueRowSuffix(th *material.Theme, it queueItem) layout.Widget {
 func reasonLabel(th *material.Theme, state queueState, label string) material.LabelStyle {
 	lb := material.Label(th, unit.Sp(11), label)
 	if state == qFailed {
-		lb.MaxLines = 1
+		lb.WrapPolicy = text.WrapGraphemes
 	}
 	return lb
 }
