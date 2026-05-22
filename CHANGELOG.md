@@ -28,6 +28,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (#57). The screenshot/mock queue fixture now covers an audio-only failure
   among successful files, and failed rows render the reason in a tighter
   two-line layout instead of expanding far beyond the text.
+- **Audio `.scram` cleanup feedback is clearer** (#62). Successful cleanup
+  removes the callout and shows a deleted-count toast; partial failures keep
+  only the files that still need attention.
 
 ## [1.4.1] - 2026-05-17
 
