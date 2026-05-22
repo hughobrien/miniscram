@@ -147,6 +147,9 @@ func redumpPut(db *sql.DB, hash, authMode string, e *redumpEntry) {
 	if db == nil || e == nil {
 		return
 	}
+	if e.State == "err" {
+		return
+	}
 	_, _ = db.Exec(`
 		INSERT INTO redump_cache_v2 (hash, auth_mode, state, url, title, checked_unix)
 		VALUES (?, ?, ?, ?, ?, ?)

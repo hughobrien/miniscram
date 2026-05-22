@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -290,24 +289,9 @@ type cueTrack struct {
 	state string
 }
 
-// ---------------- redump lookup ----------------
-
-type redumpEntry struct {
-	State       string `json:"state"` // "found" | "miss" | "err" | "pending"
-	URL         string `json:"url,omitempty"`
-	Title       string `json:"title,omitempty"`
-	CheckedUnix int64  `json:"checked_unix"`
-}
-
-var titleRe = regexp.MustCompile(`<title>redump\.org\s*&bull;\s*([^<]+?)\s*</title>`)
-
 // dropTag is the unique event tag used to register the window as a
 // drag-and-drop target for text/uri-list payloads.
 var dropTag = new(int)
-
-func redumpFetch(hash string) *redumpEntry {
-	return newRedumpClient("http://forum.redump.org", "http://redump.org").Fetch(hash)
-}
 
 // ---------------- model ----------------
 
@@ -355,12 +339,12 @@ type model struct {
 	cliErr          string
 	cliBannerHidden bool // user dismissed the banner
 
-	redump     map[string]*redumpEntry
-	redumpMu   sync.Mutex
-	invalidate func()
+	redump       map[string]*redumpEntry
+	redumpMu     sync.Mutex
+	redumpLookup *redumpLookupService
+	invalidate   func()
 
 	redumpUsername string
-	redumpPassword string
 	redumpStatus   string
 
 	stats       statsAgg
@@ -476,63 +460,6 @@ func (m *model) load(p string) {
 func (m *model) loadAndFocus(p string) {
 	m.view = "file"
 	m.load(p)
-}
-
-func (m *model) lookup(hashes []string) {
-	auth, hasAuth := redumpAuthGet(m.db)
-	authMode := "anon"
-	if hasAuth {
-		authMode = "auth"
-	}
-	var (
-		authClient     *redumpClient
-		authLoginErr   error
-		authLoginTried bool
-	)
-	for _, h := range hashes {
-		// disk cache first
-		if e, ok := redumpGet(m.db, h, authMode); ok {
-			m.redumpMu.Lock()
-			m.redump[h] = e
-			m.redumpMu.Unlock()
-			if m.invalidate != nil {
-				m.invalidate()
-			}
-			continue
-		}
-		m.redumpMu.Lock()
-		if existing, ok := m.redump[h]; ok && existing != nil && existing.State != "" && existing.State != "pending" {
-			m.redumpMu.Unlock()
-			continue
-		}
-		m.redump[h] = &redumpEntry{State: "pending"}
-		m.redumpMu.Unlock()
-		if m.invalidate != nil {
-			m.invalidate()
-		}
-		var e *redumpEntry
-		if hasAuth {
-			if !authLoginTried {
-				authClient = newRedumpClient("http://forum.redump.org", "http://redump.org")
-				authLoginErr = authClient.Login(auth.Username, auth.Password)
-				authLoginTried = true
-			}
-			if authLoginErr != nil {
-				e = &redumpEntry{State: "err", CheckedUnix: time.Now().Unix()}
-			} else {
-				e = authClient.Fetch(h)
-			}
-		} else {
-			e = redumpFetch(h)
-		}
-		redumpPut(m.db, h, authMode, e)
-		m.redumpMu.Lock()
-		m.redump[h] = e
-		m.redumpMu.Unlock()
-		if m.invalidate != nil {
-			m.invalidate()
-		}
-	}
 }
 
 func (m *model) refreshStats() {
@@ -1012,7 +939,6 @@ func main() {
 	}
 	if auth, ok := redumpAuthGet(mdl.db); ok {
 		mdl.redumpUsername = auth.Username
-		mdl.redumpPassword = auth.Password
 		mdl.redumpStatus = "Saved"
 	} else {
 		mdl.redumpStatus = "Not configured"
@@ -1129,11 +1055,7 @@ func loop(w *app.Window, mdl *model) error {
 	)
 	_ = mockHoverCB
 	listScroll.Axis = layout.Vertical
-	redumpUserEditor.SingleLine = true
-	redumpPassEditor.SingleLine = true
-	redumpPassEditor.Mask = '*'
-	redumpUserEditor.SetText(mdl.redumpUsername)
-	redumpPassEditor.SetText(mdl.redumpPassword)
+	initRedumpEditors(mdl, &redumpUserEditor, &redumpPassEditor)
 
 	qBtns := newQueuePanelButtons()
 	qBtns.DeleteScramCB.Value = true // mirror queue-level default (deleteScram: true)
@@ -1256,26 +1178,37 @@ func loop(w *app.Window, mdl *model) error {
 			if redumpSaveBtn.Clicked(gtx) {
 				u := strings.TrimSpace(redumpUserEditor.Text())
 				p := redumpPassEditor.Text()
+				if p == "" {
+					if auth, ok := redumpAuthGet(mdl.db); ok && auth.Username == u {
+						p = auth.Password
+					}
+				}
 				if u == "" || p == "" {
 					mdl.redumpStatus = "Username and password required"
 				} else {
 					redumpAuthPut(mdl.db, u, p)
 					mdl.redumpUsername = u
-					mdl.redumpPassword = p
+					redumpPassEditor.SetText("")
+					mdl.clearRedumpMemory()
 					mdl.redumpStatus = "Saved"
 				}
 			}
 			if redumpClearBtn.Clicked(gtx) {
 				redumpAuthClear(mdl.db)
 				mdl.redumpUsername = ""
-				mdl.redumpPassword = ""
 				redumpUserEditor.SetText("")
 				redumpPassEditor.SetText("")
+				mdl.clearRedumpMemory()
 				mdl.redumpStatus = "Not configured"
 			}
 			if redumpTestBtn.Clicked(gtx) {
 				u := strings.TrimSpace(redumpUserEditor.Text())
 				p := redumpPassEditor.Text()
+				if p == "" {
+					if auth, ok := redumpAuthGet(mdl.db); ok && auth.Username == u {
+						p = auth.Password
+					}
+				}
 				if u == "" || p == "" {
 					mdl.redumpStatus = "Username and password required"
 				} else if err := newRedumpClient("http://forum.redump.org", "http://redump.org").Login(u, p); err != nil {
@@ -2123,7 +2056,7 @@ func tracksCard(th *material.Theme, mdl *model,
 					var entry *redumpEntry
 					if algo == "sha1" {
 						mdl.redumpMu.Lock()
-						entry = mdl.redump[v]
+						entry = mdl.redump[redumpCacheKey(v, redumpAuthMode(mdl.db))]
 						mdl.redumpMu.Unlock()
 					}
 					children = append(children, layout.Rigid(hashSubRow(th, algo, v, entry,
@@ -2292,9 +2225,10 @@ func cueTracksCard(th *material.Theme, mdl *model,
 		// Snapshot the relevant redump entries too so the lock is held
 		// briefly and the layout can read freely from local state.
 		entries := make(map[string]*redumpEntry, len(snap))
+		authMode := redumpAuthMode(mdl.db)
 		for _, ct := range snap {
 			if h := ct.hashes["sha1"]; h != "" {
-				entries[h] = mdl.redump[h]
+				entries[h] = mdl.redump[redumpCacheKey(h, authMode)]
 			}
 		}
 		mdl.redumpMu.Unlock()
