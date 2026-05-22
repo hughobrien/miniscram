@@ -12,7 +12,9 @@ own `go.mod` (matching the pattern of `scripts/sweep`) so the main
   stat tiles, tracks table with per-track hashes and a Copy button.
 - Looks each track's SHA-1 up at redump.org (`/discs/quicksearch/<hash>/`)
   with a User-Agent identifying the GUI, and turns the row green
-  with an "Open ↗" link when matched. Cached per-hash in SQLite.
+  with an "Open ↗" link when matched. The Redump tab can store
+  credentials in the local SQLite database so lookups run as an
+  authenticated Redump user.
 - For cuesheets: shows referenced bin sizes and warns if any are
   missing or if the sibling `.scram` is absent.
 - Records every pack/unpack/verify (success, fail, or cancelled) in
@@ -53,6 +55,7 @@ for the apt list).
 | What                          | Where                                                |
 |-------------------------------|------------------------------------------------------|
 | Redump cache + history events | `$XDG_DATA_HOME/miniscram-gui/db.sqlite`             |
+| Redump credentials            | `$XDG_DATA_HOME/miniscram-gui/db.sqlite` (`redump_auth`, plaintext) |
 
 ## Flags
 

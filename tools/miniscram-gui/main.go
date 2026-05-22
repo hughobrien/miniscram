@@ -15,7 +15,6 @@ import (
 	"image/color"
 	"io"
 	"math"
-	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -307,30 +306,7 @@ var titleRe = regexp.MustCompile(`<title>redump\.org\s*&bull;\s*([^<]+?)\s*</tit
 var dropTag = new(int)
 
 func redumpFetch(hash string) *redumpEntry {
-	now := time.Now().Unix()
-	req, err := http.NewRequest("GET", "http://redump.org/discs/quicksearch/"+url.PathEscape(hash)+"/", nil)
-	if err != nil {
-		return &redumpEntry{State: "err", CheckedUnix: now}
-	}
-	req.Header.Set("User-Agent", userAgent)
-	cli := &http.Client{Timeout: 15 * time.Second}
-	resp, err := cli.Do(req)
-	if err != nil {
-		return &redumpEntry{State: "err", CheckedUnix: now}
-	}
-	defer resp.Body.Close()
-	final := resp.Request.URL.String()
-	if !strings.Contains(final, "/disc/") {
-		return &redumpEntry{State: "miss", CheckedUnix: now}
-	}
-	body, _ := io.ReadAll(resp.Body)
-	title := ""
-	if m := titleRe.FindStringSubmatch(string(body)); len(m) > 1 {
-		t := strings.TrimSpace(m[1])
-		t = strings.SplitN(t, "&bull;", 2)[0]
-		title = strings.TrimSpace(t)
-	}
-	return &redumpEntry{State: "found", URL: final, Title: title, CheckedUnix: now}
+	return newRedumpClient("http://forum.redump.org", "http://redump.org").Fetch(hash)
 }
 
 // ---------------- model ----------------
@@ -352,7 +328,7 @@ func (m *model) getDeleteBtn(id int64) *widget.Clickable {
 type model struct {
 	db *sql.DB
 
-	view string // "file" | "stats"
+	view string // "file" | "stats" | "redump"
 
 	path     string
 	basename string
@@ -374,14 +350,18 @@ type model struct {
 	// invoke (next to miniscram-gui, two dirs up, or the bare name for
 	// PATH lookup) — surfaced in the banner so the user knows where the
 	// GUI looked. cliErr is the probe's error message, also surfaced.
-	cliMissing  bool
-	cliBinary   string
-	cliErr      string
+	cliMissing      bool
+	cliBinary       string
+	cliErr          string
 	cliBannerHidden bool // user dismissed the banner
 
 	redump     map[string]*redumpEntry
 	redumpMu   sync.Mutex
 	invalidate func()
+
+	redumpUsername string
+	redumpPassword string
+	redumpStatus   string
 
 	stats       statsAgg
 	recent      []eventRec
@@ -499,9 +479,19 @@ func (m *model) loadAndFocus(p string) {
 }
 
 func (m *model) lookup(hashes []string) {
+	auth, hasAuth := redumpAuthGet(m.db)
+	authMode := "anon"
+	if hasAuth {
+		authMode = "auth"
+	}
+	var (
+		authClient     *redumpClient
+		authLoginErr   error
+		authLoginTried bool
+	)
 	for _, h := range hashes {
 		// disk cache first
-		if e, ok := redumpGet(m.db, h); ok {
+		if e, ok := redumpGet(m.db, h, authMode); ok {
 			m.redumpMu.Lock()
 			m.redump[h] = e
 			m.redumpMu.Unlock()
@@ -520,8 +510,22 @@ func (m *model) lookup(hashes []string) {
 		if m.invalidate != nil {
 			m.invalidate()
 		}
-		e := redumpFetch(h)
-		redumpPut(m.db, h, e)
+		var e *redumpEntry
+		if hasAuth {
+			if !authLoginTried {
+				authClient = newRedumpClient("http://forum.redump.org", "http://redump.org")
+				authLoginErr = authClient.Login(auth.Username, auth.Password)
+				authLoginTried = true
+			}
+			if authLoginErr != nil {
+				e = &redumpEntry{State: "err", CheckedUnix: time.Now().Unix()}
+			} else {
+				e = authClient.Fetch(h)
+			}
+		} else {
+			e = redumpFetch(h)
+		}
+		redumpPut(m.db, h, authMode, e)
 		m.redumpMu.Lock()
 		m.redump[h] = e
 		m.redumpMu.Unlock()
@@ -556,7 +560,11 @@ func buildEventRec(m *model, action, input, output string, res actionResult) eve
 		if meta == nil || len(meta.Tracks) == 0 {
 			return
 		}
-		if e, ok := redumpGet(m.db, meta.Tracks[0].Hashes["sha1"]); ok && e.State == "found" {
+		authMode := "anon"
+		if _, ok := redumpAuthGet(m.db); ok {
+			authMode = "auth"
+		}
+		if e, ok := redumpGet(m.db, meta.Tracks[0].Hashes["sha1"], authMode); ok && e.State == "found" {
 			ev.Title = e.Title
 		}
 	}
@@ -1002,6 +1010,13 @@ func main() {
 	mdl.runner.onUnusedScram = func(path string, size int64) {
 		mdl.queue.appendUnusedScram(unusedScram{Path: path, Size: size})
 	}
+	if auth, ok := redumpAuthGet(mdl.db); ok {
+		mdl.redumpUsername = auth.Username
+		mdl.redumpPassword = auth.Password
+		mdl.redumpStatus = "Saved"
+	} else {
+		mdl.redumpStatus = "Not configured"
+	}
 
 	switch a := resolveStartupAction(*loadPath, flag.Args()); a.Kind {
 	case "dir":
@@ -1059,10 +1074,10 @@ func main() {
 		// don't need to exist; classify() is bypassed and States are set
 		// directly. The worker is NOT started.
 		mockBasenames := []struct {
-			Name  string
-			State queueState
-			Frac  float64
-			Reason string
+			Name       string
+			State      queueState
+			Frac       float64
+			Reason     string
 			DurationMs int64
 		}{
 			{"freelancer.cue", qDone, 1.0, "", 5400},
@@ -1119,24 +1134,35 @@ func loop(w *app.Window, mdl *model) error {
 	th.Palette.Fg = text1
 
 	var (
-		openBtn         widget.Clickable
-		statsBtn        widget.Clickable
-		fileBtn         widget.Clickable
-		verifyBtn       widget.Clickable
-		unpackBtn       widget.Clickable
-		packBtn         widget.Clickable
-		cancelBtn       widget.Clickable
-		toastDismissBtn widget.Clickable
-		toastRevealBtn  widget.Clickable
+		openBtn             widget.Clickable
+		statsBtn            widget.Clickable
+		fileBtn             widget.Clickable
+		redumpBtn           widget.Clickable
+		verifyBtn           widget.Clickable
+		unpackBtn           widget.Clickable
+		packBtn             widget.Clickable
+		cancelBtn           widget.Clickable
+		toastDismissBtn     widget.Clickable
+		toastRevealBtn      widget.Clickable
 		cliBannerDismissBtn widget.Clickable
-		deleteScramCB   = widget.Bool{Value: true} // default: consume scram on success
-		mockHoverCB     widget.Bool                // for screenshots
-		copyBtns        = make(map[string]*widget.Clickable)
-		linkBtns        = make(map[string]*linkEntry)
-		listScroll      widget.List
+		deleteScramCB       = widget.Bool{Value: true} // default: consume scram on success
+		mockHoverCB         widget.Bool                // for screenshots
+		copyBtns            = make(map[string]*widget.Clickable)
+		linkBtns            = make(map[string]*linkEntry)
+		listScroll          widget.List
+		redumpUserEditor    widget.Editor
+		redumpPassEditor    widget.Editor
+		redumpSaveBtn       widget.Clickable
+		redumpTestBtn       widget.Clickable
+		redumpClearBtn      widget.Clickable
 	)
 	_ = mockHoverCB
 	listScroll.Axis = layout.Vertical
+	redumpUserEditor.SingleLine = true
+	redumpPassEditor.SingleLine = true
+	redumpPassEditor.Mask = '*'
+	redumpUserEditor.SetText(mdl.redumpUsername)
+	redumpPassEditor.SetText(mdl.redumpPassword)
 
 	qBtns := newQueuePanelButtons()
 	qBtns.DeleteScramCB.Value = true // mirror queue-level default (deleteScram: true)
@@ -1252,6 +1278,40 @@ func loop(w *app.Window, mdl *model) error {
 			}
 			if fileBtn.Clicked(gtx) {
 				mdl.view = "file"
+			}
+			if redumpBtn.Clicked(gtx) {
+				mdl.view = "redump"
+			}
+			if redumpSaveBtn.Clicked(gtx) {
+				u := strings.TrimSpace(redumpUserEditor.Text())
+				p := redumpPassEditor.Text()
+				if u == "" || p == "" {
+					mdl.redumpStatus = "Username and password required"
+				} else {
+					redumpAuthPut(mdl.db, u, p)
+					mdl.redumpUsername = u
+					mdl.redumpPassword = p
+					mdl.redumpStatus = "Saved"
+				}
+			}
+			if redumpClearBtn.Clicked(gtx) {
+				redumpAuthClear(mdl.db)
+				mdl.redumpUsername = ""
+				mdl.redumpPassword = ""
+				redumpUserEditor.SetText("")
+				redumpPassEditor.SetText("")
+				mdl.redumpStatus = "Not configured"
+			}
+			if redumpTestBtn.Clicked(gtx) {
+				u := strings.TrimSpace(redumpUserEditor.Text())
+				p := redumpPassEditor.Text()
+				if u == "" || p == "" {
+					mdl.redumpStatus = "Username and password required"
+				} else if err := newRedumpClient("http://forum.redump.org", "http://redump.org").Login(u, p); err != nil {
+					mdl.redumpStatus = "Login failed"
+				} else {
+					mdl.redumpStatus = "Login OK"
+				}
 			}
 			if openBtn.Clicked(gtx) {
 				// Manual file open is a "user took control" signal — disengage
@@ -1414,7 +1474,7 @@ func loop(w *app.Window, mdl *model) error {
 
 			layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return topBar(th, mdl, &openBtn, &statsBtn, &fileBtn).Layout(gtx)
+					return topBar(th, mdl, &openBtn, &statsBtn, &fileBtn, &redumpBtn).Layout(gtx)
 				}),
 				layout.Rigid(divider),
 				layout.Rigid(cliMissingBanner(th, mdl, &cliBannerDismissBtn)),
@@ -1430,6 +1490,8 @@ func loop(w *app.Window, mdl *model) error {
 									switch mdl.view {
 									case "stats":
 										return statsView(gtx, th, mdl)
+									case "redump":
+										return redumpView(th, mdl, &redumpUserEditor, &redumpPassEditor, &redumpSaveBtn, &redumpTestBtn, &redumpClearBtn)(gtx)
 									default:
 										return body(gtx, th, mdl, &verifyBtn, &unpackBtn, &packBtn, &deleteScramCB, getCopy, getLink)
 									}
@@ -1475,14 +1537,14 @@ func readURIList(r io.Reader) []string {
 
 // ---------------- top bar ----------------
 
-func topBar(th *material.Theme, mdl *model, openBtn, statsBtn, fileBtn *widget.Clickable) topBarStyle {
-	return topBarStyle{th: th, mdl: mdl, openBtn: openBtn, statsBtn: statsBtn, fileBtn: fileBtn}
+func topBar(th *material.Theme, mdl *model, openBtn, statsBtn, fileBtn, redumpBtn *widget.Clickable) topBarStyle {
+	return topBarStyle{th: th, mdl: mdl, openBtn: openBtn, statsBtn: statsBtn, fileBtn: fileBtn, redumpBtn: redumpBtn}
 }
 
 type topBarStyle struct {
-	th                         *material.Theme
-	mdl                        *model
-	openBtn, statsBtn, fileBtn *widget.Clickable
+	th                                    *material.Theme
+	mdl                                   *model
+	openBtn, statsBtn, fileBtn, redumpBtn *widget.Clickable
 }
 
 func (b topBarStyle) Layout(gtx layout.Context) layout.Dimensions {
@@ -1499,6 +1561,8 @@ func (b topBarStyle) Layout(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(tabButton(b.th, b.fileBtn, "Inspect", b.mdl.view == "file")),
 				layout.Rigid(spacer(4, 0)),
 				layout.Rigid(tabButton(b.th, b.statsBtn, "Stats", b.mdl.view == "stats")),
+				layout.Rigid(spacer(4, 0)),
+				layout.Rigid(tabButton(b.th, b.redumpBtn, "Redump", b.mdl.view == "redump")),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: gtx.Constraints.Min} }),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					btn := material.Button(b.th, b.openBtn, "Open file…")

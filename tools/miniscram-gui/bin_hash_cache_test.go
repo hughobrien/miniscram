@@ -72,7 +72,7 @@ func TestHashCueBins_PopulatesCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hashCueBin: %v", err)
 	}
-	redumpPut(m.db, expSha1, &redumpEntry{State: "miss", CheckedUnix: time.Now().Unix()})
+	redumpPut(m.db, expSha1, "anon", &redumpEntry{State: "miss", CheckedUnix: time.Now().Unix()})
 
 	tracks := []cueTrack{{num: 1, mode: "MODE1/2352", filename: "track01.bin", exists: true}}
 	m.hashCueBins(tracks, []string{binPath})
@@ -114,7 +114,7 @@ func TestHashCueBins_UsesCache(t *testing.T) {
 	wrongSha1 := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	wrongSha256 := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	binHashPut(m.db, binPath, st.Size(), st.ModTime().Unix(), wrongMd5, wrongSha1, wrongSha256)
-	redumpPut(m.db, wrongSha1, &redumpEntry{State: "miss", CheckedUnix: time.Now().Unix()})
+	redumpPut(m.db, wrongSha1, "anon", &redumpEntry{State: "miss", CheckedUnix: time.Now().Unix()})
 
 	tracks := []cueTrack{{num: 1, mode: "MODE1/2352", filename: "track01.bin", exists: true}}
 	m.hashCueBins(tracks, []string{binPath})
