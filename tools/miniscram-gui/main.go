@@ -1070,38 +1070,9 @@ func main() {
 		}
 	}
 	if *mockQueue != "" {
-		// Stage synthetic queue items spanning the visible states. Paths
-		// don't need to exist; classify() is bypassed and States are set
-		// directly. The worker is NOT started.
-		mockBasenames := []struct {
-			Name       string
-			State      queueState
-			Frac       float64
-			Reason     string
-			DurationMs int64
-		}{
-			{"freelancer.cue", qDone, 1.0, "", 5400},
-			{"deus-ex.cue", qRunning, 0.55, "", 0},
-			{"half-life.cue", qReady, 0, "", 0},
-			{"mp2-play.cue", qReady, 0, "", 0},
-			{"oddworld.cue", qSkipped, 0, "no sibling .scram", 0},
-			{"baldurs-gate.cue", qSkipped, 0, "already packed", 0},
-		}
-		mdl.queue.mu.Lock()
-		for _, m := range mockBasenames {
-			mdl.queue.items = append(mdl.queue.items, queueItem{
-				ID:         mdl.queue.nextID,
-				CuePath:    "/" + *mockQueue + "/" + m.Name,
-				Basename:   m.Name,
-				State:      m.State,
-				Fraction:   m.Frac,
-				Reason:     m.Reason,
-				DurationMs: m.DurationMs,
-			})
-			mdl.queue.nextID++
-		}
-		mdl.queue.workerRunning = true // so Stop button renders
-		mdl.queue.mu.Unlock()
+		// Stage synthetic queue items for screenshots. Paths don't need
+		// to exist; classify() is bypassed and states are set directly.
+		stageMockQueue(mdl.queue, *mockQueue)
 	}
 	if *mockCLIMissing {
 		mdl.cliMissing = true

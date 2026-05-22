@@ -66,7 +66,7 @@ for the apt list).
 | `-seed`                  | Insert a small set of fixture events so Stats demos well.                       |
 | `-mock-running <action>` | Screenshot-only: inject a fake in-flight action (`pack`/`unpack`/`verify`).     |
 | `-mock-toast <action>`   | Screenshot-only: inject a fake success toast (`pack`/`unpack`/`verify`).        |
-| `-mock-queue <label>`    | Screenshot-only: stage a queue with synthetic items in mixed states.            |
+| `-mock-queue <label>`    | Screenshot-only: stage a queue with synthetic items in mixed states; use `audio-fail` for a completed queue with one audio-only failure. |
 
 ## Screenshots
 

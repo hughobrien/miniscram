@@ -11,6 +11,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"strings"
 
 	"gioui.org/font"
 	"gioui.org/layout"
@@ -230,6 +231,9 @@ func queueRow(th *material.Theme, it queueItem, btns *queuePanelButtons) layout.
 		clickArea := btns.RowClick(it.ID)
 		actionBtn := btns.RowAction(it.ID)
 		rowH := gtx.Dp(unit.Dp(34))
+		if it.State == qFailed {
+			rowH = gtx.Dp(unit.Dp(48))
+		}
 
 		return clickArea.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			// Record the row content first, then paint backgrounds behind it.
@@ -240,16 +244,7 @@ func queueRow(th *material.Theme, it queueItem, btns *queuePanelButtons) layout.
 						layout.Rigid(queueRowGlyph(it)),
 						layout.Rigid(spacer(8, 0)),
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							lb := material.Label(th, unit.Sp(12), it.Basename)
-							switch it.State {
-							case qSkipped, qCancelled:
-								lb.Color = text3
-							case qFailed:
-								lb.Color = bad
-							default:
-								lb.Color = text1
-							}
-							return lb.Layout(gtx)
+							return queueRowMainText(th, it)(gtx)
 						}),
 						layout.Rigid(queueRowSuffix(th, it)),
 						layout.Rigid(spacer(6, 0)),
@@ -280,6 +275,30 @@ func queueRow(th *material.Theme, it queueItem, btns *queuePanelButtons) layout.
 			}
 			return content
 		})
+	}
+}
+
+func queueRowMainText(th *material.Theme, it queueItem) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		name := material.Label(th, unit.Sp(12), it.Basename)
+		name.MaxLines = 1
+		switch it.State {
+		case qSkipped, qCancelled:
+			name.Color = text3
+		case qFailed:
+			name.Color = bad
+			reason := it.Reason
+			if reason == "" {
+				reason = "fail"
+			}
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(name.Layout),
+				layout.Rigid(failedReasonLabel(th, reason).Layout),
+			)
+		default:
+			name.Color = text1
+		}
+		return name.Layout(gtx)
 	}
 }
 
@@ -317,12 +336,6 @@ func queueRowSuffix(th *material.Theme, it queueItem) layout.Widget {
 		case qDone:
 			label = fmt.Sprintf("%.1fs", float64(it.DurationMs)/1000)
 			col = good
-		case qFailed:
-			label = it.Reason
-			if label == "" {
-				label = "fail"
-			}
-			col = bad
 		case qSkipped:
 			label = it.Reason
 		case qCancelled:
@@ -336,16 +349,27 @@ func queueRowSuffix(th *material.Theme, it queueItem) layout.Widget {
 	}
 }
 
-// reasonLabel builds the label-style for a queue-row suffix. The
-// qFailed state forces MaxLines = 1 so long error strings (e.g.
-// "no plausible scrambled sync field found in 765077352 bytes of
-// scram") don't tower over the queue. Truncator defaults to "…".
+// reasonLabel builds the label-style for a queue-row suffix.
 func reasonLabel(th *material.Theme, state queueState, label string) material.LabelStyle {
 	lb := material.Label(th, unit.Sp(11), label)
-	if state == qFailed {
-		lb.WrapPolicy = text.WrapGraphemes
-	}
 	return lb
+}
+
+// failedReasonLabel builds the second line in failed queue rows. It is
+// capped to one line so long errors cannot inflate the row into a large block.
+func failedReasonLabel(th *material.Theme, label string) material.LabelStyle {
+	lb := material.Label(th, unit.Sp(11), shortFailedReason(label))
+	lb.Color = bad
+	lb.MaxLines = 1
+	return lb
+}
+
+func shortFailedReason(label string) string {
+	before, _, found := strings.Cut(label, ";")
+	if found {
+		return strings.TrimSpace(before)
+	}
+	return label
 }
 
 // queueRowActionBtn renders the × (remove ready) or ⏹ (cancel running) button.
@@ -377,8 +401,8 @@ func queueRowActionBtn(th *material.Theme, it queueItem, click *widget.Clickable
 // releases — the four-rect form is portable.
 func drawHoverBorder(ops *op.Ops, size image.Point) {
 	col := text3
-	paint.FillShape(ops, col, clip.Rect{Max: image.Pt(size.X, 1)}.Op())                       // top
-	paint.FillShape(ops, col, clip.Rect{Min: image.Pt(0, size.Y - 1), Max: size}.Op())         // bottom
-	paint.FillShape(ops, col, clip.Rect{Max: image.Pt(1, size.Y)}.Op())                       // left
-	paint.FillShape(ops, col, clip.Rect{Min: image.Pt(size.X - 1, 0), Max: size}.Op())         // right
+	paint.FillShape(ops, col, clip.Rect{Max: image.Pt(size.X, 1)}.Op())              // top
+	paint.FillShape(ops, col, clip.Rect{Min: image.Pt(0, size.Y-1), Max: size}.Op()) // bottom
+	paint.FillShape(ops, col, clip.Rect{Max: image.Pt(1, size.Y)}.Op())              // left
+	paint.FillShape(ops, col, clip.Rect{Min: image.Pt(size.X-1, 0), Max: size}.Op()) // right
 }
