@@ -4,6 +4,27 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-05-22
+
+### Added
+
+- **GUI Redump credentials tab** (#58). A new Redump tab lets users save,
+  test, and clear Redump forum credentials for authenticated disc lookups.
+  Credentials are stored in the local SQLite database, and the tab displays
+  a plaintext-storage caution next to the controls.
+- **Authenticated Redump lookup/cache path** (#58). When saved credentials
+  are present, the GUI logs in through the Redump forum before querying
+  `redump.org`, allowing hashes only visible to authenticated users to be
+  found. Anonymous and authenticated lookup results are cached separately so
+  an anonymous miss does not mask an authenticated hit.
+
+### Fixed
+
+- **Failed GUI queue rows stay compact while showing useful error text**
+  (#57). The screenshot/mock queue fixture now covers an audio-only failure
+  among successful files, and failed rows render the reason in a tighter
+  two-line layout instead of expanding far beyond the text.
+
 ## [1.4.1] - 2026-05-17
 
 ### Fixed
