@@ -193,7 +193,7 @@ func TestHandleActionResult_TitleFromRedump(t *testing.T) {
 	}{Number: 1, Mode: "MODE1/2352", Hashes: map[string]string{"sha1": "deadbeef"}}
 	m.meta.Tracks = append(m.meta.Tracks, track)
 
-	redumpPut(m.db, "deadbeef", &redumpEntry{
+	redumpPut(m.db, "deadbeef", "anon", &redumpEntry{
 		State:       "found",
 		URL:         "http://redump.org/disc/12345/",
 		Title:       "Test Disc",
