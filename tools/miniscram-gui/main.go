@@ -1324,14 +1324,7 @@ func loop(w *app.Window, mdl *model) error {
 				mdl.runner.Cancel()
 			}
 			if qBtns.DeleteUnusedScrams.Clicked(gtx) {
-				failed := deleteUnusedScrams(mdl.queue)
-				if len(failed) > 0 {
-					mdl.toast = &toastState{
-						Status:    "fail",
-						FailMsg:   fmt.Sprintf("could not delete %d .scram file(s) — check permissions or remove manually", len(failed)),
-						ExpiresAt: time.Now().Add(8 * time.Second),
-					}
-				}
+				mdl.toast = handleDeleteUnusedScrams(mdl.queue, time.Now())
 				if mdl.invalidate != nil {
 					mdl.invalidate()
 				}

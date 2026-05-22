@@ -104,6 +104,7 @@ type toastState struct {
 	Output     string // path to the output file; "" for verify
 	OutputSize int64
 	DurationMs int64
+	Message    string
 	ExpiresAt  time.Time
 	Hide       bool // set when user clicks the ✕
 
@@ -136,23 +137,27 @@ func toastWidget(th *material.Theme, ts *toastState, dismissBtn, revealBtn *widg
 			}
 			summary = verb + ": " + ts.FailMsg
 		} else {
-			verb := map[string]string{
-				"pack":   "Packed",
-				"unpack": "Unpacked",
-				"verify": "Verified",
-			}[ts.Action]
-			if verb == "" {
-				verb = "Done"
+			if ts.Message != "" {
+				summary = ts.Message
+			} else {
+				verb := map[string]string{
+					"pack":   "Packed",
+					"unpack": "Unpacked",
+					"verify": "Verified",
+				}[ts.Action]
+				if verb == "" {
+					verb = "Done"
+				}
+				basename := filepath.Base(ts.Output)
+				if basename == "." || basename == "" {
+					basename = ts.Action + " complete"
+				}
+				summary = verb + "  " + basename
+				if ts.OutputSize > 0 {
+					summary += "  ·  " + humanBytes(ts.OutputSize)
+				}
+				summary += "  ·  " + fmt.Sprintf("%.1fs", float64(ts.DurationMs)/1000)
 			}
-			basename := filepath.Base(ts.Output)
-			if basename == "." || basename == "" {
-				basename = ts.Action + " complete"
-			}
-			summary = verb + "  " + basename
-			if ts.OutputSize > 0 {
-				summary += "  ·  " + humanBytes(ts.OutputSize)
-			}
-			summary += "  ·  " + fmt.Sprintf("%.1fs", float64(ts.DurationMs)/1000)
 		}
 
 		macro := op.Record(gtx.Ops)
