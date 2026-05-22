@@ -18,6 +18,23 @@ CREATE TABLE IF NOT EXISTS redump_cache (
     title        TEXT,
     checked_unix INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS redump_auth (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    username     TEXT NOT NULL,
+    password     TEXT NOT NULL,
+    updated_unix INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS redump_cache_v2 (
+    hash         TEXT NOT NULL,
+    auth_mode    TEXT NOT NULL,
+    state        TEXT NOT NULL,
+    url          TEXT,
+    title        TEXT,
+    checked_unix INTEGER NOT NULL,
+    PRIMARY KEY (hash, auth_mode)
+);
+INSERT OR IGNORE INTO redump_cache_v2 (hash, auth_mode, state, url, title, checked_unix)
+    SELECT hash, 'anon', state, url, title, checked_unix FROM redump_cache;
 CREATE TABLE IF NOT EXISTS events (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     ts_unix          INTEGER NOT NULL,
@@ -70,13 +87,55 @@ func dbOpen() (*sql.DB, error) {
 	return db, nil
 }
 
+// redump auth (plaintext local credentials) -------------------
+
+type redumpAuth struct {
+	Username    string
+	Password    string
+	UpdatedUnix int64
+}
+
+func redumpAuthGet(db *sql.DB) (redumpAuth, bool) {
+	if db == nil {
+		return redumpAuth{}, false
+	}
+	var a redumpAuth
+	err := db.QueryRow(`SELECT username, password, updated_unix FROM redump_auth WHERE id = 1`).
+		Scan(&a.Username, &a.Password, &a.UpdatedUnix)
+	if err != nil {
+		return redumpAuth{}, false
+	}
+	return a, true
+}
+
+func redumpAuthPut(db *sql.DB, username, password string) {
+	if db == nil {
+		return
+	}
+	_, _ = db.Exec(`
+		INSERT INTO redump_auth (id, username, password, updated_unix)
+		VALUES (1, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			username = excluded.username,
+			password = excluded.password,
+			updated_unix = excluded.updated_unix
+	`, username, password, time.Now().Unix())
+}
+
+func redumpAuthClear(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	_, _ = db.Exec(`DELETE FROM redump_auth WHERE id = 1`)
+}
+
 // redump cache (per-hash) -------------------------------------
 
-func redumpGet(db *sql.DB, hash string) (*redumpEntry, bool) {
+func redumpGet(db *sql.DB, hash, authMode string) (*redumpEntry, bool) {
 	if db == nil {
 		return nil, false
 	}
-	row := db.QueryRow(`SELECT state, COALESCE(url,''), COALESCE(title,''), checked_unix FROM redump_cache WHERE hash = ?`, hash)
+	row := db.QueryRow(`SELECT state, COALESCE(url,''), COALESCE(title,''), checked_unix FROM redump_cache_v2 WHERE hash = ? AND auth_mode = ?`, hash, authMode)
 	e := &redumpEntry{}
 	if err := row.Scan(&e.State, &e.URL, &e.Title, &e.CheckedUnix); err != nil {
 		return nil, false
@@ -84,19 +143,19 @@ func redumpGet(db *sql.DB, hash string) (*redumpEntry, bool) {
 	return e, true
 }
 
-func redumpPut(db *sql.DB, hash string, e *redumpEntry) {
+func redumpPut(db *sql.DB, hash, authMode string, e *redumpEntry) {
 	if db == nil || e == nil {
 		return
 	}
 	_, _ = db.Exec(`
-		INSERT INTO redump_cache (hash, state, url, title, checked_unix)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(hash) DO UPDATE SET
+		INSERT INTO redump_cache_v2 (hash, auth_mode, state, url, title, checked_unix)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(hash, auth_mode) DO UPDATE SET
 			state = excluded.state,
 			url = excluded.url,
 			title = excluded.title,
 			checked_unix = excluded.checked_unix
-	`, hash, e.State, e.URL, e.Title, e.CheckedUnix)
+	`, hash, authMode, e.State, e.URL, e.Title, e.CheckedUnix)
 }
 
 // events --------------------------------------------------
