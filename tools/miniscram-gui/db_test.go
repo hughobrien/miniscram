@@ -81,3 +81,14 @@ func TestRedumpCache_SeparatesAnonymousAndAuthenticated(t *testing.T) {
 		t.Errorf("auth.Title = %q", auth.Title)
 	}
 }
+
+func TestRedumpCache_DoesNotPersistTransientErrors(t *testing.T) {
+	db := newMemoryDB(t)
+	const hash = "deadbeef"
+
+	redumpPut(db, hash, "auth", &redumpEntry{State: "err", CheckedUnix: time.Now().Unix()})
+
+	if got, ok := redumpGet(db, hash, "auth"); ok {
+		t.Fatalf("redumpGet returned %q for transient error; want no cached entry", got.State)
+	}
+}

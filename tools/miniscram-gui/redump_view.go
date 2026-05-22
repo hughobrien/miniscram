@@ -12,6 +12,14 @@ func redumpPlaintextCautionText() string {
 	return "Caution: Redump credentials are stored in plaintext in the local SQLite database."
 }
 
+func initRedumpEditors(mdl *model, user, pass *widget.Editor) {
+	user.SingleLine = true
+	pass.SingleLine = true
+	pass.Mask = '*'
+	user.SetText(mdl.redumpUsername)
+	pass.SetText("")
+}
+
 func redumpView(th *material.Theme, mdl *model, user, pass *widget.Editor, save, test, clear *widget.Clickable) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: 28, Left: 32, Right: 32}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
