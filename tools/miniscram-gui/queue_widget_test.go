@@ -3,22 +3,29 @@ package main
 import (
 	"testing"
 
-	"gioui.org/text"
 	"gioui.org/widget/material"
 )
 
-// TestReasonLabel_FailedWrapsAtGraphemes confirms qFailed reasons use
-// WrapGraphemes instead of MaxLines=1, so text wraps at character
-// boundaries rather than being truncated with ellipsis.
-func TestReasonLabel_FailedWrapsAtGraphemes(t *testing.T) {
+// TestFailedReasonLabel_StaysOneLine confirms failed-row detail text
+// is capped to one line. Failed rows render the reason on their own
+// second line, not as a wrapping right-hand suffix.
+func TestFailedReasonLabel_StaysOneLine(t *testing.T) {
 	th := material.NewTheme()
 	long := "cue contains only AUDIO tracks; nothing for miniscram to scramble-pack"
-	lb := reasonLabel(th, qFailed, long)
-	if lb.MaxLines != 0 {
-		t.Errorf("reasonLabel(qFailed).MaxLines = %d, want 0 (unbounded)", lb.MaxLines)
+	lb := failedReasonLabel(th, long)
+	if lb.MaxLines != 1 {
+		t.Errorf("failedReasonLabel().MaxLines = %d, want 1", lb.MaxLines)
 	}
-	if lb.WrapPolicy != text.WrapGraphemes {
-		t.Errorf("reasonLabel(qFailed).WrapPolicy = %v, want text.WrapGraphemes", lb.WrapPolicy)
+	if lb.Text == "" {
+		t.Error("failedReasonLabel().Text is empty")
+	}
+}
+
+func TestFailedReasonLabel_OnlyShowsTextBeforeSemicolon(t *testing.T) {
+	th := material.NewTheme()
+	lb := failedReasonLabel(th, "cue contains only AUDIO tracks; nothing for miniscram to scramble-pack")
+	if lb.Text != "cue contains only AUDIO tracks" {
+		t.Errorf("failedReasonLabel().Text = %q, want %q", lb.Text, "cue contains only AUDIO tracks")
 	}
 }
 
