@@ -374,9 +374,9 @@ type model struct {
 	// invoke (next to miniscram-gui, two dirs up, or the bare name for
 	// PATH lookup) — surfaced in the banner so the user knows where the
 	// GUI looked. cliErr is the probe's error message, also surfaced.
-	cliMissing  bool
-	cliBinary   string
-	cliErr      string
+	cliMissing      bool
+	cliBinary       string
+	cliErr          string
 	cliBannerHidden bool // user dismissed the banner
 
 	redump     map[string]*redumpEntry
@@ -1055,38 +1055,9 @@ func main() {
 		}
 	}
 	if *mockQueue != "" {
-		// Stage synthetic queue items spanning the visible states. Paths
-		// don't need to exist; classify() is bypassed and States are set
-		// directly. The worker is NOT started.
-		mockBasenames := []struct {
-			Name  string
-			State queueState
-			Frac  float64
-			Reason string
-			DurationMs int64
-		}{
-			{"freelancer.cue", qDone, 1.0, "", 5400},
-			{"deus-ex.cue", qRunning, 0.55, "", 0},
-			{"half-life.cue", qReady, 0, "", 0},
-			{"mp2-play.cue", qReady, 0, "", 0},
-			{"oddworld.cue", qSkipped, 0, "no sibling .scram", 0},
-			{"baldurs-gate.cue", qSkipped, 0, "already packed", 0},
-		}
-		mdl.queue.mu.Lock()
-		for _, m := range mockBasenames {
-			mdl.queue.items = append(mdl.queue.items, queueItem{
-				ID:         mdl.queue.nextID,
-				CuePath:    "/" + *mockQueue + "/" + m.Name,
-				Basename:   m.Name,
-				State:      m.State,
-				Fraction:   m.Frac,
-				Reason:     m.Reason,
-				DurationMs: m.DurationMs,
-			})
-			mdl.queue.nextID++
-		}
-		mdl.queue.workerRunning = true // so Stop button renders
-		mdl.queue.mu.Unlock()
+		// Stage synthetic queue items for screenshots. Paths don't need
+		// to exist; classify() is bypassed and states are set directly.
+		stageMockQueue(mdl.queue, *mockQueue)
 	}
 	if *mockCLIMissing {
 		mdl.cliMissing = true
@@ -1119,21 +1090,21 @@ func loop(w *app.Window, mdl *model) error {
 	th.Palette.Fg = text1
 
 	var (
-		openBtn         widget.Clickable
-		statsBtn        widget.Clickable
-		fileBtn         widget.Clickable
-		verifyBtn       widget.Clickable
-		unpackBtn       widget.Clickable
-		packBtn         widget.Clickable
-		cancelBtn       widget.Clickable
-		toastDismissBtn widget.Clickable
-		toastRevealBtn  widget.Clickable
+		openBtn             widget.Clickable
+		statsBtn            widget.Clickable
+		fileBtn             widget.Clickable
+		verifyBtn           widget.Clickable
+		unpackBtn           widget.Clickable
+		packBtn             widget.Clickable
+		cancelBtn           widget.Clickable
+		toastDismissBtn     widget.Clickable
+		toastRevealBtn      widget.Clickable
 		cliBannerDismissBtn widget.Clickable
-		deleteScramCB   = widget.Bool{Value: true} // default: consume scram on success
-		mockHoverCB     widget.Bool                // for screenshots
-		copyBtns        = make(map[string]*widget.Clickable)
-		linkBtns        = make(map[string]*linkEntry)
-		listScroll      widget.List
+		deleteScramCB       = widget.Bool{Value: true} // default: consume scram on success
+		mockHoverCB         widget.Bool                // for screenshots
+		copyBtns            = make(map[string]*widget.Clickable)
+		linkBtns            = make(map[string]*linkEntry)
+		listScroll          widget.List
 	)
 	_ = mockHoverCB
 	listScroll.Axis = layout.Vertical
