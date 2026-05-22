@@ -17,6 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `redump.org`, allowing hashes only visible to authenticated users to be
   found. Anonymous and authenticated lookup results are cached separately so
   an anonymous miss does not mask an authenticated hit.
+- **Redump lookup/cache hardening** (#60). In-memory lookup state now keeps
+  authenticated and anonymous results separate, transient Redump errors are
+  no longer persisted in SQLite, and saved passwords are not pre-filled back
+  into the GUI editor.
 
 ### Fixed
 
