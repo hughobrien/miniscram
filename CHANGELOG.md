@@ -4,6 +4,20 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-05-25
+
+### Fixed
+
+- **GUI Redump lookups reuse a found disc page for sibling tracks** (#64).
+  When one track hash resolves to a Redump disc page, the GUI now parses
+  that page's track SHA-1 list and fills matching sibling tracks without
+  issuing redundant per-track quicksearch requests. Any hashes not present
+  on the page still fall back to individual quicksearch.
+- **GUI hash Copy buttons now write to the clipboard** (#66). Copy buttons
+  for miniscram track hashes, CUE track hashes, and original `.scram`
+  hashes now drain click events and write the current row value to the
+  Gio clipboard.
+
 ## [1.5.0] - 2026-05-22
 
 ### Added
