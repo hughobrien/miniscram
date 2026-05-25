@@ -18,6 +18,7 @@ type redumpClient struct {
 }
 
 var csrfRe = regexp.MustCompile(`name="csrf_token"\s+value="([^"]+)"`)
+var sha1HexRe = regexp.MustCompile(`\b[0-9a-fA-F]{40}\b`)
 
 func newRedumpClient(forumBase, siteBase string) *redumpClient {
 	jar, _ := cookiejar.New(nil)
@@ -37,6 +38,24 @@ func parseCSRFToken(body string) (string, bool) {
 		return "", false
 	}
 	return m[1], true
+}
+
+func parseRedumpDiscSHA1s(body string) []string {
+	matches := sha1HexRe.FindAllString(body, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, match := range matches {
+		h := strings.ToLower(match)
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		out = append(out, h)
+	}
+	return out
 }
 
 func (c *redumpClient) Login(username, password string) error {
@@ -95,12 +114,19 @@ func (c *redumpClient) Fetch(hash string) *redumpEntry {
 	if !strings.Contains(final, "/disc/") {
 		return &redumpEntry{State: "miss", CheckedUnix: now}
 	}
-	body, _ := io.ReadAll(resp.Body)
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	body := string(bodyBytes)
 	title := ""
-	if m := titleRe.FindStringSubmatch(string(body)); len(m) > 1 {
+	if m := titleRe.FindStringSubmatch(body); len(m) > 1 {
 		t := strings.TrimSpace(m[1])
 		t = strings.SplitN(t, "&bull;", 2)[0]
 		title = strings.TrimSpace(t)
 	}
-	return &redumpEntry{State: "found", URL: final, Title: title, CheckedUnix: now}
+	return &redumpEntry{
+		State:       "found",
+		URL:         final,
+		Title:       title,
+		CheckedUnix: now,
+		TrackSHA1s:  parseRedumpDiscSHA1s(body),
+	}
 }

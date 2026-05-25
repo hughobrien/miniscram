@@ -9,10 +9,11 @@ import (
 )
 
 type redumpEntry struct {
-	State       string `json:"state"` // "found" | "miss" | "err" | "pending"
-	URL         string `json:"url,omitempty"`
-	Title       string `json:"title,omitempty"`
-	CheckedUnix int64  `json:"checked_unix"`
+	State       string   `json:"state"` // "found" | "miss" | "err" | "pending"
+	URL         string   `json:"url,omitempty"`
+	Title       string   `json:"title,omitempty"`
+	CheckedUnix int64    `json:"checked_unix"`
+	TrackSHA1s  []string `json:"-"`
 }
 
 var titleRe = regexp.MustCompile(`<title>redump\.org\s*&bull;\s*([^<]+?)\s*</title>`)
@@ -131,8 +132,35 @@ func (s *redumpLookupService) lookup(m *model, hashes []string) {
 		m.redumpMu.Lock()
 		m.redump[cacheKey] = e
 		m.redumpMu.Unlock()
+		cacheRedumpDiscPageMatches(m, hashes, authMode, e)
 		if m.invalidate != nil {
 			m.invalidate()
 		}
+	}
+}
+
+func cacheRedumpDiscPageMatches(m *model, hashes []string, authMode string, e *redumpEntry) {
+	if m == nil || e == nil || e.State != "found" || len(e.TrackSHA1s) == 0 {
+		return
+	}
+	pageHashes := map[string]bool{}
+	for _, h := range e.TrackSHA1s {
+		pageHashes[h] = true
+	}
+	for _, h := range hashes {
+		if !pageHashes[h] {
+			continue
+		}
+		related := &redumpEntry{
+			State:       e.State,
+			URL:         e.URL,
+			Title:       e.Title,
+			CheckedUnix: e.CheckedUnix,
+			TrackSHA1s:  e.TrackSHA1s,
+		}
+		redumpPut(m.db, h, authMode, related)
+		m.redumpMu.Lock()
+		m.redump[redumpCacheKey(h, authMode)] = related
+		m.redumpMu.Unlock()
 	}
 }

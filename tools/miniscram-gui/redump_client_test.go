@@ -86,3 +86,26 @@ func TestRedumpClient_QuicksearchAuthenticated(t *testing.T) {
 		t.Errorf("Title = %q", e.Title)
 	}
 }
+
+func TestRedumpClient_ParsesTrackSHA1sFromDiscPage(t *testing.T) {
+	html := `
+<html><head><title>redump.org &bull; Tetris</title></head>
+<body>
+<table>
+<tr><th>#</th><th>SHA-1</th></tr>
+<tr><td>1</td><td>4b4e16b627b847a7452e7f32b6c009128bc7ab29</td></tr>
+<tr><td>2</td><td>607bcfd29adcd6cd7beaba8ba7fef8ce6eb1536f</td></tr>
+<tr><td>3</td><td>d46e85945d49ad60ede55cc557f26d964ea555ac</td></tr>
+</table>
+</body></html>`
+
+	got := parseRedumpDiscSHA1s(html)
+	want := []string{
+		"4b4e16b627b847a7452e7f32b6c009128bc7ab29",
+		"607bcfd29adcd6cd7beaba8ba7fef8ce6eb1536f",
+		"d46e85945d49ad60ede55cc557f26d964ea555ac",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("sha1s = %v, want %v", got, want)
+	}
+}
