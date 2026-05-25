@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -55,10 +56,8 @@ func TestBinHashCache_NilDB(t *testing.T) {
 	binHashPut(nil, "/tmp/a.bin", 1, 1, "m", "s1", "s2")
 }
 
-// The integration tests use m.hashCueBins, which calls m.lookup() at
-// the end of each per-bin goroutine. m.lookup() consults redump_cache
-// before HTTPing redump.org; pre-seeding redump_cache for the sha1
-// keeps the test fully offline.
+// m.hashCueBins consults redump_cache via m.lookup() after hashing.
+// Pre-seeding redump_cache for the sha1 keeps the test fully offline.
 
 func TestHashCueBins_PopulatesCache(t *testing.T) {
 	m := newTestModel(t)
@@ -124,5 +123,58 @@ func TestHashCueBins_UsesCache(t *testing.T) {
 	}
 	if tracks[0].hashes["sha1"] != wrongSha1 {
 		t.Errorf("sha1 = %q, want %q (cache should have short-circuited the hash)", tracks[0].hashes["sha1"], wrongSha1)
+	}
+}
+
+func TestHashCueBins_BatchesAuthenticatedRedumpLookups(t *testing.T) {
+	m := newTestModel(t)
+	m.redump = map[string]*redumpEntry{}
+	username, password := redumpTestCreds(t)
+	redumpAuthPut(m.db, username, password)
+
+	var (
+		mu         sync.Mutex
+		loginCount int
+		fetched    []string
+		badCreds   bool
+	)
+	m.redumpLookup = &redumpLookupService{
+		login: func(gotUser, gotPass string) (redumpFetcher, error) {
+			mu.Lock()
+			if gotUser != username || gotPass != password {
+				badCreds = true
+			}
+			loginCount++
+			mu.Unlock()
+			return redumpFetchFunc(func(hash string) *redumpEntry {
+				mu.Lock()
+				fetched = append(fetched, hash)
+				mu.Unlock()
+				return &redumpEntry{State: "miss", CheckedUnix: time.Now().Unix()}
+			}), nil
+		},
+	}
+
+	paths := []string{
+		writeTempBytes(t, "track01.bin", 1),
+		writeTempBytes(t, "track02.bin", 2),
+		writeTempBytes(t, "track03.bin", 3),
+	}
+	tracks := []cueTrack{
+		{num: 1, mode: "AUDIO", filename: "track01.bin", exists: true},
+		{num: 2, mode: "AUDIO", filename: "track02.bin", exists: true},
+		{num: 3, mode: "AUDIO", filename: "track03.bin", exists: true},
+	}
+
+	m.hashCueBins(tracks, paths)
+
+	if badCreds {
+		t.Fatal("lookup did not use saved Redump credentials")
+	}
+	if loginCount != 1 {
+		t.Fatalf("loginCount = %d, want 1", loginCount)
+	}
+	if len(fetched) != len(tracks) {
+		t.Fatalf("fetched %d hashes, want %d", len(fetched), len(tracks))
 	}
 }
