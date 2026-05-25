@@ -238,6 +238,8 @@ TRKS / HASH / DLTA chunks. 856 MB → 329 bytes — about 2.7 million×.
 Pack a `.scram` into a `.miniscram` container.
 
     miniscram pack disc.cue [-o out.miniscram] [-f] [--keep-source]
+    # Or all cues in this dir
+    find . -type f -iname '*.cue' -print0 | xargs -0n1 miniscram pack
 
 Reads `disc.scram` (derived from the cue stem) and the `.bin` files
 referenced by `disc.cue`. Writes `disc.miniscram` and removes
@@ -294,6 +296,8 @@ macOS, and Windows on amd64 are published; checksums are in
 Run without installing:
 
     nix run github:hughobrien/miniscram -- pack disc.cue
+    # Or all cues in this dir
+    find . -type f -iname '*.cue' -print0 | xargs -0n1 nix run github:hughobrien/miniscram -- pack
 
 Install into a profile:
 
