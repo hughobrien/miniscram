@@ -27,6 +27,7 @@ import (
 	"gioui.org/app"
 	"gioui.org/font"
 	"gioui.org/font/gofont"
+	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
 	"gioui.org/io/transfer"
@@ -360,6 +361,11 @@ type model struct {
 	runner *actionRunner
 	toast  *toastState
 	queue  *queueModel
+}
+
+type copyEntry struct {
+	click *widget.Clickable
+	value string
 }
 
 func (m *model) load(p string) {
@@ -1053,7 +1059,7 @@ func loop(w *app.Window, mdl *model) error {
 		cliBannerDismissBtn widget.Clickable
 		deleteScramCB       = widget.Bool{Value: true} // default: consume scram on success
 		mockHoverCB         widget.Bool                // for screenshots
-		copyBtns            = make(map[string]*widget.Clickable)
+		copyBtns            = make(map[string]*copyEntry)
 		linkBtns            = make(map[string]*linkEntry)
 		listScroll          widget.List
 		redumpUserEditor    widget.Editor
@@ -1070,13 +1076,14 @@ func loop(w *app.Window, mdl *model) error {
 	qBtns.DeleteScramCB.Value = true // mirror queue-level default (deleteScram: true)
 	var qListScroll widget.List
 	qListScroll.Axis = layout.Vertical
-	getCopy := func(key string) *widget.Clickable {
+	getCopy := func(key, value string) *widget.Clickable {
 		if c, ok := copyBtns[key]; ok {
-			return c
+			c.value = value
+			return c.click
 		}
-		c := new(widget.Clickable)
+		c := &copyEntry{click: new(widget.Clickable), value: value}
 		copyBtns[key] = c
-		return c
+		return c.click
 	}
 	getLink := func(key, u string) *linkEntry {
 		if e, ok := linkBtns[key]; ok {
@@ -1367,6 +1374,7 @@ func loop(w *app.Window, mdl *model) error {
 					openURL(le.url)
 				}
 			}
+			handleCopyClicks(gtx, copyBtns, writeClipboard)
 			// per-row delete buttons in the stats view
 			for id, btn := range mdl.deleteBtns {
 				if btn.Clicked(gtx) {
@@ -1506,7 +1514,7 @@ func body(gtx layout.Context, th *material.Theme,
 	mdl *model,
 	verifyBtn, unpackBtn, packBtn *widget.Clickable,
 	deleteScram *widget.Bool,
-	getCopy func(string) *widget.Clickable,
+	getCopy func(string, string) *widget.Clickable,
 	getLink func(string, string) *linkEntry,
 ) layout.Dimensions {
 	switch mdl.kind {
@@ -1521,7 +1529,7 @@ func body(gtx layout.Context, th *material.Theme,
 
 func miniscramView(gtx layout.Context, th *material.Theme, mdl *model,
 	verifyBtn, unpackBtn *widget.Clickable,
-	getCopy func(string) *widget.Clickable,
+	getCopy func(string, string) *widget.Clickable,
 	getLink func(string, string) *linkEntry,
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -1538,7 +1546,7 @@ func miniscramView(gtx layout.Context, th *material.Theme, mdl *model,
 }
 
 func cueView(gtx layout.Context, th *material.Theme, mdl *model, packBtn *widget.Clickable, deleteScram *widget.Bool,
-	getCopy func(string) *widget.Clickable,
+	getCopy func(string, string) *widget.Clickable,
 	getLink func(string, string) *linkEntry,
 ) layout.Dimensions {
 	scramPath := strings.TrimSuffix(mdl.path, filepath.Ext(mdl.path)) + ".scram"
@@ -2028,7 +2036,7 @@ func hashFailRow(th *material.Theme) layout.Widget {
 }
 
 func tracksCard(th *material.Theme, mdl *model,
-	getCopy func(string) *widget.Clickable,
+	getCopy func(string, string) *widget.Clickable,
 	getLink func(string, string) *linkEntry,
 ) layout.Widget {
 	return card(func(gtx layout.Context) layout.Dimensions {
@@ -2062,7 +2070,7 @@ func tracksCard(th *material.Theme, mdl *model,
 						mdl.redumpMu.Unlock()
 					}
 					children = append(children, layout.Rigid(hashSubRow(th, algo, v, entry,
-						getCopy(fmt.Sprintf("t%d-%s", t.Number, algo)),
+						getCopy(fmt.Sprintf("t%d-%s", t.Number, algo), v),
 						getLink(fmt.Sprintf("t%d-%s-link", t.Number, algo), entryURL(entry)),
 					)))
 				}
@@ -2174,7 +2182,7 @@ func hashSubRow(th *material.Theme, algo, value string,
 	}
 }
 
-func scramHashesCard(th *material.Theme, mdl *model, getCopy func(string) *widget.Clickable) layout.Widget {
+func scramHashesCard(th *material.Theme, mdl *model, getCopy func(string, string) *widget.Clickable) layout.Widget {
 	return card(func(gtx layout.Context) layout.Dimensions {
 		var children []layout.FlexChild
 		children = append(children, layout.Rigid(sectionHeader(th, "Original .scram hashes")))
@@ -2186,7 +2194,7 @@ func scramHashesCard(th *material.Theme, mdl *model, getCopy func(string) *widge
 				children = append(children, layout.Rigid(thinDivider))
 			}
 			v := mdl.meta.Scram.Hashes[algo]
-			children = append(children, layout.Rigid(scramHashRow(th, algo, v, getCopy("scram-"+algo))))
+			children = append(children, layout.Rigid(scramHashRow(th, algo, v, getCopy("scram-"+algo, v))))
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
@@ -2215,7 +2223,7 @@ func scramHashRow(th *material.Theme, algo, value string, copyBtn *widget.Clicka
 }
 
 func cueTracksCard(th *material.Theme, mdl *model,
-	getCopy func(string) *widget.Clickable,
+	getCopy func(string, string) *widget.Clickable,
 	getLink func(string, string) *linkEntry,
 ) layout.Widget {
 	return card(func(gtx layout.Context) layout.Dimensions {
@@ -2300,7 +2308,7 @@ func cueTracksCard(th *material.Theme, mdl *model,
 					entry = entries[v]
 				}
 				children = append(children, layout.Rigid(hashSubRow(th, algo, v, entry,
-					getCopy(fmt.Sprintf("cue-t%d-%s", ct.num, algo)),
+					getCopy(fmt.Sprintf("cue-t%d-%s", ct.num, algo), v),
 					getLink(fmt.Sprintf("cue-t%d-%s-link", ct.num, algo), entryURL(entry)),
 				)))
 			}
@@ -2486,6 +2494,24 @@ func copyButton(th *material.Theme, c *widget.Clickable) layout.Widget {
 		btn.Inset = layout.Inset{Top: 4, Bottom: 4, Left: 10, Right: 10}
 		return btn.Layout(gtx)
 	}
+}
+
+func handleCopyClicks(gtx layout.Context, entries map[string]*copyEntry, write func(layout.Context, string)) {
+	for _, e := range entries {
+		if e == nil || e.click == nil || e.value == "" {
+			continue
+		}
+		if e.click.Clicked(gtx) {
+			write(gtx, e.value)
+		}
+	}
+}
+
+func writeClipboard(gtx layout.Context, value string) {
+	gtx.Execute(clipboard.WriteCmd{
+		Type: "application/text",
+		Data: io.NopCloser(strings.NewReader(value)),
+	})
 }
 
 func linkButton(th *material.Theme, link *linkEntry, label string) layout.Widget {
