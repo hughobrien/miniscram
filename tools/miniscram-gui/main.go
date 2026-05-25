@@ -733,12 +733,21 @@ func (m *model) hashCueBins(tracks []cueTrack, fullPaths []string) {
 			if m.invalidate != nil {
 				m.invalidate()
 			}
-			if hashErr == nil && sha1h != "" {
-				m.lookup([]string{sha1h})
-			}
 		}()
 	}
 	wg.Wait()
+
+	var hashes []string
+	for i := range tracks {
+		if tracks[i].state == "done" {
+			if h := tracks[i].hashes["sha1"]; h != "" {
+				hashes = append(hashes, h)
+			}
+		}
+	}
+	if len(hashes) > 0 {
+		m.lookup(hashes)
+	}
 }
 
 // ---------------- helpers ----------------
