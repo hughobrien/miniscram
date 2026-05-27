@@ -4,6 +4,19 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-05-27
+
+### Fixed
+
+- **GUI Redump test login no longer freezes the app** (#69). The Redump
+  credentials tab now runs the test-login HTTP request off the Gio UI loop,
+  shows a "Testing login..." status while it is in flight, and applies the
+  success/failure result when the background login finishes.
+- **GUI runner invalidation test no longer flakes under race testing**
+  (#70). The test now waits for the expected asynchronous invalidation count
+  instead of assuming the stderr reader goroutine has finished immediately
+  after the action result is delivered.
+
 ## [1.5.1] - 2026-05-25
 
 ### Fixed
