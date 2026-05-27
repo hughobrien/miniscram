@@ -219,8 +219,6 @@ func TestActionRunner_OnUnusedScramCallback(t *testing.T) {
 	}
 }
 
-
-
 // TestActionRunner_JSONHappy exercises the success path under
 // --progress=json. The fake emits step/done pairs for every known
 // pack phase; the runner should report success with a positive
@@ -317,6 +315,10 @@ func TestActionRunner_InvalidateOnLine(t *testing.T) {
 	}
 	<-done
 
+	deadline := time.Now().Add(time.Second)
+	for ticks.Load() < 4 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if got := ticks.Load(); got < 4 {
 		t.Errorf("invalidate calls = %d, want ≥ 4", got)
 	}

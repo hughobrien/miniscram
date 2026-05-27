@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"gioui.org/layout"
 	"gioui.org/text"
 	"gioui.org/unit"
@@ -18,6 +20,68 @@ func initRedumpEditors(mdl *model, user, pass *widget.Editor) {
 	pass.Mask = '*'
 	user.SetText(mdl.redumpUsername)
 	pass.SetText("")
+}
+
+type redumpLoginFunc func(username, password string) error
+
+func startRedumpTestLogin(mdl *model, user, pass *widget.Editor, login redumpLoginFunc) bool {
+	u := strings.TrimSpace(user.Text())
+	p := pass.Text()
+	if p == "" {
+		if auth, ok := redumpAuthGet(mdl.db); ok && auth.Username == u {
+			p = auth.Password
+		}
+	}
+	if u == "" || p == "" {
+		mdl.redumpStatus = "Username and password required"
+		return false
+	}
+	if mdl.redumpTesting {
+		return false
+	}
+	if mdl.redumpTestDone == nil {
+		mdl.redumpTestDone = make(chan error, 1)
+	}
+	for {
+		select {
+		case <-mdl.redumpTestDone:
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	mdl.redumpTesting = true
+	mdl.redumpStatus = "Testing login..."
+	go func() {
+		err := login(u, p)
+		select {
+		case mdl.redumpTestDone <- err:
+		default:
+		}
+		if mdl.invalidate != nil {
+			mdl.invalidate()
+		}
+	}()
+	return true
+}
+
+func applyRedumpTestLoginResults(mdl *model) bool {
+	if mdl.redumpTestDone == nil {
+		return false
+	}
+	select {
+	case err := <-mdl.redumpTestDone:
+		mdl.redumpTesting = false
+		if err != nil {
+			mdl.redumpStatus = "Login failed"
+		} else {
+			mdl.redumpStatus = "Login OK"
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func redumpView(th *material.Theme, mdl *model, user, pass *widget.Editor, save, test, clear *widget.Clickable) layout.Widget {
