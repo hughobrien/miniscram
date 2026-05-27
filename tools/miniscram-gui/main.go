@@ -347,6 +347,8 @@ type model struct {
 
 	redumpUsername string
 	redumpStatus   string
+	redumpTestDone chan error
+	redumpTesting  bool
 
 	stats       statsAgg
 	recent      []eventRec
@@ -1180,6 +1182,7 @@ func loop(w *app.Window, mdl *model) error {
 				default:
 				}
 			}
+			applyRedumpTestLoginResults(mdl)
 
 			if statsBtn.Clicked(gtx) {
 				mdl.view = "stats"
@@ -1218,20 +1221,9 @@ func loop(w *app.Window, mdl *model) error {
 				mdl.redumpStatus = "Not configured"
 			}
 			if redumpTestBtn.Clicked(gtx) {
-				u := strings.TrimSpace(redumpUserEditor.Text())
-				p := redumpPassEditor.Text()
-				if p == "" {
-					if auth, ok := redumpAuthGet(mdl.db); ok && auth.Username == u {
-						p = auth.Password
-					}
-				}
-				if u == "" || p == "" {
-					mdl.redumpStatus = "Username and password required"
-				} else if err := newRedumpClient("http://forum.redump.org", "http://redump.org").Login(u, p); err != nil {
-					mdl.redumpStatus = "Login failed"
-				} else {
-					mdl.redumpStatus = "Login OK"
-				}
+				startRedumpTestLogin(mdl, &redumpUserEditor, &redumpPassEditor, func(username, password string) error {
+					return newRedumpClient("http://forum.redump.org", "http://redump.org").Login(username, password)
+				})
 			}
 			if openBtn.Clicked(gtx) {
 				// Manual file open is a "user took control" signal — disengage
