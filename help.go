@@ -67,13 +67,18 @@ const unpackHelpText = `USAGE:
 
 ARGUMENTS:
     <in.miniscram>    .miniscram container produced by 'miniscram pack'.
-                      The track .bin files referenced by the manifest
-                      must exist in the same directory as the container.
+                      Bin data is resolved by CONTENT: unpack uses the
+                      per-track hashes, not the recorded filenames. It
+                      looks for the recorded track files in the container's
+                      directory, else a single .bin there, else --bin.
 
 OPTIONS:
     -o, --output <path>    where to write the reconstructed .scram.
                            default: <miniscram-stem>.scram next to
                            <in.miniscram>.
+    --bin <path>           single combined .bin to source from (e.g. one
+                           produced by 'chdman extractcd'). Overrides
+                           filename-based lookup; verified by hash.
     -f, --force            overwrite existing output.
     --progress=json        emit NDJSON progress events on stderr
                            (suppresses human text; for scripted consumers).
@@ -86,9 +91,12 @@ const verifyHelpText = `USAGE:
 
 ARGUMENTS:
     <in.miniscram>    .miniscram container produced by 'miniscram pack'.
-                      Track .bin files must exist in the same directory.
+                      Bin data is resolved by content (recorded track
+                      files, else a single .bin in the dir, else --bin).
 
 OPTIONS:
+    --bin <path>      single combined .bin to source from; overrides
+                      filename-based lookup, verified by hash.
     --progress=json   emit NDJSON progress events on stderr
                       (suppresses human text; for scripted consumers).
     -q, --quiet       suppress progress output.

@@ -204,13 +204,14 @@ func runPack(args []string, stderr io.Writer) int {
 }
 
 func runUnpack(args []string, stderr io.Writer) int {
-	var output, outputLong string
+	var output, outputLong, bin string
 	var force, forceLong bool
 	positional, common, exit, ok := parseSubcommand("unpack", unpackHelpText, args, stderr, func(fs *flag.FlagSet) {
 		fs.StringVar(&output, "o", "", "output path")
 		fs.StringVar(&outputLong, "output", "", "output path")
 		fs.BoolVar(&force, "f", false, "overwrite output")
 		fs.BoolVar(&forceLong, "force", false, "overwrite output")
+		fs.StringVar(&bin, "bin", "", "single bin file to source from")
 	})
 	if !ok {
 		return exit
@@ -232,7 +233,7 @@ func runUnpack(args []string, stderr io.Writer) int {
 	}
 	if err := Unpack(UnpackOptions{
 		ContainerPath: containerPath, OutputPath: out,
-		Verify: true, Force: force || forceLong,
+		Verify: true, Force: force || forceLong, BinPath: bin,
 	}, rep); err != nil {
 		return errToExit(err)
 	}
@@ -240,7 +241,10 @@ func runUnpack(args []string, stderr io.Writer) int {
 }
 
 func runVerify(args []string, stderr io.Writer) int {
-	positional, common, exit, ok := parseSubcommand("verify", verifyHelpText, args, stderr, nil)
+	var bin string
+	positional, common, exit, ok := parseSubcommand("verify", verifyHelpText, args, stderr, func(fs *flag.FlagSet) {
+		fs.StringVar(&bin, "bin", "", "single bin file to source from")
+	})
 	if !ok {
 		return exit
 	}
@@ -254,7 +258,7 @@ func runVerify(args []string, stderr io.Writer) int {
 	default:
 		rep = NewReporter(stderr, common.quiet)
 	}
-	if err := Verify(VerifyOptions{ContainerPath: positional[0]}, rep); err != nil {
+	if err := Verify(VerifyOptions{ContainerPath: positional[0], BinPath: bin}, rep); err != nil {
 		return errToExit(err)
 	}
 	return exitOK

@@ -268,6 +268,9 @@ func resolveBinSource(dir, binPath string, tracks []Track) (string, []ResolvedFi
 // VerifyOptions holds inputs for Verify.
 type VerifyOptions struct {
 	ContainerPath string
+	// BinPath optionally points verify at a single bin to source from
+	// (same semantics as UnpackOptions.BinPath).
+	BinPath string
 }
 
 // Verify performs a non-destructive integrity check: rebuild the
@@ -312,6 +315,7 @@ func Verify(opts VerifyOptions, r Reporter) error {
 		OutputPath:    tmpPath,
 		Verify:        false,
 		Force:         true,
+		BinPath:       opts.BinPath,
 	}, r); err != nil {
 		return err
 	}
