@@ -63,7 +63,9 @@ func (m *Manifest) BinSectorCount() int32 {
 // from a container, where FileOffset is not serialized. Tracks sharing a
 // Filename (combined cues) get sequential offsets accumulated from their
 // Sizes in manifest order; one-track-per-FILE tracks get offset 0. Mirrors
-// the offsets ResolveCue computes at pack time.
+// the offsets ResolveCue computes at pack time. This relies on each
+// Filename's tracks being consecutive in manifest order, which ResolveCue
+// enforces by rejecting non-consecutive duplicate FILEs.
 func assignFileOffsets(tracks []Track) {
 	offsets := map[string]int64{}
 	for i := range tracks {

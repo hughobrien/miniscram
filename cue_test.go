@@ -421,3 +421,29 @@ func TestResolveCueCombinedRejects(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveCueRejectsNonConsecutiveDuplicateFile(t *testing.T) {
+	dir := t.TempDir()
+	// Same FILE name appears in two non-consecutive groups (a.bin, b.bin,
+	// a.bin). ResolveCue's consecutive grouping and assignFileOffsets'
+	// global grouping would disagree, so this must be rejected.
+	for _, name := range []string{"a.bin", "b.bin"} {
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, 2*SectorSize), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cue := "FILE \"a.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n" +
+		"FILE \"b.bin\" BINARY\n  TRACK 02 AUDIO\n    INDEX 01 00:00:00\n" +
+		"FILE \"a.bin\" BINARY\n  TRACK 03 AUDIO\n    INDEX 01 00:00:00\n"
+	cuePath := filepath.Join(dir, "x.cue")
+	if err := os.WriteFile(cuePath, []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ResolveCue(cuePath)
+	if err == nil {
+		t.Fatal("ResolveCue accepted a cue with a non-consecutive duplicate FILE")
+	}
+	if !strings.Contains(err.Error(), "non-consecutive") {
+		t.Fatalf("error %q does not mention non-consecutive duplicate FILE", err)
+	}
+}

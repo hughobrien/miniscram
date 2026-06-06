@@ -302,6 +302,7 @@ func ResolveCue(cuePath string) (CueResolved, error) {
 
 	// ParseCue emits tracks in cue order; a change of Filename starts a
 	// new FILE group. Each group maps to exactly one .bin on disk.
+	seenFiles := map[string]bool{}
 	for i := 0; i < len(tracks); {
 		fname := tracks[i].Filename
 		j := i
@@ -309,6 +310,16 @@ func ResolveCue(cuePath string) (CueResolved, error) {
 			j++
 		}
 		group := tracks[i:j] // sub-slice shares backing array with tracks
+
+		// Reject a Filename that reappears in a later, non-consecutive group.
+		// This grouping is consecutive, but assignFileOffsets (unpack) groups
+		// by Filename globally; if the same name spanned two runs the two
+		// would compute different FileOffsets and break round-trip integrity.
+		if seenFiles[fname] {
+			return CueResolved{}, fmt.Errorf("file %s appears in non-consecutive FILE groups; "+
+				"each FILE must list all its tracks consecutively", fname)
+		}
+		seenFiles[fname] = true
 
 		path := filepath.Join(cueDir, fname)
 		info, err := os.Stat(path)
