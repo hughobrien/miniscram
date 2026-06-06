@@ -321,3 +321,68 @@ func protectionLabel(protected bool) string {
 	}
 	return "clean"
 }
+
+// TestE2EContentDefinedUnpack packs the real Vampire_play disc from its
+// per-track bins, then recovers the scram from the combined chdman-style
+// Vampire_play.bin via --bin — a different filename and partitioning than
+// the container recorded. Proves content-defined recovery byte-exact on a
+// real disc. Skips when the dataset is absent.
+func TestE2EContentDefinedUnpack(t *testing.T) {
+	dir := "test-discs/vampire-play"
+	scram := filepath.Join(dir, "Vampire_play.scram")
+	combined := filepath.Join(dir, "Vampire_play.bin")
+	t1 := filepath.Join(dir, "Vampire_play (Track 1).bin")
+	t2 := filepath.Join(dir, "Vampire_play (Track 2).bin")
+	for _, p := range []string{scram, combined, t1, t2} {
+		if _, err := os.Stat(p); err != nil {
+			t.Skipf("dataset not present: %s", p)
+		}
+	}
+
+	// Work in a temp dir on the same filesystem (recovered scram is ~900 MB).
+	tmp, err := os.MkdirTemp(dir, "miniscram-cd-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmp) })
+
+	// Split cue referencing the two per-track bins (redumper convention).
+	cue := "FILE \"Vampire_play (Track 1).bin\" BINARY\n" +
+		"  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n" +
+		"FILE \"Vampire_play (Track 2).bin\" BINARY\n" +
+		"  TRACK 02 AUDIO\n    INDEX 00 00:00:00\n    INDEX 01 00:02:00\n"
+	cuePath := filepath.Join(dir, "vp_split_cd.cue")
+	if err := os.WriteFile(cuePath, []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(cuePath) })
+
+	// Place the container next to the cue/per-track bins. Pack's built-in
+	// step-8 round-trip verify resolves bins relative to the container's
+	// directory, so the per-track bins must be reachable from there for the
+	// split layout to verify clean.
+	container := filepath.Join(dir, "vp_split_cd.miniscram")
+	t.Cleanup(func() { os.Remove(container) })
+	rep := NewReporter(io.Discard, true)
+	if err := Pack(PackOptions{
+		CuePath: cuePath, ScramPath: scram, OutputPath: container,
+	}, rep); err != nil {
+		t.Fatalf("Pack (split): %v", err)
+	}
+
+	// The container records the per-track filenames. Recover from the
+	// combined bin via --bin — an explicit single-file source with a
+	// different filename and partitioning than the container recorded. The
+	// --bin override bypasses directory-based resolution entirely, so this
+	// is a genuine cross-layout recovery regardless of dir contents. The
+	// recovered scram lands in tmp (~900 MB).
+	out := filepath.Join(tmp, "recovered.scram")
+	if err := Unpack(UnpackOptions{
+		ContainerPath: container, OutputPath: out, Verify: true, BinPath: combined,
+	}, rep); err != nil {
+		t.Fatalf("Unpack --bin combined: %v", err)
+	}
+	if !filesEqual(t, out, scram) {
+		t.Fatal("recovered scram differs from original")
+	}
+}
