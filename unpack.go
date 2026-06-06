@@ -46,8 +46,10 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 	st = r.Step("resolving bin files")
 	containerDir := filepath.Dir(opts.ContainerPath)
 	assignFileOffsets(m.Tracks)
-	// Sum per-file sizes so a combined .bin (several tracks sharing one
-	// Filename) is validated against the total of its tracks' ranges.
+	// Sum per-file sizes so a bin shared by several tracks is validated
+	// against the total of its tracks' ranges. Each Redumper track has its
+	// own file today, so a sum is just that track's size; grouping by name
+	// is what keeps range-based resolution layout-agnostic.
 	fileTotals := map[string]int64{}
 	for _, tr := range m.Tracks {
 		fileTotals[tr.Filename] += tr.Size
