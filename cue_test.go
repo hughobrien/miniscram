@@ -373,7 +373,8 @@ func TestResolveCueCombinedRejects(t *testing.T) {
 	cases := []struct {
 		name      string
 		cue       string
-		fileSects int // combined.bin size in sectors
+		fileSects int    // combined.bin size in sectors
+		wantErr   string // distinctive substring of expected error
 	}{
 		{
 			name: "first-track-not-at-zero",
@@ -381,6 +382,7 @@ func TestResolveCueCombinedRejects(t *testing.T) {
 				"  TRACK 01 MODE1/2352\n    INDEX 01 00:00:02\n" +
 				"  TRACK 02 AUDIO\n    INDEX 01 00:00:04\n",
 			fileSects: 7,
+			wantErr:   "does not start at offset 0",
 		},
 		{
 			name: "non-monotonic-index",
@@ -388,6 +390,7 @@ func TestResolveCueCombinedRejects(t *testing.T) {
 				"  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n" +
 				"  TRACK 02 AUDIO\n    INDEX 01 00:00:00\n",
 			fileSects: 7,
+			wantErr:   "not greater than previous",
 		},
 		{
 			name: "index-beyond-file",
@@ -395,6 +398,7 @@ func TestResolveCueCombinedRejects(t *testing.T) {
 				"  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n" +
 				"  TRACK 02 AUDIO\n    INDEX 01 00:01:00\n", // frame 75 >> 7-sector file
 			fileSects: 7,
+			wantErr:   "beyond file length",
 		},
 	}
 	for _, tc := range cases {
@@ -407,8 +411,12 @@ func TestResolveCueCombinedRejects(t *testing.T) {
 			if err := os.WriteFile(cuePath, []byte(tc.cue), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := ResolveCue(cuePath); err == nil {
+			_, err := ResolveCue(cuePath)
+			if err == nil {
 				t.Fatalf("ResolveCue accepted invalid combined cue %q", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q does not mention %q", err, tc.wantErr)
 			}
 		})
 	}
