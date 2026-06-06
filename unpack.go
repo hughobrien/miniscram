@@ -45,8 +45,20 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 
 	st = r.Step("resolving bin files")
 	containerDir := filepath.Dir(opts.ContainerPath)
-	files := make([]ResolvedFile, len(m.Tracks))
-	for i, tr := range m.Tracks {
+	assignFileOffsets(m.Tracks)
+	// Sum per-file sizes so a combined .bin (several tracks sharing one
+	// Filename) is validated against the total of its tracks' ranges.
+	fileTotals := map[string]int64{}
+	for _, tr := range m.Tracks {
+		fileTotals[tr.Filename] += tr.Size
+	}
+	var files []ResolvedFile
+	seen := map[string]bool{}
+	for _, tr := range m.Tracks {
+		if seen[tr.Filename] {
+			continue
+		}
+		seen[tr.Filename] = true
 		path := filepath.Join(containerDir, tr.Filename)
 		info, err := os.Stat(path)
 		if err != nil {
@@ -54,18 +66,18 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 			st.Fail(wrapped)
 			return wrapped
 		}
-		if info.Size() != tr.Size {
-			wrapped := fmt.Errorf("%w: track %d (%s) size on disk %d != manifest %d",
-				errBinHashMismatch, tr.Number, tr.Filename, info.Size(), tr.Size)
+		if info.Size() != fileTotals[tr.Filename] {
+			wrapped := fmt.Errorf("%w: %s size on disk %d != manifest total %d",
+				errBinHashMismatch, tr.Filename, info.Size(), fileTotals[tr.Filename])
 			st.Fail(wrapped)
 			return wrapped
 		}
-		files[i] = ResolvedFile{Path: path, Size: tr.Size}
+		files = append(files, ResolvedFile{Path: path, Size: info.Size()})
 	}
-	st.Done("%d track(s)", len(files))
+	st.Done("%d file(s), %d track(s)", len(files), len(m.Tracks))
 
 	st = r.Step("verifying bin hashes")
-	perTrack, err := hashTrackFiles(files)
+	perTrack, err := hashTracks(containerDir, m.Tracks)
 	if err != nil {
 		st.Fail(err)
 		return err
