@@ -28,6 +28,55 @@ func packSyntheticContainer(t *testing.T) string {
 	return out
 }
 
+func TestHashTracksRangesMatchWholeFiles(t *testing.T) {
+	dir := t.TempDir()
+	// Two logical tracks concatenated into one combined file.
+	a := bytes.Repeat([]byte{0xAA}, 3*SectorSize)
+	b := bytes.Repeat([]byte{0xBB}, 2*SectorSize)
+	combined := append(append([]byte{}, a...), b...)
+	if err := os.WriteFile(filepath.Join(dir, "combined.bin"), combined, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Also write the two ranges as standalone files to hash independently.
+	if err := os.WriteFile(filepath.Join(dir, "a.bin"), a, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.bin"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracks := []Track{
+		{Number: 1, Filename: "combined.bin", FileOffset: 0, Size: int64(len(a))},
+		{Number: 2, Filename: "combined.bin", FileOffset: int64(len(a)), Size: int64(len(b))},
+	}
+	got, err := hashTracks(dir, tracks)
+	if err != nil {
+		t.Fatalf("hashTracks: %v", err)
+	}
+	wantA := mustHashFile(t, filepath.Join(dir, "a.bin"))
+	wantB := mustHashFile(t, filepath.Join(dir, "b.bin"))
+	if got[0] != wantA {
+		t.Errorf("track 1 range hash %+v != standalone a.bin %+v", got[0], wantA)
+	}
+	if got[1] != wantB {
+		t.Errorf("track 2 range hash %+v != standalone b.bin %+v", got[1], wantB)
+	}
+}
+
+func TestAssignFileOffsets(t *testing.T) {
+	tracks := []Track{
+		{Number: 1, Filename: "combined.bin", Size: 4 * SectorSize},
+		{Number: 2, Filename: "combined.bin", Size: 3 * SectorSize},
+		{Number: 3, Filename: "other.bin", Size: 5 * SectorSize},
+	}
+	assignFileOffsets(tracks)
+	wantOffsets := []int64{0, 4 * SectorSize, 0}
+	for i, w := range wantOffsets {
+		if tracks[i].FileOffset != w {
+			t.Errorf("track %d FileOffset = %d, want %d", tracks[i].Number, tracks[i].FileOffset, w)
+		}
+	}
+}
+
 func TestHashFile(t *testing.T) {
 	for _, tc := range []struct {
 		content    []byte
@@ -195,9 +244,9 @@ type capturingReporter struct {
 	unused []unusedScramCall
 }
 
-func (c *capturingReporter) Step(string) StepHandle              { return noopStep{} }
-func (c *capturingReporter) Info(string, ...any)                 {}
-func (c *capturingReporter) Warn(string, ...any)                 {}
+func (c *capturingReporter) Step(string) StepHandle { return noopStep{} }
+func (c *capturingReporter) Info(string, ...any)    {}
+func (c *capturingReporter) Warn(string, ...any)    {}
 func (c *capturingReporter) UnusedScram(path string, size int64) {
 	c.unused = append(c.unused, unusedScramCall{Path: path, Size: size})
 }

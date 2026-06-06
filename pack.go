@@ -286,6 +286,36 @@ func hashTrackFiles(files []ResolvedFile) ([]FileHashes, error) {
 	return perFile, nil
 }
 
+// hashTracks returns per-track MD5/SHA-1/SHA-256 over each track's byte
+// range [FileOffset, FileOffset+Size) within filepath.Join(baseDir,
+// track.Filename), in track order. For one-track-per-FILE cues FileOffset
+// is 0 and Size is the whole file, so this reproduces hashTrackFiles. For
+// combined (multi-track-per-FILE) cues each track hashes only its own
+// range. Tracks must have FileOffset/Size populated (by ResolveCue at pack
+// time or assignFileOffsets at unpack time).
+func hashTracks(baseDir string, tracks []Track) ([]FileHashes, error) {
+	perTrack := make([]FileHashes, len(tracks))
+	for i, t := range tracks {
+		f, err := os.Open(filepath.Join(baseDir, t.Filename))
+		if err != nil {
+			return nil, err
+		}
+		sr := io.NewSectionReader(f, t.FileOffset, t.Size)
+		m, s1, s256 := md5.New(), sha1.New(), sha256.New()
+		_, copyErr := io.Copy(io.MultiWriter(m, s1, s256), sr)
+		f.Close()
+		if copyErr != nil {
+			return nil, copyErr
+		}
+		perTrack[i] = FileHashes{
+			MD5:    hex.EncodeToString(m.Sum(nil)),
+			SHA1:   hex.EncodeToString(s1.Sum(nil)),
+			SHA256: hex.EncodeToString(s256.Sum(nil)),
+		}
+	}
+	return perTrack, nil
+}
+
 // compareHashes returns nil iff all three hashes match. Otherwise it
 // returns a plain (un-sentinel-wrapped) error whose message describes
 // each hash's status. Callers wrap with their own sentinel via

@@ -59,6 +59,19 @@ func (m *Manifest) BinSectorCount() int32 {
 	return int32(m.BinSize() / int64(SectorSize))
 }
 
+// assignFileOffsets fills each track's FileOffset for tracks read back
+// from a container, where FileOffset is not serialized. Tracks sharing a
+// Filename (combined cues) get sequential offsets accumulated from their
+// Sizes in manifest order; one-track-per-FILE tracks get offset 0. Mirrors
+// the offsets ResolveCue computes at pack time.
+func assignFileOffsets(tracks []Track) {
+	offsets := map[string]int64{}
+	for i := range tracks {
+		tracks[i].FileOffset = offsets[tracks[i].Filename]
+		offsets[tracks[i].Filename] += tracks[i].Size
+	}
+}
+
 // WriteContainer writes a v2 .miniscram file at path: 5-byte header
 // (magic + version) followed by MFST, TRKS, HASH, DLTA chunks.
 // Atomic: writes to a .tmp file then renames.
