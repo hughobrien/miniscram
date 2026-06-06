@@ -261,10 +261,13 @@ func hashFile(path string) (FileHashes, error) {
 // hashTracks returns per-track MD5/SHA-1/SHA-256 over each track's byte
 // range [FileOffset, FileOffset+Size) within filepath.Join(baseDir,
 // track.Filename), in track order. For one-track-per-FILE cues FileOffset
-// is 0 and Size is the whole file, so this reproduces hashTrackFiles. For
-// combined (multi-track-per-FILE) cues each track hashes only its own
+// is 0 and Size is the whole file, so each track hashes its entire file.
+// For combined (multi-track-per-FILE) cues each track hashes only its own
 // range. Tracks must have FileOffset/Size populated (by ResolveCue at pack
 // time or assignFileOffsets at unpack time).
+//
+// A combined file is reopened once per track, but each pass reads only its
+// own disjoint range, so total I/O across the file is ~1x its size.
 func hashTracks(baseDir string, tracks []Track) ([]FileHashes, error) {
 	perTrack := make([]FileHashes, len(tracks))
 	for i, t := range tracks {
