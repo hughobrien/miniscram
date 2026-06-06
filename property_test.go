@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	mathrand "math/rand"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -286,5 +288,57 @@ func TestContainerRoundTripProperty(t *testing.T) {
 	// MaxCount: 100 — each iteration involves a tempfile + zlib roundtrip.
 	if err := quick.Check(f, &quick.Config{MaxCount: 100}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestRecoveryLayoutAgnostic asserts the scram recovered from the recorded
+// per-track files is byte-identical to the one recovered from a single
+// combined bin of the same content — the core content-defined property.
+func TestRecoveryLayoutAgnostic(t *testing.T) {
+	for _, audioTracks := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("audio%d", audioTracks), func(t *testing.T) {
+			disc := synthDisc(t, SynthOpts{MainSectors: 20, AudioTracks: audioTracks, WriteOffset: 8})
+
+			splitDir := t.TempDir()
+			_, splitScram, splitCue := writeFixture(t, splitDir, disc)
+			container := filepath.Join(splitDir, "x.miniscram")
+			if err := Pack(PackOptions{
+				CuePath: splitCue, ScramPath: splitScram, OutputPath: container,
+				LeadinLBA: LBAPregapStart,
+			}, nil); err != nil {
+				t.Fatalf("Pack: %v", err)
+			}
+
+			// Recover via the named per-track files (in place).
+			viaNamed := filepath.Join(splitDir, "via-named.scram")
+			if err := Unpack(UnpackOptions{ContainerPath: container, OutputPath: viaNamed, Verify: true}, nil); err != nil {
+				t.Fatalf("Unpack via named files: %v", err)
+			}
+
+			// Recover via a single combined bin in a fresh dir.
+			restoreDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(restoreDir, "combined.bin"), combinedBinBytes(disc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			containerCopy := filepath.Join(restoreDir, "x.miniscram")
+			data, err := os.ReadFile(container)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(containerCopy, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			viaSingle := filepath.Join(restoreDir, "via-single.scram")
+			if err := Unpack(UnpackOptions{ContainerPath: containerCopy, OutputPath: viaSingle, Verify: true}, nil); err != nil {
+				t.Fatalf("Unpack via single bin: %v", err)
+			}
+
+			if mustHashFile(t, viaNamed) != mustHashFile(t, viaSingle) {
+				t.Fatal("scram recovered via named files differs from via single bin")
+			}
+			if mustHashFile(t, viaNamed) != mustHashFile(t, splitScram) {
+				t.Fatal("recovered scram differs from the original")
+			}
+		})
 	}
 }
