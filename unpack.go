@@ -21,6 +21,9 @@ type UnpackOptions struct {
 	OutputPath    string
 	Verify        bool
 	Force         bool
+	// BinPath optionally points unpack at a single bin to source from,
+	// overriding filename-based resolution. Empty = auto-resolve.
+	BinPath string
 }
 
 // Unpack reproduces the original .scram from the container's track files + delta.
@@ -45,41 +48,15 @@ func Unpack(opts UnpackOptions, r Reporter) error {
 
 	st = r.Step("resolving bin files")
 	containerDir := filepath.Dir(opts.ContainerPath)
-	assignFileOffsets(m.Tracks)
-	// Sum per-file sizes so a bin shared by several tracks is validated
-	// against the total of its tracks' ranges. Each Redumper track has its
-	// own file today, so a sum is just that track's size; grouping by name
-	// is what keeps range-based resolution layout-agnostic.
-	fileTotals := map[string]int64{}
-	for _, tr := range m.Tracks {
-		fileTotals[tr.Filename] += tr.Size
-	}
-	var files []ResolvedFile
-	seen := map[string]bool{}
-	for _, tr := range m.Tracks {
-		if seen[tr.Filename] {
-			continue
-		}
-		seen[tr.Filename] = true
-		path := filepath.Join(containerDir, tr.Filename)
-		info, err := os.Stat(path)
-		if err != nil {
-			wrapped := fmt.Errorf("track %d (%s): %w", tr.Number, tr.Filename, err)
-			st.Fail(wrapped)
-			return wrapped
-		}
-		if info.Size() != fileTotals[tr.Filename] {
-			wrapped := fmt.Errorf("%w: %s size on disk %d != manifest total %d",
-				errBinHashMismatch, tr.Filename, info.Size(), fileTotals[tr.Filename])
-			st.Fail(wrapped)
-			return wrapped
-		}
-		files = append(files, ResolvedFile{Path: path, Size: info.Size()})
+	baseDir, files, err := resolveBinSource(containerDir, opts.BinPath, m.Tracks)
+	if err != nil {
+		st.Fail(err)
+		return err
 	}
 	st.Done("%d file(s), %d track(s)", len(files), len(m.Tracks))
 
 	st = r.Step("verifying bin hashes")
-	perTrack, err := hashTracks(containerDir, m.Tracks)
+	perTrack, err := hashTracks(baseDir, m.Tracks)
 	if err != nil {
 		st.Fail(err)
 		return err

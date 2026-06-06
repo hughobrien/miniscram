@@ -129,11 +129,11 @@ func TestUnpackMissingBinSurfacesStepError(t *testing.T) {
 		t.Fatal("expected error for missing bin file, got nil")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "no such file") {
-		t.Errorf("expected 'no such file' in error, got: %v", msg)
+	if !strings.Contains(msg, "cannot find bin data") {
+		t.Errorf("expected 'cannot find bin data' in error, got: %v", msg)
 	}
-	if !strings.Contains(msg, "track 1") {
-		t.Errorf("expected track number in error, got: %v", msg)
+	if !strings.Contains(msg, "--bin") {
+		t.Errorf("expected '--bin' hint in error, got: %v", msg)
 	}
 }
 
@@ -309,4 +309,82 @@ func TestResolveBinSourceAmbiguousAndMissing(t *testing.T) {
 			t.Fatal("expected error when no named files and no .bin present")
 		}
 	})
+}
+
+func TestUnpackContentDefinedSingleBin(t *testing.T) {
+	disc := synthDisc(t, SynthOpts{MainSectors: 12, AudioTracks: 1, WriteOffset: 8})
+
+	// Pack against the split (one-file-per-track) layout.
+	splitDir := t.TempDir()
+	_, splitScram, splitCue := writeFixture(t, splitDir, disc)
+	container := filepath.Join(splitDir, "x.miniscram")
+	if err := Pack(PackOptions{
+		CuePath: splitCue, ScramPath: splitScram, OutputPath: container,
+		LeadinLBA: LBAPregapStart,
+	}, nil); err != nil {
+		t.Fatalf("Pack: %v", err)
+	}
+
+	// Restore in a fresh dir holding ONLY the container + a single combined
+	// bin whose name does not match the container's per-track filenames.
+	restoreDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(restoreDir, "combined.bin"), combinedBinBytes(disc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	containerCopy := filepath.Join(restoreDir, "x.miniscram")
+	data, err := os.ReadFile(container)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(containerCopy, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(restoreDir, "out.scram")
+	if err := Unpack(UnpackOptions{
+		ContainerPath: containerCopy, OutputPath: out, Verify: true,
+	}, nil); err != nil {
+		t.Fatalf("content-defined Unpack: %v", err)
+	}
+	if got, want := mustHashFile(t, out), mustHashFile(t, splitScram); got != want {
+		t.Fatalf("recovered scram %+v != original %+v", got, want)
+	}
+}
+
+func TestUnpackContentDefinedRejectsWrongBin(t *testing.T) {
+	disc := synthDisc(t, SynthOpts{MainSectors: 12, AudioTracks: 1, WriteOffset: 8})
+	splitDir := t.TempDir()
+	_, splitScram, splitCue := writeFixture(t, splitDir, disc)
+	container := filepath.Join(splitDir, "x.miniscram")
+	if err := Pack(PackOptions{
+		CuePath: splitCue, ScramPath: splitScram, OutputPath: container,
+		LeadinLBA: LBAPregapStart,
+	}, nil); err != nil {
+		t.Fatalf("Pack: %v", err)
+	}
+
+	// A combined bin of the RIGHT size but WRONG content (one byte flipped).
+	restoreDir := t.TempDir()
+	bad := combinedBinBytes(disc)
+	bad[100] ^= 0xFF
+	if err := os.WriteFile(filepath.Join(restoreDir, "combined.bin"), bad, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	containerCopy := filepath.Join(restoreDir, "x.miniscram")
+	data, _ := os.ReadFile(container)
+	if err := os.WriteFile(containerCopy, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(restoreDir, "out.scram")
+	err := Unpack(UnpackOptions{ContainerPath: containerCopy, OutputPath: out, Verify: true}, nil)
+	if err == nil {
+		t.Fatal("expected hash-mismatch error on wrong bin")
+	}
+	if !errors.Is(err, errBinHashMismatch) {
+		t.Errorf("error = %v; want wrapped errBinHashMismatch", err)
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Error("no output scram should be written when the bin fails verification")
+	}
 }
