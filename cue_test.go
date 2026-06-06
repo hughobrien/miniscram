@@ -77,7 +77,6 @@ func TestParseCueRejects(t *testing.T) {
 		{"path-separator", "FILE \"subdir/x.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"},
 		{"dot-name", "FILE \".\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"},
 		{"dotdot-name", "FILE \"..\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"},
-		{"multi-track-per-file", "FILE \"shared.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n  TRACK 02 AUDIO\n    INDEX 01 02:00:00\n"},
 		{"no-index01", "FILE \"X.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 00 00:00:00\n"},
 	}
 	for _, tc := range cases {
@@ -304,4 +303,32 @@ FILE "a (Track 3).bin" BINARY
 			t.Fatalf("got Session=%d; want 2", got[1].Session)
 		}
 	})
+}
+
+func TestParseCueAcceptsMultiTrackPerFile(t *testing.T) {
+	src := "FILE \"combined.bin\" BINARY\n" +
+		"  TRACK 01 MODE1/2352\n" +
+		"    INDEX 01 00:00:00\n" +
+		"  TRACK 02 AUDIO\n" +
+		"    INDEX 00 00:09:00\n" +
+		"    INDEX 01 00:11:00\n"
+	got, err := ParseCue(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("ParseCue: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d tracks, want 2", len(got))
+	}
+	if got[0].Filename != "combined.bin" || got[1].Filename != "combined.bin" {
+		t.Errorf("both tracks should share Filename combined.bin; got %q, %q", got[0].Filename, got[1].Filename)
+	}
+	// IndexFrame is the lowest INDEX of each track (file-relative frames).
+	// Track 1: INDEX 01 00:00:00 = 0. Track 2: lowest is INDEX 00 00:09:00 =
+	// 9*75 = 675.
+	if got[0].IndexFrame != 0 {
+		t.Errorf("track 1 IndexFrame = %d, want 0", got[0].IndexFrame)
+	}
+	if got[1].IndexFrame != 675 {
+		t.Errorf("track 2 IndexFrame = %d, want 675 (INDEX 00 00:09:00)", got[1].IndexFrame)
+	}
 }

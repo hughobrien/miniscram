@@ -41,6 +41,16 @@ type Track struct {
 	Filename string     `json:"filename"`
 	Size     int64      `json:"size"`
 	Hashes   FileHashes `json:"hashes"`
+
+	// IndexFrame is the file-relative frame number of this track's lowest
+	// INDEX (INDEX 00 if present, else INDEX 01), captured by ParseCue.
+	// Transient: consumed by ResolveCue to derive FileOffset; never
+	// serialized (the TRKS chunk codec ignores it).
+	IndexFrame int32 `json:"-"`
+	// FileOffset is the byte offset of this track's data within Filename.
+	// 0 for one-track-per-FILE cues. Transient: re-derived at read time
+	// by ResolveCue (pack) or assignFileOffsets (unpack); never serialized.
+	FileOffset int64 `json:"-"`
 }
 
 // IsData reports whether the track's main-channel data is scrambled.
@@ -72,9 +82,10 @@ var validModes = map[string]bool{
 // Returned Tracks have Number, Mode, and Filename populated.
 // FirstLBA / Size / hashes are populated downstream (ResolveCue, Pack).
 //
-// Rejects non-BINARY FILE types, path-bearing filenames (containing
-// any of `/`, `\`, `..`), and cues where a single FILE contains more
-// than one TRACK (Redumper never produces this shape).
+// Rejects non-BINARY FILE types and path-bearing filenames (containing
+// any of `/`, `\`, `..`). A FILE may contain multiple TRACKs (combined
+// chdman-style layout); each track records its lowest INDEX frame in
+// IndexFrame for ResolveCue to turn into a within-file byte range.
 func ParseCue(r io.Reader) ([]Track, error) {
 	// Read up to cueSniffBytes into a buffer before scanning. If the
 	// buffer holds none of the cue keywords, return errNotACuesheet
@@ -94,9 +105,10 @@ func ParseCue(r io.Reader) ([]Track, error) {
 	var tracks []Track
 	var cur *Track
 	var hasIndex01 bool
+	var curMinFrame int32  // lowest INDEX frame seen for cur (file-relative)
+	var curHasIndex bool   // whether any INDEX line was seen for cur
 	var currentFile string // basename of the most recent FILE line
-	var fileTrackCount int // number of TRACKs seen in currentFile (must end at 0 or 1)
-	currentSession := 1   // bumped by REM SESSION NN; stamped on every TRACK
+	currentSession := 1    // bumped by REM SESSION NN; stamped on every TRACK
 	flushTrack := func() error {
 		if cur == nil {
 			return nil
@@ -104,6 +116,7 @@ func ParseCue(r io.Reader) ([]Track, error) {
 		if !hasIndex01 {
 			return fmt.Errorf("track %d has no INDEX 01", cur.Number)
 		}
+		cur.IndexFrame = curMinFrame
 		tracks = append(tracks, *cur)
 		return nil
 	}
@@ -170,17 +183,12 @@ func ParseCue(r io.Reader) ([]Track, error) {
 			cur = nil
 			hasIndex01 = false
 			currentFile = rawName
-			fileTrackCount = 0
 		case "TRACK":
 			if currentFile == "" {
 				return nil, fmt.Errorf("TRACK before any FILE: %q", line)
 			}
 			if err := flushTrack(); err != nil {
 				return nil, err
-			}
-			fileTrackCount++
-			if fileTrackCount > 1 {
-				return nil, fmt.Errorf("FILE %q contains more than one TRACK; multi-track-per-FILE cues are unsupported", currentFile)
 			}
 			if len(fields) < 3 {
 				return nil, fmt.Errorf("malformed TRACK line: %q", line)
@@ -195,6 +203,8 @@ func ParseCue(r io.Reader) ([]Track, error) {
 			}
 			cur = &Track{Number: n, Mode: mode, Filename: currentFile, Session: currentSession}
 			hasIndex01 = false
+			curMinFrame = 0
+			curHasIndex = false
 		case "INDEX":
 			if cur == nil {
 				return nil, fmt.Errorf("INDEX before TRACK: %q", line)
@@ -202,16 +212,17 @@ func ParseCue(r io.Reader) ([]Track, error) {
 			if len(fields) < 3 {
 				return nil, fmt.Errorf("malformed INDEX line: %q", line)
 			}
-			if fields[1] != "01" {
-				continue // ignore INDEX 00 and others
-			}
-			// Parse the MSF for validation only; the value is unused
-			// (see spec: FirstLBA is the file-start LBA, computed by
-			// ResolveCue, not the INDEX 01 within-file LBA).
-			if _, err := parseMSF(fields[2]); err != nil {
+			frame, err := parseMSF(fields[2])
+			if err != nil {
 				return nil, fmt.Errorf("bad MSF in %q: %v", line, err)
 			}
-			hasIndex01 = true
+			if !curHasIndex || frame < curMinFrame {
+				curMinFrame = frame
+				curHasIndex = true
+			}
+			if fields[1] == "01" {
+				hasIndex01 = true
+			}
 		default:
 			// PERFORMER, TITLE, CATALOG, PREGAP, etc. — ignored.
 		}
