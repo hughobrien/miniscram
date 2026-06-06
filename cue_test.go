@@ -332,3 +332,84 @@ func TestParseCueAcceptsMultiTrackPerFile(t *testing.T) {
 		t.Errorf("track 2 IndexFrame = %d, want 675 (INDEX 00 00:09:00)", got[1].IndexFrame)
 	}
 }
+
+func TestResolveCueCombined(t *testing.T) {
+	dir := t.TempDir()
+	// Combined bin: 4-sector data track + 3-sector audio track = 7 sectors.
+	const dataSectors, audioSectors = 4, 3
+	combined := make([]byte, (dataSectors+audioSectors)*SectorSize)
+	if err := os.WriteFile(filepath.Join(dir, "combined.bin"), combined, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Audio track starts at file-frame 4 (00:00:04).
+	cue := "FILE \"combined.bin\" BINARY\n" +
+		"  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n" +
+		"  TRACK 02 AUDIO\n    INDEX 01 00:00:04\n"
+	cuePath := filepath.Join(dir, "combined.cue")
+	if err := os.WriteFile(cuePath, []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveCue(cuePath)
+	if err != nil {
+		t.Fatalf("ResolveCue: %v", err)
+	}
+	if len(resolved.Files) != 1 {
+		t.Fatalf("Files = %d, want 1 (combined cue has one FILE)", len(resolved.Files))
+	}
+	want := []Track{
+		{Number: 1, FileOffset: 0, Size: dataSectors * SectorSize, FirstLBA: 0},
+		{Number: 2, FileOffset: dataSectors * SectorSize, Size: audioSectors * SectorSize, FirstLBA: dataSectors},
+	}
+	for i, w := range want {
+		got := resolved.Tracks[i]
+		if got.FileOffset != w.FileOffset || got.Size != w.Size || got.FirstLBA != w.FirstLBA {
+			t.Errorf("track %d: got FileOffset=%d Size=%d FirstLBA=%d; want FileOffset=%d Size=%d FirstLBA=%d",
+				got.Number, got.FileOffset, got.Size, got.FirstLBA, w.FileOffset, w.Size, w.FirstLBA)
+		}
+	}
+}
+
+func TestResolveCueCombinedRejects(t *testing.T) {
+	cases := []struct {
+		name      string
+		cue       string
+		fileSects int // combined.bin size in sectors
+	}{
+		{
+			name: "first-track-not-at-zero",
+			cue: "FILE \"combined.bin\" BINARY\n" +
+				"  TRACK 01 MODE1/2352\n    INDEX 01 00:00:02\n" +
+				"  TRACK 02 AUDIO\n    INDEX 01 00:00:04\n",
+			fileSects: 7,
+		},
+		{
+			name: "non-monotonic-index",
+			cue: "FILE \"combined.bin\" BINARY\n" +
+				"  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n" +
+				"  TRACK 02 AUDIO\n    INDEX 01 00:00:00\n",
+			fileSects: 7,
+		},
+		{
+			name: "index-beyond-file",
+			cue: "FILE \"combined.bin\" BINARY\n" +
+				"  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n" +
+				"  TRACK 02 AUDIO\n    INDEX 01 00:01:00\n", // frame 75 >> 7-sector file
+			fileSects: 7,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "combined.bin"), make([]byte, tc.fileSects*SectorSize), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cuePath := filepath.Join(dir, "combined.cue")
+			if err := os.WriteFile(cuePath, []byte(tc.cue), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ResolveCue(cuePath); err == nil {
+				t.Fatalf("ResolveCue accepted invalid combined cue %q", tc.name)
+			}
+		})
+	}
+}
