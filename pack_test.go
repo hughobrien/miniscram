@@ -28,47 +28,6 @@ func packSyntheticContainer(t *testing.T) string {
 	return out
 }
 
-func TestPackUnpackCombinedRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	disc := synthDisc(t, SynthOpts{MainSectors: 12, AudioTracks: 1, WriteOffset: 8})
-	scramPath, cuePath := writeCombinedFixture(t, dir, disc)
-	containerPath := filepath.Join(dir, "combined.miniscram")
-
-	if err := Pack(PackOptions{
-		CuePath: cuePath, ScramPath: scramPath, OutputPath: containerPath,
-		LeadinLBA: LBAPregapStart, // synthDisc uses a 150-sector pregap, no full lead-in
-	}, nil); err != nil {
-		t.Fatalf("Pack combined cue: %v", err)
-	}
-
-	// The container must record two tracks both pointing at combined.bin.
-	m, _, err := ReadContainer(containerPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m.Tracks) != 2 {
-		t.Fatalf("container has %d tracks, want 2", len(m.Tracks))
-	}
-	for _, tr := range m.Tracks {
-		if tr.Filename != "combined.bin" {
-			t.Errorf("track %d Filename = %q, want combined.bin", tr.Number, tr.Filename)
-		}
-	}
-
-	// Unpack with verification: the recovered scram must equal the original.
-	outPath := filepath.Join(dir, "combined.scram.recovered")
-	if err := Unpack(UnpackOptions{
-		ContainerPath: containerPath, OutputPath: outPath, Verify: true,
-	}, nil); err != nil {
-		t.Fatalf("Unpack combined: %v", err)
-	}
-	got := mustHashFile(t, outPath)
-	want := mustHashFile(t, scramPath)
-	if got != want {
-		t.Fatalf("recovered scram hash %+v != original %+v", got, want)
-	}
-}
-
 func TestHashTracksRangesMatchWholeFiles(t *testing.T) {
 	dir := t.TempDir()
 	// Two logical tracks concatenated into one combined file.

@@ -42,14 +42,11 @@ type Track struct {
 	Size     int64      `json:"size"`
 	Hashes   FileHashes `json:"hashes"`
 
-	// IndexFrame is the file-relative frame number of this track's lowest
-	// INDEX (INDEX 00 if present, else INDEX 01), captured by ParseCue.
-	// Transient: consumed by ResolveCue to derive FileOffset; never
-	// serialized (the TRKS chunk codec ignores it).
-	IndexFrame int32 `json:"-"`
 	// FileOffset is the byte offset of this track's data within Filename.
-	// 0 for one-track-per-FILE cues. Transient: re-derived at read time
-	// by ResolveCue (pack) or assignFileOffsets (unpack); never serialized.
+	// 0 for one-track-per-FILE cues (every Redumper track). Transient:
+	// set by the unpack-side resolver, never serialized (the TRKS chunk
+	// codec ignores it). Lets hashTracks address a track's range within a
+	// shared bin without a format change.
 	FileOffset int64 `json:"-"`
 }
 
@@ -82,10 +79,9 @@ var validModes = map[string]bool{
 // Returned Tracks have Number, Mode, and Filename populated.
 // FirstLBA / Size / hashes are populated downstream (ResolveCue, Pack).
 //
-// Rejects non-BINARY FILE types and path-bearing filenames (containing
-// any of `/`, `\`, `..`). A FILE may contain multiple TRACKs (combined
-// chdman-style layout); each track records its lowest INDEX frame in
-// IndexFrame for ResolveCue to turn into a within-file byte range.
+// Rejects non-BINARY FILE types, path-bearing filenames (containing
+// any of `/`, `\`, `..`), and cues where a single FILE contains more
+// than one TRACK (Redumper never produces this shape).
 func ParseCue(r io.Reader) ([]Track, error) {
 	// Read up to cueSniffBytes into a buffer before scanning. If the
 	// buffer holds none of the cue keywords, return errNotACuesheet
@@ -105,9 +101,8 @@ func ParseCue(r io.Reader) ([]Track, error) {
 	var tracks []Track
 	var cur *Track
 	var hasIndex01 bool
-	var curMinFrame int32  // lowest INDEX frame seen for cur (file-relative)
-	var curHasIndex bool   // whether any INDEX line was seen for cur
 	var currentFile string // basename of the most recent FILE line
+	var fileTrackCount int // number of TRACKs seen in currentFile (must end at 0 or 1)
 	currentSession := 1    // bumped by REM SESSION NN; stamped on every TRACK
 	flushTrack := func() error {
 		if cur == nil {
@@ -116,7 +111,6 @@ func ParseCue(r io.Reader) ([]Track, error) {
 		if !hasIndex01 {
 			return fmt.Errorf("track %d has no INDEX 01", cur.Number)
 		}
-		cur.IndexFrame = curMinFrame
 		tracks = append(tracks, *cur)
 		return nil
 	}
@@ -183,12 +177,17 @@ func ParseCue(r io.Reader) ([]Track, error) {
 			cur = nil
 			hasIndex01 = false
 			currentFile = rawName
+			fileTrackCount = 0
 		case "TRACK":
 			if currentFile == "" {
 				return nil, fmt.Errorf("TRACK before any FILE: %q", line)
 			}
 			if err := flushTrack(); err != nil {
 				return nil, err
+			}
+			fileTrackCount++
+			if fileTrackCount > 1 {
+				return nil, fmt.Errorf("FILE %q contains more than one TRACK; multi-track-per-FILE cues are unsupported", currentFile)
 			}
 			if len(fields) < 3 {
 				return nil, fmt.Errorf("malformed TRACK line: %q", line)
@@ -203,8 +202,6 @@ func ParseCue(r io.Reader) ([]Track, error) {
 			}
 			cur = &Track{Number: n, Mode: mode, Filename: currentFile, Session: currentSession}
 			hasIndex01 = false
-			curMinFrame = 0
-			curHasIndex = false
 		case "INDEX":
 			if cur == nil {
 				return nil, fmt.Errorf("INDEX before TRACK: %q", line)
@@ -212,17 +209,16 @@ func ParseCue(r io.Reader) ([]Track, error) {
 			if len(fields) < 3 {
 				return nil, fmt.Errorf("malformed INDEX line: %q", line)
 			}
-			frame, err := parseMSF(fields[2])
-			if err != nil {
+			if fields[1] != "01" {
+				continue // ignore INDEX 00 and others
+			}
+			// Parse the MSF for validation only; the value is unused
+			// (see spec: FirstLBA is the file-start LBA, computed by
+			// ResolveCue, not the INDEX 01 within-file LBA).
+			if _, err := parseMSF(fields[2]); err != nil {
 				return nil, fmt.Errorf("bad MSF in %q: %v", line, err)
 			}
-			if !curHasIndex || frame < curMinFrame {
-				curMinFrame = frame
-				curHasIndex = true
-			}
-			if fields[1] == "01" {
-				hasIndex01 = true
-			}
+			hasIndex01 = true
 		default:
 			// PERFORMER, TITLE, CATALOG, PREGAP, etc. — ignored.
 		}
@@ -282,10 +278,8 @@ type ResolvedFile struct {
 // files' sectors. Each Track also gets its Size populated from
 // os.Stat.
 //
-// A FILE may hold one TRACK (whole-file = track, the Redumper case) or
-// several (combined chdman layout), in which case each track's
-// FileOffset/Size are derived from the lowest INDEX frames and validated
-// to tile the file exactly.
+// Each Track is associated with exactly one File (one TRACK per FILE
+// is enforced by ParseCue).
 func ResolveCue(cuePath string) (CueResolved, error) {
 	f, err := os.Open(cuePath)
 	if err != nil {
@@ -297,81 +291,23 @@ func ResolveCue(cuePath string) (CueResolved, error) {
 		return CueResolved{}, err
 	}
 	cueDir := filepath.Dir(cuePath)
-	var files []ResolvedFile
 	var cumulativeLBA int32
-
-	// ParseCue emits tracks in cue order; a change of Filename starts a
-	// new FILE group. Each group maps to exactly one .bin on disk.
-	seenFiles := map[string]bool{}
-	for i := 0; i < len(tracks); {
-		fname := tracks[i].Filename
-		j := i
-		for j < len(tracks) && tracks[j].Filename == fname {
-			j++
-		}
-		group := tracks[i:j] // sub-slice shares backing array with tracks
-
-		// Reject a Filename that reappears in a later, non-consecutive group.
-		// This grouping is consecutive, but assignFileOffsets (unpack) groups
-		// by Filename globally; if the same name spanned two runs the two
-		// would compute different FileOffsets and break round-trip integrity.
-		if seenFiles[fname] {
-			return CueResolved{}, fmt.Errorf("file %s appears in non-consecutive FILE groups; "+
-				"each FILE must list all its tracks consecutively", fname)
-		}
-		seenFiles[fname] = true
-
-		path := filepath.Join(cueDir, fname)
+	var files []ResolvedFile
+	for i := range tracks {
+		path := filepath.Join(cueDir, tracks[i].Filename)
 		info, err := os.Stat(path)
 		if err != nil {
-			return CueResolved{}, fmt.Errorf("track %d (%s): %w", group[0].Number, fname, err)
+			return CueResolved{}, fmt.Errorf("track %d (%s): %w", tracks[i].Number, tracks[i].Filename, err)
 		}
-		fileSize := info.Size()
-		if fileSize%int64(SectorSize) != 0 {
-			return CueResolved{}, fmt.Errorf("file %s size %d is not a multiple of sector size %d",
-				fname, fileSize, SectorSize)
+		size := info.Size()
+		if size%int64(SectorSize) != 0 {
+			return CueResolved{}, fmt.Errorf("track %d (%s) size %d is not a multiple of sector size %d",
+				tracks[i].Number, tracks[i].Filename, size, SectorSize)
 		}
-		files = append(files, ResolvedFile{Path: path, Size: fileSize})
-		fileSectors := int32(fileSize / int64(SectorSize))
-
-		if len(group) == 1 {
-			// One TRACK per FILE (Redumper convention): the whole file is
-			// the track. Identical to the original behaviour.
-			group[0].FileOffset = 0
-			group[0].Size = fileSize
-			group[0].FirstLBA = cumulativeLBA
-		} else {
-			// Multiple TRACKs in one FILE (combined / chdman layout): derive
-			// each track's byte range from its lowest INDEX frame. The data
-			// track must begin at the file start; INDEX frames must strictly
-			// increase and stay within the file. Contiguous derivation means
-			// the spans tile the file exactly (no gaps or overlaps).
-			if group[0].IndexFrame != 0 {
-				return CueResolved{}, fmt.Errorf("file %s: first track %d does not start at offset 0 (lowest INDEX frame %d)",
-					fname, group[0].Number, group[0].IndexFrame)
-			}
-			for k := range group {
-				if k > 0 && group[k].IndexFrame <= group[k-1].IndexFrame {
-					return CueResolved{}, fmt.Errorf("file %s: track %d INDEX frame %d not greater than previous %d",
-						fname, group[k].Number, group[k].IndexFrame, group[k-1].IndexFrame)
-				}
-				if group[k].IndexFrame >= fileSectors {
-					return CueResolved{}, fmt.Errorf("file %s: track %d INDEX frame %d is beyond file length (%d sectors)",
-						fname, group[k].Number, group[k].IndexFrame, fileSectors)
-				}
-				group[k].FileOffset = int64(group[k].IndexFrame) * int64(SectorSize)
-				group[k].FirstLBA = cumulativeLBA + group[k].IndexFrame
-			}
-			for k := range group {
-				endFrame := fileSectors
-				if k+1 < len(group) {
-					endFrame = group[k+1].IndexFrame
-				}
-				group[k].Size = int64(endFrame-group[k].IndexFrame) * int64(SectorSize)
-			}
-		}
-		cumulativeLBA += fileSectors
-		i = j
+		tracks[i].FirstLBA = cumulativeLBA
+		tracks[i].Size = size
+		files = append(files, ResolvedFile{Path: path, Size: size})
+		cumulativeLBA += int32(size / int64(SectorSize))
 	}
 	return CueResolved{Tracks: tracks, Files: files}, nil
 }

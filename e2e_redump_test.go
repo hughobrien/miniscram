@@ -68,20 +68,6 @@ var realDiscFixtures = []realDiscFixture{
 		// Track 01 spans LBAs 0..135010 (Mode 1); sample within that range.
 		EDCSampleLBAs: []int64{0, 100, 1000, 100000},
 	},
-	{
-		Name: "vampire-play",
-		Dir:  "test-discs/vampire-play",
-		Stem: "Vampire_play",
-		// chdman-style COMBINED cue: one Vampire_play.bin holds the MODE1
-		// data track followed by the AUDIO track. Clean disc, 0 EDC/ECC
-		// errors on the data track per the Redumper log. Exercises native
-		// multi-track-per-FILE pack/unpack.
-		ExpectedDataTrackErrors: 0,
-		MaxDeltaBytes:           1024 * 1024,
-		MaxContainerBytes:       1024 * 1024,
-		// Data track spans LBAs 0..307598 (MODE1); samples stay well inside.
-		EDCSampleLBAs: []int64{0, 100, 1000, 100000},
-	},
 }
 
 // fixturePresent reports whether the .cue and .scram for a fixture
@@ -139,9 +125,6 @@ func TestE2ERoundTripRealDiscs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// FileOffset is not serialized; re-derive it so countDataTrackErrors
-			// reads each data track's range within a combined .bin.
-			assignFileOffsets(m.Tracks)
 			// Exact assertion on data-track ECC/EDC error count. This
 			// matches Redumper's "errors count" definition and is a
 			// stable signature for the protection class. Walks per-track
@@ -201,28 +184,25 @@ func TestE2EEDCAndECCRealDiscs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Find the first data track and read its file directly, honoring
-			// its FileOffset within a (possibly combined) .bin.
-			var dataTrack Track
-			found := false
-			for _, tr := range resolved.Tracks {
+			// Find the first data track and read its file directly.
+			var dataTrackPath string
+			for i, tr := range resolved.Tracks {
 				if tr.IsData() {
-					dataTrack = tr
-					found = true
+					dataTrackPath = resolved.Files[i].Path
 					break
 				}
 			}
-			if !found {
+			if dataTrackPath == "" {
 				t.Fatal("no data track found in cue")
 			}
-			file, err := os.Open(filepath.Join(f.Dir, dataTrack.Filename))
+			file, err := os.Open(dataTrackPath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer file.Close()
 			for _, lba := range f.EDCSampleLBAs {
 				var sec [SectorSize]byte
-				if _, err := file.ReadAt(sec[:], dataTrack.FileOffset+lba*SectorSize); err != nil {
+				if _, err := file.ReadAt(sec[:], lba*SectorSize); err != nil {
 					t.Fatalf("reading sector %d: %v", lba, err)
 				}
 				// EDC over [0:2064] should equal stored bytes [2064:2068].
@@ -311,7 +291,7 @@ func countDataTrackErrors(t *testing.T, fixtureDir string, tracks []Track) int {
 		}
 		nSectors := tr.Size / int64(SectorSize)
 		for i := int64(0); i < nSectors; i++ {
-			offset := tr.FileOffset + i*int64(SectorSize)
+			offset := i * int64(SectorSize)
 			if _, err := f.ReadAt(sec[:], offset); err != nil {
 				f.Close()
 				t.Fatalf("reading sector %d of %s: %v", i, tr.Filename, err)

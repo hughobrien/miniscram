@@ -148,45 +148,6 @@ func writeFixture(t *testing.T, dir string, disc SynthDisc) (binPath, scramPath,
 	return
 }
 
-// writeCombinedFixture writes a single combined .bin (data track followed
-// by all audio tracks), a multi-track-per-FILE cue referencing it, and the
-// scram — the layout chdman createcd/extractcd produces. Assumes the disc's
-// data track is MODE1/2352 (synthDisc's default). Returns scram/cue paths.
-func writeCombinedFixture(t *testing.T, dir string, disc SynthDisc) (scramPath, cuePath string) {
-	t.Helper()
-	combined := append([]byte{}, disc.Bin...)
-	for _, ab := range disc.AudioBins {
-		combined = append(combined, ab...)
-	}
-	must := func(err error) {
-		t.Helper()
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	must(os.WriteFile(filepath.Join(dir, "combined.bin"), combined, 0o644))
-	scramPath = filepath.Join(dir, "combined.scram")
-	cuePath = filepath.Join(dir, "combined.cue")
-	must(os.WriteFile(scramPath, disc.Scram, 0o644))
-
-	dataSectors := int32(len(disc.Bin) / SectorSize)
-	var b strings.Builder
-	fmt.Fprintf(&b, "FILE \"combined.bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n")
-	frame := dataSectors
-	for a := range disc.AudioBins {
-		fmt.Fprintf(&b, "  TRACK %02d AUDIO\n    INDEX 01 %s\n", a+2, framesToMSF(frame))
-		frame += int32(len(disc.AudioBins[a]) / SectorSize)
-	}
-	must(os.WriteFile(cuePath, []byte(b.String()), 0o644))
-	return scramPath, cuePath
-}
-
-// framesToMSF formats a frame count as decimal mm:ss:ff for a cue INDEX.
-func framesToMSF(frames int32) string {
-	const fps = MSFFramesPerSecond
-	return fmt.Sprintf("%02d:%02d:%02d", frames/(60*fps), (frames/fps)%60, frames%fps)
-}
-
 // sampleManifest returns a deterministic Manifest for format tests.
 func sampleManifest() *Manifest {
 	return &Manifest{
