@@ -371,13 +371,16 @@ func TestUnpackContentDefinedRejectsWrongBin(t *testing.T) {
 		t.Fatal(err)
 	}
 	containerCopy := filepath.Join(restoreDir, "x.miniscram")
-	data, _ := os.ReadFile(container)
+	data, err := os.ReadFile(container)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(containerCopy, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	out := filepath.Join(restoreDir, "out.scram")
-	err := Unpack(UnpackOptions{ContainerPath: containerCopy, OutputPath: out, Verify: true}, nil)
+	err = Unpack(UnpackOptions{ContainerPath: containerCopy, OutputPath: out, Verify: true}, nil)
 	if err == nil {
 		t.Fatal("expected hash-mismatch error on wrong bin")
 	}
