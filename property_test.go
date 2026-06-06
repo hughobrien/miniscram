@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	mathrand "math/rand"
 	"path/filepath"
 	"reflect"
@@ -286,5 +287,58 @@ func TestContainerRoundTripProperty(t *testing.T) {
 	// MaxCount: 100 — each iteration involves a tempfile + zlib roundtrip.
 	if err := quick.Check(f, &quick.Config{MaxCount: 100}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestSplitCombinedContainersAgree is the design's centerpiece invariant:
+// packing the same disc as a one-track-per-FILE (split) cue and as a
+// combined multi-track-per-FILE cue must produce containers that are
+// identical except for per-track Filename/FileOffset — same FirstLBA, Mode,
+// Size, per-track Hashes, scram hashes, and delta bytes.
+func TestSplitCombinedContainersAgree(t *testing.T) {
+	for _, audioTracks := range []int{1, 2} {
+		t.Run(fmt.Sprintf("audio%d", audioTracks), func(t *testing.T) {
+			disc := synthDisc(t, SynthOpts{MainSectors: 20, AudioTracks: audioTracks, WriteOffset: 8})
+
+			splitDir := t.TempDir()
+			_, splitScram, splitCue := writeFixture(t, splitDir, disc)
+			splitContainer := filepath.Join(splitDir, "split.miniscram")
+			if err := Pack(PackOptions{CuePath: splitCue, ScramPath: splitScram, OutputPath: splitContainer, LeadinLBA: LBAPregapStart}, nil); err != nil {
+				t.Fatalf("Pack split: %v", err)
+			}
+
+			combinedDir := t.TempDir()
+			combScram, combCue := writeCombinedFixture(t, combinedDir, disc)
+			combContainer := filepath.Join(combinedDir, "combined.miniscram")
+			if err := Pack(PackOptions{CuePath: combCue, ScramPath: combScram, OutputPath: combContainer, LeadinLBA: LBAPregapStart}, nil); err != nil {
+				t.Fatalf("Pack combined: %v", err)
+			}
+
+			ms, deltaS, err := ReadContainer(splitContainer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mc, deltaC, err := ReadContainer(combContainer)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !bytes.Equal(deltaS, deltaC) {
+				t.Errorf("delta payloads differ: split %d bytes, combined %d bytes", len(deltaS), len(deltaC))
+			}
+			if ms.Scram.Hashes != mc.Scram.Hashes {
+				t.Errorf("scram hashes differ: split %+v, combined %+v", ms.Scram.Hashes, mc.Scram.Hashes)
+			}
+			if len(ms.Tracks) != len(mc.Tracks) {
+				t.Fatalf("track counts differ: split %d, combined %d", len(ms.Tracks), len(mc.Tracks))
+			}
+			for i := range ms.Tracks {
+				s, c := ms.Tracks[i], mc.Tracks[i]
+				if s.FirstLBA != c.FirstLBA || s.Mode != c.Mode || s.Size != c.Size || s.Hashes != c.Hashes {
+					t.Errorf("track %d disagrees:\n split: FirstLBA=%d Mode=%s Size=%d Hashes=%+v\n comb:  FirstLBA=%d Mode=%s Size=%d Hashes=%+v",
+						i+1, s.FirstLBA, s.Mode, s.Size, s.Hashes, c.FirstLBA, c.Mode, c.Size, c.Hashes)
+				}
+			}
+		})
 	}
 }
