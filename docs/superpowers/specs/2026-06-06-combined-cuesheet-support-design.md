@@ -1,8 +1,23 @@
 # Native combined (multi-track-per-FILE) cuesheet support
 
 Date: 2026-06-06
-Status: approved (design)
-Semver impact: MINOR (no container-format change; older readers reject cleanly)
+Status: PARTIALLY SUPERSEDED — the pack-side of this design was descoped.
+Semver impact: n/a (pack-side reverted)
+
+> **Status note (2026-06-06).** This design proposed packing *and*
+> unpacking combined (chdman-style) cuesheets. The pack side was then
+> descoped: redumper only ever emits one-track-per-FILE, so a combined
+> cue never appears at pack time, and miniscram is a redumper-specialised
+> tool. The implementation reverted `ParseCue`/`ResolveCue` combined
+> parsing and the pack-combined tests, keeping only the behavior-neutral,
+> range-capable groundwork (the transient `Track.FileOffset`,
+> `hashTracks`, `assignFileOffsets`, and a range-capable unpack
+> resolver). That groundwork is the foundation for **content-defined bin
+> resolution at unpack** — see
+> `2026-06-06-content-defined-bin-resolution-design.md`, which delivers
+> the real use case (recover the scram from any bin layout, e.g. a
+> combined bin from `chdman extractcd`). The sections below are retained
+> as the original design record.
 
 ## Problem
 
