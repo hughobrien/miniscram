@@ -4,6 +4,20 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-06-06
+
+### Added
+
+- **Content-defined bin resolution for `unpack`/`verify`**. The recovered
+  `.scram` is now sourced by per-track content hashes rather than by the
+  exact filenames the container recorded. `unpack`/`verify` look for the
+  recorded track files, else a single `.bin` in the container's directory,
+  else a `--bin <path>` you provide. This recovers the scram from any bin
+  layout — including a single combined `.bin` produced by `chdman
+  extractcd` — so a disc can be archived as `chd + .miniscram` and fully
+  restored later. A wrong or shifted bin fails loudly on the hash check.
+  No container-format change.
+
 ## [1.5.2] - 2026-05-27
 
 ### Fixed

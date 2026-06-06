@@ -390,3 +390,37 @@ func TestCLIPack_RemoveUnusedScram_ScramAlreadyGone(t *testing.T) {
 		t.Errorf("stderr contains warning about missing scram; should be silent: %q", stderr.String())
 	}
 }
+
+func TestCLIUnpackVerifyWithBinFlag(t *testing.T) {
+	disc := synthDisc(t, SynthOpts{MainSectors: 12, AudioTracks: 1, WriteOffset: 8})
+	splitDir := t.TempDir()
+	_, splitScram, splitCue := writeFixture(t, splitDir, disc)
+	container := filepath.Join(splitDir, "x.miniscram")
+	if err := Pack(PackOptions{
+		CuePath: splitCue, ScramPath: splitScram, OutputPath: container,
+		LeadinLBA: LBAPregapStart,
+	}, nil); err != nil {
+		t.Fatalf("Pack: %v", err)
+	}
+	// A combined bin in a separate dir, named arbitrarily.
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "anything.bin")
+	if err := os.WriteFile(binPath, combinedBinBytes(disc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	// verify --bin
+	if code := run([]string{"verify", "--bin", binPath, container}, io.Discard, &stderr); code != exitOK {
+		t.Fatalf("verify --bin exit %d (%s)", code, stderr.String())
+	}
+	// unpack --bin
+	out := filepath.Join(t.TempDir(), "out.scram")
+	stderr.Reset()
+	if code := run([]string{"unpack", "-q", "--bin", binPath, "-o", out, container}, io.Discard, &stderr); code != exitOK {
+		t.Fatalf("unpack --bin exit %d (%s)", code, stderr.String())
+	}
+	if got, want := mustHashFile(t, out), mustHashFile(t, splitScram); got != want {
+		t.Fatalf("recovered scram %+v != original %+v", got, want)
+	}
+}

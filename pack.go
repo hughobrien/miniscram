@@ -144,7 +144,7 @@ func Pack(opts PackOptions, r Reporter) error {
 
 	// 5. single hashing pass over track files.
 	st = r.Step("hashing tracks")
-	perTrack, err := hashTrackFiles(resolved.Files)
+	perTrack, err := hashTracks(filepath.Dir(opts.CuePath), tracks)
 	if err != nil {
 		st.Fail(err)
 		return err
@@ -258,32 +258,37 @@ func hashFile(path string) (FileHashes, error) {
 	return hashReader(f)
 }
 
-// hashTrackFiles streams every file once, returning per-file
-// MD5/SHA-1/SHA-256 hashes in input order. Used by Pack (to populate
-// the manifest) and by Unpack (to verify against the manifest's
-// recorded values). Files are read sequentially; failure on any file
-// aborts. Returns one FileHashes per input file, in order.
-func hashTrackFiles(files []ResolvedFile) ([]FileHashes, error) {
-	perFile := make([]FileHashes, len(files))
-	for i, rf := range files {
-		f, err := os.Open(rf.Path)
+// hashTracks returns per-track MD5/SHA-1/SHA-256 over each track's byte
+// range [FileOffset, FileOffset+Size) within filepath.Join(baseDir,
+// track.Filename), in track order. When each track has its own file
+// FileOffset is 0 and Size is the whole file, so each track hashes its
+// entire file. When several tracks share one bin file, each hashes only
+// its own range. Tracks must have FileOffset/Size populated; FileOffset is
+// 0 unless a track shares a bin with others (set by assignFileOffsets).
+//
+// A shared bin is reopened once per track, but each pass reads only its
+// own disjoint range, so total I/O across the file is ~1x its size.
+func hashTracks(baseDir string, tracks []Track) ([]FileHashes, error) {
+	perTrack := make([]FileHashes, len(tracks))
+	for i, t := range tracks {
+		f, err := os.Open(filepath.Join(baseDir, t.Filename))
 		if err != nil {
 			return nil, err
 		}
+		sr := io.NewSectionReader(f, t.FileOffset, t.Size)
 		m, s1, s256 := md5.New(), sha1.New(), sha256.New()
-		w := io.MultiWriter(m, s1, s256)
-		_, copyErr := io.Copy(w, f)
+		_, copyErr := io.Copy(io.MultiWriter(m, s1, s256), sr)
 		f.Close()
 		if copyErr != nil {
 			return nil, copyErr
 		}
-		perFile[i] = FileHashes{
+		perTrack[i] = FileHashes{
 			MD5:    hex.EncodeToString(m.Sum(nil)),
 			SHA1:   hex.EncodeToString(s1.Sum(nil)),
 			SHA256: hex.EncodeToString(s256.Sum(nil)),
 		}
 	}
-	return perFile, nil
+	return perTrack, nil
 }
 
 // compareHashes returns nil iff all three hashes match. Otherwise it

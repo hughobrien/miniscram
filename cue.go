@@ -41,6 +41,13 @@ type Track struct {
 	Filename string     `json:"filename"`
 	Size     int64      `json:"size"`
 	Hashes   FileHashes `json:"hashes"`
+
+	// FileOffset is the byte offset of this track's data within Filename.
+	// 0 for one-track-per-FILE cues (every Redumper track). Transient:
+	// set by the unpack-side resolver, never serialized (the TRKS chunk
+	// codec ignores it). Lets hashTracks address a track's range within a
+	// shared bin without a format change.
+	FileOffset int64 `json:"-"`
 }
 
 // IsData reports whether the track's main-channel data is scrambled.
@@ -96,7 +103,7 @@ func ParseCue(r io.Reader) ([]Track, error) {
 	var hasIndex01 bool
 	var currentFile string // basename of the most recent FILE line
 	var fileTrackCount int // number of TRACKs seen in currentFile (must end at 0 or 1)
-	currentSession := 1   // bumped by REM SESSION NN; stamped on every TRACK
+	currentSession := 1    // bumped by REM SESSION NN; stamped on every TRACK
 	flushTrack := func() error {
 		if cur == nil {
 			return nil
