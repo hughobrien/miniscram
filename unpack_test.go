@@ -166,3 +166,147 @@ func TestUnpackVerifiesHashes(t *testing.T) {
 		})
 	}
 }
+
+// helper: concatenate a disc's data bin followed by all its audio bins.
+func combinedBinBytes(disc SynthDisc) []byte {
+	out := append([]byte{}, disc.Bin...)
+	for _, ab := range disc.AudioBins {
+		out = append(out, ab...)
+	}
+	return out
+}
+
+func TestResolveBinSourceNamedFiles(t *testing.T) {
+	dir := t.TempDir()
+	// Two distinct per-track files (the Redumper layout).
+	if err := os.WriteFile(filepath.Join(dir, "t1.bin"), make([]byte, 4*SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "t2.bin"), make([]byte, 3*SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracks := []Track{
+		{Number: 1, Filename: "t1.bin", Size: 4 * SectorSize},
+		{Number: 2, Filename: "t2.bin", Size: 3 * SectorSize},
+	}
+	baseDir, files, err := resolveBinSource(dir, "", tracks)
+	if err != nil {
+		t.Fatalf("resolveBinSource: %v", err)
+	}
+	if baseDir != dir {
+		t.Errorf("baseDir = %q, want %q", baseDir, dir)
+	}
+	if len(files) != 2 {
+		t.Fatalf("files = %d, want 2", len(files))
+	}
+	if tracks[0].FileOffset != 0 || tracks[1].FileOffset != 0 {
+		t.Errorf("named-file tracks should keep FileOffset 0; got %d, %d", tracks[0].FileOffset, tracks[1].FileOffset)
+	}
+	if tracks[0].Filename != "t1.bin" || tracks[1].Filename != "t2.bin" {
+		t.Errorf("named-file filenames must be unchanged; got %q, %q", tracks[0].Filename, tracks[1].Filename)
+	}
+}
+
+func TestResolveBinSourceSingleBinAutoDetect(t *testing.T) {
+	dir := t.TempDir()
+	// One combined bin; the recorded per-track filenames are NOT present.
+	if err := os.WriteFile(filepath.Join(dir, "whatever.bin"), make([]byte, 7*SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracks := []Track{
+		{Number: 1, Filename: "t1.bin", Size: 4 * SectorSize},
+		{Number: 2, Filename: "t2.bin", Size: 3 * SectorSize},
+	}
+	baseDir, files, err := resolveBinSource(dir, "", tracks)
+	if err != nil {
+		t.Fatalf("resolveBinSource: %v", err)
+	}
+	if len(files) != 1 || filepath.Base(files[0].Path) != "whatever.bin" {
+		t.Fatalf("expected single source whatever.bin; got %+v", files)
+	}
+	if baseDir != dir {
+		t.Errorf("baseDir = %q, want %q", baseDir, dir)
+	}
+	// Tracks rewritten to point at the single bin, mapped by cumulative offset.
+	if tracks[0].Filename != "whatever.bin" || tracks[1].Filename != "whatever.bin" {
+		t.Errorf("tracks should be rewritten to whatever.bin; got %q, %q", tracks[0].Filename, tracks[1].Filename)
+	}
+	if tracks[0].FileOffset != 0 || tracks[1].FileOffset != 4*SectorSize {
+		t.Errorf("offsets = %d, %d; want 0, %d", tracks[0].FileOffset, tracks[1].FileOffset, 4*SectorSize)
+	}
+}
+
+func TestResolveBinSourceExplicitBinPath(t *testing.T) {
+	dir := t.TempDir()
+	binDir := t.TempDir() // somewhere other than the container dir
+	binPath := filepath.Join(binDir, "combined.bin")
+	if err := os.WriteFile(binPath, make([]byte, 7*SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Named files DO exist in dir, but --bin must override them.
+	if err := os.WriteFile(filepath.Join(dir, "t1.bin"), make([]byte, 4*SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "t2.bin"), make([]byte, 3*SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracks := []Track{
+		{Number: 1, Filename: "t1.bin", Size: 4 * SectorSize},
+		{Number: 2, Filename: "t2.bin", Size: 3 * SectorSize},
+	}
+	baseDir, files, err := resolveBinSource(dir, binPath, tracks)
+	if err != nil {
+		t.Fatalf("resolveBinSource: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != binPath {
+		t.Fatalf("expected single source %s; got %+v", binPath, files)
+	}
+	if baseDir != binDir {
+		t.Errorf("baseDir = %q, want %q", baseDir, binDir)
+	}
+	if tracks[1].FileOffset != 4*SectorSize {
+		t.Errorf("track 2 offset = %d, want %d", tracks[1].FileOffset, 4*SectorSize)
+	}
+}
+
+func TestResolveBinSourceSizeMismatch(t *testing.T) {
+	dir := t.TempDir()
+	// Single bin present, but one sector too short for the manifest total.
+	if err := os.WriteFile(filepath.Join(dir, "wrong.bin"), make([]byte, 6*SectorSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracks := []Track{
+		{Number: 1, Filename: "t1.bin", Size: 4 * SectorSize},
+		{Number: 2, Filename: "t2.bin", Size: 3 * SectorSize},
+	}
+	_, _, err := resolveBinSource(dir, "", tracks)
+	if err == nil {
+		t.Fatal("expected error on size mismatch")
+	}
+	if !errors.Is(err, errBinHashMismatch) {
+		t.Errorf("error = %v; want wrapped errBinHashMismatch", err)
+	}
+}
+
+func TestResolveBinSourceAmbiguousAndMissing(t *testing.T) {
+	t.Run("multiple-bins-none-named", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "a.bin"), make([]byte, SectorSize), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "b.bin"), make([]byte, SectorSize), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		tracks := []Track{{Number: 1, Filename: "t1.bin", Size: 4 * SectorSize}}
+		if _, _, err := resolveBinSource(dir, "", tracks); err == nil {
+			t.Fatal("expected error with multiple .bin candidates and no named files")
+		}
+	})
+	t.Run("nothing-present", func(t *testing.T) {
+		dir := t.TempDir()
+		tracks := []Track{{Number: 1, Filename: "t1.bin", Size: 4 * SectorSize}}
+		if _, _, err := resolveBinSource(dir, "", tracks); err == nil {
+			t.Fatal("expected error when no named files and no .bin present")
+		}
+	})
+}
