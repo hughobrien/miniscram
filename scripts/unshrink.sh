@@ -22,5 +22,5 @@ zstd -dv --rm "${base}.subcode.zst"
 
 # split uses scram, state, subcode, toc to generate original cue and bins
 cp "${base}.log" "${base}.log.orig"
-redumper split --force-split --image-name="$base"
+redumper disc --continue split --image-name="$base"
 mv "${base}.log.orig" "${base}.log"
