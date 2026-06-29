@@ -73,9 +73,9 @@ func TestWalkForCues_Recursive(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "a", "a.cue"), []byte(""))
 	writeFile(t, filepath.Join(root, "b", "deep", "b.cue"), []byte(""))
-	writeFile(t, filepath.Join(root, "c.txt"), []byte("")) // ignored
+	writeFile(t, filepath.Join(root, "c.txt"), []byte(""))            // ignored
 	writeFile(t, filepath.Join(root, ".hidden", "x.cue"), []byte("")) // skipped (dot dir)
-	writeFile(t, filepath.Join(root, "B.CUE"), []byte("")) // case-insensitive ext
+	writeFile(t, filepath.Join(root, "B.CUE"), []byte(""))            // case-insensitive ext
 
 	cues := walkForCues(root)
 	if len(cues) != 3 {
@@ -160,13 +160,13 @@ func TestPrettyProgressLine_NotJSON(t *testing.T) {
 
 func TestLookupFraction_KnownLabels(t *testing.T) {
 	cases := map[string]float64{
-		"resolving cue /tmp/x.cue":            0.02, // prefix-match with suffix
-		"detecting write offset":              0.05,
-		"checking constant offset":            0.08,
-		"hashing tracks":                      0.15,
-		"hashing scram":                       0.30,
-		"building scram prediction + delta":   0.65,
-		"writing container":                   0.95,
+		"resolving cue /tmp/x.cue":          0.02, // prefix-match with suffix
+		"detecting write offset":            0.05,
+		"checking constant offset":          0.08,
+		"hashing tracks":                    0.15,
+		"hashing scram":                     0.30,
+		"building scram prediction + delta": 0.65,
+		"writing container":                 0.95,
 	}
 	for label, want := range cases {
 		got, ok := lookupFraction(label)

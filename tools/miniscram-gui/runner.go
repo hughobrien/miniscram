@@ -18,9 +18,9 @@ import (
 
 // runningState is the snapshot of an in-flight subprocess.
 type runningState struct {
-	Action     string    // "pack" | "unpack" | "verify"
-	Input      string    // source file path
-	Output     string    // optional; destination path for pack/unpack
+	Action     string // "pack" | "unpack" | "verify"
+	Input      string // source file path
+	Output     string // optional; destination path for pack/unpack
 	StartedAt  time.Time
 	LastLine   string // most recent non-empty stderr line
 	Cancelling bool   // set between Cancel() and process exit
@@ -83,8 +83,8 @@ func resolveMiniscram() string {
 	}
 	dir := filepath.Dir(exe)
 	for _, candidate := range []string{
-		filepath.Join(dir, name),                  // sibling (nix package)
-		filepath.Join(dir, "..", "..", name),      // local-dev (tools/miniscram-gui/ → repo root)
+		filepath.Join(dir, name),             // sibling (nix package)
+		filepath.Join(dir, "..", "..", name), // local-dev (tools/miniscram-gui/ → repo root)
 	} {
 		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
 			abs, err := filepath.Abs(candidate)
