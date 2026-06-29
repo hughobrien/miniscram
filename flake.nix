@@ -142,6 +142,22 @@
           packages = with pkgs; [ go gopls gotools ];
         };
 
+        checks.gate = self.packages.${system}.default.overrideAttrs (old: {
+          pname = "miniscram-ci-gate";
+          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.clang ];
+          doCheck = true;
+          checkPhase = ''
+            runHook preCheck
+            export HOME="$TMPDIR"
+            go vet ./...
+            drift=$(gofmt -l . | grep -v '^vendor/' || true)
+            [ -z "$drift" ] || { echo "gofmt drift: $drift"; exit 1; }
+            go test ./...
+            CGO_ENABLED=1 CC=clang go test -race ./...
+            runHook postCheck
+          '';
+        });
+
         formatter = pkgs.nixfmt-rfc-style;
       });
 }
