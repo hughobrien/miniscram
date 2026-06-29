@@ -1,0 +1,17 @@
+name: ci
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+jobs:
+  gate:
+    runs-on: native
+    steps:
+      - run: |
+          umask 077
+          host="${{ github.server_url }}"
+          printf 'machine %s login x-access-token password %s\n' "${host#https://}" "${{ github.token }}" > "$HOME/.netrc"
+          nix build --no-write-lock-file -L \
+            "git+${{ github.server_url }}/${{ github.repository }}.git?ref=${{ github.ref_name }}&rev=${{ github.sha }}#checks.x86_64-linux.gate"
+          rm -f "$HOME/.netrc"
