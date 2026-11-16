@@ -97,7 +97,7 @@
           pname = "miniscram-gui";
           inherit version;
           src = ./tools/miniscram-gui;
-          vendorHash = "sha256-6XYri4ATQf9esa+HvJEHPY9apV+iRoe/TlqBmY5SB9o=";
+          vendorHash = "sha256-lz8qH36JHnCSngmDg8VuxvqFYORF0tKhfjhmI9D5Nxs=";
 
           nativeBuildInputs = guiNativeBuildInputs;
           buildInputs = guiBuildInputs;
