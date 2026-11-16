@@ -4,6 +4,19 @@ All notable changes to miniscram are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-11-15
+
+### Changed
+
+- Updated dependencies: Gio v0.9.0 -> v0.10.3 and modernc.org/sqlite
+  v1.50.0 -> v1.62.0 in the GUI, sqlite v1.34.4 -> v1.62.0 in the sweep
+  script, plus transitive updates; refreshed `flake.lock` (nixpkgs,
+  flake-utils) and the GUI `vendorHash`. The CLI remains stdlib-only.
+- The sweep script's split step now runs via `disc --continue` so
+  protection detection is picked up.
+- CI moved to a hermetic Forgejo test gate (vet, gofmt, test, race).
+- Added utility scripts; one-time `gofmt` pass.
+
 ## [1.6.0] - 2026-06-06
 
 ### Added
