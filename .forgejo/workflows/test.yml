@@ -8,10 +8,13 @@ jobs:
   gate:
     runs-on: native
     steps:
-      - run: |
+      - env:
+          # Per-job credential. ~/.netrc sits in a HOME shared by concurrent
+          # jobs and raced (403s).
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: http.${{ github.server_url }}/.extraHeader
+          GIT_CONFIG_VALUE_0: "Authorization: Bearer ${{ github.token }}"
+        run: |
           umask 077
-          host="${{ github.server_url }}"
-          printf 'machine %s login x-access-token password %s\n' "${host#https://}" "${{ github.token }}" > "$HOME/.netrc"
           nix build --no-write-lock-file -L \
             "git+${{ github.server_url }}/${{ github.repository }}.git?ref=${{ github.ref_name }}&rev=${{ github.sha }}#checks.x86_64-linux.gate"
-          rm -f "$HOME/.netrc"
